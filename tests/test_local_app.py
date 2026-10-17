@@ -98,6 +98,7 @@ class LocalAppTests(unittest.TestCase):
     def test_static_assets_status_and_unknown_routes(self):
         for path, expected in (("/", b"SYNAPSE"), ("/app.js", b"textContent"),
                                ("/chat-stream.mjs", b"class ChatStream"),
+                               ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
                                ("/monitor.mjs", b"class MonitorView"), ("/navigation.mjs", b"viewForHash"),
                                ("/updates.mjs", b"class UpdateView"),
                                ("/icon.svg", b"<svg"),

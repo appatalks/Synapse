@@ -38,7 +38,7 @@ jobs:
       - name: Application lifecycle and API
         run: python tests/test_local_app.py synapse_app/app.py
       - name: Chat, navigation and monitoring
-        run: node --test tests/test_chat_stream.mjs tests/test_monitor.mjs
+        run: node --test tests/test_chat_stream.mjs tests/test_monitor.mjs tests/test_preferences.mjs
       - name: Build and exercise the actual zipapp
         run: |
           python scripts/build_synapse.py --output dist

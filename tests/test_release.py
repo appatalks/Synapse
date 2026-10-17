@@ -36,6 +36,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(line.startswith("SYNAPSE: http://127.0.0.1:"), line)
             port = urlsplit(line.split(" ", 1)[1].strip()).port
             for path, content in (("/", b"SYNAPSE"), ("/monitor.mjs", b"MonitorView"),
+                                  ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
                                   ("/navigation.mjs", b"navigate"), ("/style.css", b"sidebar"),
                                   ("/icon.svg", b"<svg"), ("/api/v1/status", b'"app_name": "SYNAPSE"'),
                                   ("/api/v1/monitor", b'"samples"')):

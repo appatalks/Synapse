@@ -4,6 +4,7 @@ import { ChatStream } from "./chat-stream.mjs";
 import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
+import { bindChatInput } from "./chat-input.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -415,10 +416,11 @@ function assistantMessage() {
   return { output, details, reasoning, summary };
 }
 
+bindChatInput(el("prompt"), el("chat-form"), el("send"));
 el("chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = el("prompt").value.trim();
-  if (!prompt || controller || status?.state !== "ready") return;
+  if (!prompt || controller || actionPending || status?.state !== "ready" || status.chat_busy) return;
   const maxTokens = Number(el("max-output").value);
   const reasoningEffort = el("reasoning-effort").value;
   if (!["default", "low", "medium", "high"].includes(reasoningEffort)) {

@@ -24,7 +24,7 @@ name-service problems must not delay opening the UI or checking backend health.
 python tests/test_local_app.py synapse_app/app.py
 python tests/test_telemetry.py synapse_app/telemetry.py
 python tests/test_updates.py
-node --test tests/test_chat_stream.mjs tests/test_monitor.mjs
+node --test tests/test_chat_stream.mjs tests/test_monitor.mjs tests/test_preferences.mjs
 python scripts/build_synapse.py --output dist
 python tests/test_release.py dist/SYNAPSE.pyz
 python -m pip wheel --no-deps --wheel-dir dist .

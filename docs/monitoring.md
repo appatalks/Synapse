@@ -52,6 +52,14 @@ Closing it preserves the settings; they apply to the next message. Runtime
 selection stays locked while a model is loaded, and generation settings cannot
 change during a browser request.
 
+In the composer, Enter uses the same Send action; Shift+Enter keeps a new line.
+IME text composition, modified Enter shortcuts and held/repeated keys do not
+accidentally send messages. Enter cannot submit while Send is disabled.
+The sidebar's Dark/Light selector applies to every page, chart and dialog,
+persists only `synapse.theme` in browser local storage, and synchronizes across
+open tabs. No conversation or model settings are stored. If storage is blocked,
+theme switching still works for the page and an explicit persistence notice appears.
+
 **Browse models** lists local folders and GGUF filenames with Home, parent and
 root navigation. Selecting a model fills its absolute path; it does not upload
 or read the model into the browser. Hidden dotfiles are excluded. Each request

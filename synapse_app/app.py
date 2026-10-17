@@ -1195,12 +1195,14 @@ class Handler(BaseHTTPRequestHandler):
                 if "stream" in data and not isinstance(data["stream"], bool):
                     raise AppError(400, "stream must be a boolean.")
                 self._proxy(method, path, data)
-            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/monitor.mjs", "/navigation.mjs", "/updates.mjs",
+            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/chat-input.mjs", "/theme.js", "/monitor.mjs", "/navigation.mjs", "/updates.mjs",
                                              "/style.css", "/icon.svg"):
                 name, mime = {
                     "/": ("index.html", "text/html; charset=utf-8"),
                     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                     "/chat-stream.mjs": ("chat-stream.mjs", "text/javascript; charset=utf-8"),
+                    "/chat-input.mjs": ("chat-input.mjs", "text/javascript; charset=utf-8"),
+                    "/theme.js": ("theme.js", "text/javascript; charset=utf-8"),
                     "/monitor.mjs": ("monitor.mjs", "text/javascript; charset=utf-8"),
                     "/navigation.mjs": ("navigation.mjs", "text/javascript; charset=utf-8"),
                     "/updates.mjs": ("updates.mjs", "text/javascript; charset=utf-8"),

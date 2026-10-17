@@ -63,6 +63,8 @@ Without a public release yet, use those source instructions on any platform.
 
 1. Open **Chat → Model Controls**. Browse for a local GGUF or paste its path.
 2. Load the model and chat. Output limits and reasoning effort are in the same pop-up.
+   **Enter** sends a message; **Shift+Enter** inserts a new line. Choose **Dark**
+   or **Light** in the sidebar; only that theme preference is saved in this browser.
 3. Open **Monitor** for speed, CPU/GPU, VRAM, temperature, power, PCIe, read I/O,
    RAM and context fill—or **Connect an app** to use your local model in another tool.
 

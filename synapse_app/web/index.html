@@ -7,6 +7,7 @@
   <meta name="description" content="SYNAPSE: run local GGUF models, connect your apps, and see your machine at work.">
   <title>SYNAPSE</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" type="module"></script>
 </head>
@@ -20,6 +21,11 @@
       <a href="#connect" data-nav="connect"><span class="nav-symbol" aria-hidden="true">&#8644;</span>Connect an app</a>
     </nav>
     <div class="sidebar-bottom">
+      <div class="theme-control">
+        <label for="theme-selector">Theme</label>
+        <select id="theme-selector"><option value="dark">Dark</option><option value="light">Light</option></select>
+        <p id="theme-status" class="hint" role="status" hidden></p>
+      </div>
       <span class="local-indicator">On your machine. Under your control.</span>
       <p id="sidebar-model">No model loaded</p>
       <a href="https://github.com/appatalks/synapse" target="_blank" rel="noreferrer">Project &amp; help &#8599;</a>
@@ -124,9 +130,10 @@
       <div class="chat-heading"><div><p class="eyebrow">DIRECT TO YOUR MODEL</p><h2 id="chat-title">Chat</h2></div><div class="chat-actions"><button id="open-controls" type="button" class="secondary" aria-haspopup="dialog" aria-controls="model-controls">Model Controls</button><button id="clear" type="button" class="secondary">New chat</button></div></div>
       <div id="messages" role="log" aria-label="Conversation"><p id="empty">Your next idea starts here.<br>Open Model Controls to choose a local model. Chats stay in this page and are not saved.</p></div>
       <form id="chat-form">
-        <label for="prompt">Message</label><textarea id="prompt" rows="3" placeholder="What would you like to work on?" required></textarea>
+        <label for="prompt">Message</label><textarea id="prompt" rows="3" placeholder="What would you like to work on?" aria-describedby="composer-hint" enterkeyhint="send" required></textarea>
         <div class="actions"><button id="send" type="submit" disabled>Send</button><button id="stop" type="button" class="secondary" disabled>Stop</button><a class="text-link" href="#monitor">Monitor generation &#8594;</a></div>
         <p id="timing" role="status" title="Backend-reported generation speed includes reasoning tokens. Total time includes prompt processing and network time."></p>
+        <p id="composer-hint" class="hint">Enter to send. Shift+Enter for a new line.</p>
         <p class="hint">Sampling stays at backend defaults. New chat clears this page's conversation, not the expert cache. Navigation preserves an active chat; refreshing this page does not.</p>
       </form>
     </section>
