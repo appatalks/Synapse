@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from socketserver import TCPServer
 import time
 
 
@@ -180,4 +181,11 @@ class Handler(BaseHTTPRequestHandler):
             })
 
 
-ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+class FixtureServer(ThreadingHTTPServer):
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
+FixtureServer((args.host, args.port), Handler).serve_forever()

@@ -109,6 +109,17 @@ class LocalAppTests(unittest.TestCase):
         for path in ("/../app.py", "/%2e%2e/app.py", "/api/v2/status"):
             self.assertEqual(self.request("GET", path)[0], 404)
 
+    def test_loopback_startup_does_not_require_reverse_dns(self):
+        runtime = app.Runtime(str(self.backend))
+        with mock.patch.object(app.socket, "getfqdn", side_effect=AssertionError("Unexpected DNS lookup")):
+            server = app.AppServer(("127.0.0.1", 0), runtime)
+        try:
+            self.assertEqual(server.server_name, "localhost")
+            self.assertEqual(server.server_port, server.server_address[1])
+        finally:
+            server.server_close()
+            runtime.stop(closing=True)
+
     def test_missing_backend_is_explicit(self):
         self.runtime.executable = None
         self.assertFalse(self.runtime.status()["backend_available"])

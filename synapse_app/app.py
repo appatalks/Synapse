@@ -20,6 +20,7 @@ import select
 import shutil
 import signal
 import socket
+from socketserver import TCPServer
 import struct
 import subprocess
 import sys
@@ -996,6 +997,12 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], runtime: Runtime):
         self.runtime = runtime
         super().__init__(address, Handler)
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        # The loopback listener needs no potentially blocking reverse-DNS lookup.
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
     def server_close(self) -> None:
         self.runtime.monitor.close()
