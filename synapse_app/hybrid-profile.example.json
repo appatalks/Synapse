@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "executable": "/opt/vrambridge/patched/bin/llama-server",
+  "plan": "/path/to/unified-memory-scheduler/benchmarks/results/gpt120-trained-hot944.txt",
+  "cuda_plugin": "/opt/vrambridge/llama-b11669/libggml-cuda.so",
+  "model_layout": {
+    "architecture": "gpt-oss",
+    "file_type": 38,
+    "block_count": 36,
+    "embedding_length": 2880,
+    "expert_feed_forward_length": 2880,
+    "expert_count": 128,
+    "expert_used_count": 4
+  },
+  "context": 16384,
+  "cache_mib": 12000,
+  "generic_cache_mib": 8192,
+  "generic_transfer": "staged",
+  "transfer": "direct",
+  "decode_pipeline": true,
+  "async_ids": false
+}

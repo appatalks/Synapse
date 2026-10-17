@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="description" content="SYNAPSE: run local GGUF models, connect your apps, and see your machine at work.">
+  <title>SYNAPSE</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to content</a>
+  <aside class="sidebar">
+    <a class="brand" href="#run" aria-label="SYNAPSE home"><img src="/icon.svg" width="34" height="34" alt=""><span>SYNAPSE<small>LOCAL INTELLIGENCE</small></span></a>
+    <nav aria-label="Main navigation">
+      <a href="#run" data-nav="run" aria-current="page"><span class="nav-symbol" aria-hidden="true">&#9639;</span>Run a model</a>
+      <a href="#chat" data-nav="chat"><span class="nav-symbol" aria-hidden="true">&#9707;</span>Chat</a>
+      <a href="#monitor" data-nav="monitor"><span class="nav-symbol" aria-hidden="true">&#8767;</span>Monitor</a>
+      <a href="#connect" data-nav="connect"><span class="nav-symbol" aria-hidden="true">&#8644;</span>Connect an app</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <span class="local-indicator">On your machine. Under your control.</span>
+      <p id="sidebar-model">No model loaded</p>
+      <a href="https://github.com/appatalks/synapse" target="_blank" rel="noreferrer">Project &amp; help &#8599;</a>
+      <small id="app-version">Release candidate</small>
+    </div>
+  </aside>
+  <main id="workspace" tabindex="-1">
+    <header class="page-header">
+      <div><p class="eyebrow">YOUR MODELS. YOUR MACHINE.</p><h1 id="page-title">Run a model</h1><p id="page-description">Start with a local model. Nothing to upload.</p></div>
+      <span id="state" role="status">Connecting</span>
+    </header>
+    <div id="notice" role="alert" hidden></div>
+    <p id="execution-warning" role="note" hidden></p>
+
+    <section id="view-run" data-view="run" aria-labelledby="model-title">
+      <div class="run-grid">
+        <section class="card">
+          <div class="card-heading"><div><p class="eyebrow">MODEL CONTROL</p><h2 id="model-title">Bring your own GGUF</h2></div><span class="tag">Local files only</span></div>
+          <p>Choose a model already on this computer. SYNAPSE starts a private llama.cpp backend for you.</p>
+          <form id="load-form">
+            <label for="model">Model path</label>
+            <input id="model" name="model" placeholder="/path/to/model.gguf" required autocomplete="off" spellcheck="false">
+            <details>
+              <summary>Run settings</summary>
+              <label for="execution-mode">Model execution profile</label>
+              <select id="execution-mode"><option value="auto">Automatic model-specific defaults</option><option value="standard">Standard backend (manual settings)</option><option value="hybrid">Require hybrid expert dispatch</option></select>
+              <p id="profile-note">Automatic uses an installed experimental profile only when compatible. Otherwise it uses standard execution.</p>
+              <label for="placement">Execution</label>
+              <select id="placement"><option value="auto">Automatic CPU / GPU placement</option><option value="cpu">CPU only</option></select>
+              <label for="context">Context tokens</label>
+              <input id="context" type="number" value="4096" min="512" max="65536" step="1" required>
+              <p id="placement-note">Automatic uses upstream fitting with a VRAM margin. Larger contexts need more memory.</p>
+              <details>
+                <summary>Advanced performance (experimental)</summary>
+                <label for="cpu-threads">Generation CPU threads</label>
+                <input id="cpu-threads" type="number" min="1" step="1" value="1" required>
+                <label for="batch-threads">Prompt CPU threads</label>
+                <input id="batch-threads" type="number" min="1" step="1" value="1" required>
+                <label for="cpu-poll">CPU polling (0-100)</label>
+                <input id="cpu-poll" type="number" min="0" max="100" step="1" value="50" required>
+                <label for="host-op-offload">Host operation execution</label>
+                <select id="host-op-offload"><option value="true">Allow upstream GPU operation offload</option><option value="false">Keep host tensor operations on CPU</option></select>
+                <label for="op-offload-min-batch">Minimum host-operation GPU batch</label>
+                <input id="op-offload-min-batch" type="number" min="1" max="8192" step="1" value="32" required>
+                <p>Official backend only. This affects host tensor operations, not weights already on the GPU.</p>
+                <label for="load-mode">Host weight loading</label>
+                <select id="load-mode"><option value="auto">Backend default loading</option><option value="none">Copy into RAM</option></select>
+                <label for="expert-cache">GPU MoE expert cache (MiB)</label>
+                <input id="expert-cache" type="number" value="0" min="0" max="65536" step="1" required>
+                <p id="cache-note">Experimental expert caching can be slower. Zero disables it.</p>
+                <label for="fit-target">VRAM reserve (MiB)</label>
+                <input id="fit-target" type="number" value="1024" min="128" max="65536" step="1" required>
+                <label for="draft-model">DFlash draft GGUF (optional)</label>
+                <input id="draft-model" placeholder="/path/to/target-trained-dflash.gguf" autocomplete="off" spellcheck="false">
+                <label for="draft-tokens">Draft tokens per verification</label>
+                <input id="draft-tokens" type="number" value="9" min="1" max="32" step="1" required>
+                <p>A compatible target-trained draft and extra VRAM are required. Fit, quality and speed are not guaranteed.</p>
+                <p id="speculation-note"></p>
+              </details>
+            </details>
+            <div class="actions"><button id="load" type="submit" disabled>Load model</button><button id="unload" type="button" class="secondary" disabled>Unload</button><a class="text-link" href="#chat">Open chat &#8594;</a></div>
+          </form>
+          <p id="backend-help" class="callout" hidden></p>
+        </section>
+        <div class="run-details">
+          <section class="card" aria-labelledby="status-title">
+            <p class="eyebrow">RUNTIME</p><h2 id="status-title">Know what is running</h2>
+            <p id="model-status">No model loaded.</p><p id="run-status"></p><p id="selection-reason"></p><p id="resources" role="status"></p>
+            <a class="text-link" href="#monitor">Watch live performance &#8594;</a>
+            <details><summary>Backend output</summary><pre id="logs">No output yet.</pre></details>
+          </section>
+          <section class="card quiet-card"><h2>A local application, not a cloud service.</h2><p>Your prompts go to the backend on this computer. No accounts, hosted inference or model downloads are built in.</p><p>The optional hybrid MoE engine remains research software. Standard llama.cpp execution is always available.</p></section>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-chat" data-view="chat" class="chat card" aria-labelledby="chat-title" hidden>
+      <div class="chat-heading"><div><p class="eyebrow">DIRECT TO YOUR MODEL</p><h2 id="chat-title">Chat</h2></div><button id="clear" type="button" class="secondary">New chat</button></div>
+      <div id="messages" role="log" aria-label="Conversation"><p id="empty">Your next idea starts here.<br>Load a model to begin. Chats stay in this page and are not saved.</p></div>
+      <form id="chat-form">
+        <label for="prompt">Message</label><textarea id="prompt" rows="3" placeholder="What would you like to work on?" required></textarea>
+        <div class="chat-options">
+          <div><label for="max-output">Max output tokens</label><input id="max-output" type="number" value="8192" min="1" max="65536" step="1" required></div>
+          <div><label for="reasoning-effort">Reasoning effort</label><select id="reasoning-effort"><option value="default">Model default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+          <p>Includes reasoning and the final answer.<br><span id="context-note"></span></p>
+        </div>
+        <div class="actions"><button id="send" type="submit" disabled>Send</button><button id="stop" type="button" class="secondary" disabled>Stop</button><a class="text-link" href="#monitor">Monitor generation &#8594;</a></div>
+        <p id="timing" role="status" title="Backend-reported generation speed includes reasoning tokens. Total time includes prompt processing and network time."></p>
+        <p class="hint">Sampling stays at backend defaults. New chat clears this page's conversation, not the expert cache. Navigation preserves an active chat; refreshing this page does not.</p>
+      </form>
+    </section>
+
+    <section id="view-monitor" data-view="monitor" aria-labelledby="monitor-title" hidden>
+      <div class="section-heading"><div><p class="eyebrow">REAL COUNTERS. NO GUESSWORK.</p><h2 id="monitor-title">Your machine at work</h2></div><div class="monitor-controls"><label class="sr-only" for="monitor-gpu">GPU</label><select id="monitor-gpu"><option value="all">All NVIDIA GPUs</option></select><button id="monitor-pause" class="secondary" type="button" aria-pressed="false">Pause charts</button></div></div>
+      <p id="monitor-status" role="status" aria-live="off">Waiting for the first sample...</p>
+      <div id="monitor-error" class="callout" role="status" hidden></div>
+      <div id="monitor-cards" class="monitor-grid"></div>
+      <div class="card monitor-notes"><h2>What these graphs mean</h2><p>One sample per second, up to five minutes, held in memory only. GPU counters are device-wide and include other apps. CPU is whole-machine load; read I/O and process RAM belong to this app's backend. Windows read I/O includes cached and non-disk reads. macOS available RAM is an estimate.</p><p>Speed uses real backend timings or output-token counters, never text length. Context uses backend slot occupancy where available; the fallback is reported input plus output tokens, not physical KV-memory use. Missing counters show as unavailable, not zero. NVIDIA monitoring uses the installed driver's NVML library; AMD/Metal GPU sensors are not yet supported. PCIe is sampled driver throughput, not an integrated transfer total.</p></div>
+    </section>
+
+    <section id="view-connect" data-view="connect" aria-labelledby="connect-title" hidden>
+      <div class="connect-grid">
+        <section class="card"><p class="eyebrow">ONE MODEL. YOUR FAVORITE TOOLS.</p><h2 id="connect-title">Connect an app</h2><p>Use an OpenAI-compatible client while a model is ready. Requests stay on this computer.</p>
+          <label for="endpoint">API base URL</label><div class="copy-row"><input id="endpoint" readonly><button id="copy" class="secondary" type="button">Copy</button></div>
+          <div class="connection-facts"><div><span>MODEL ID</span><code>local-model</code></div><div><span>API KEY</span><code>local</code></div></div>
+          <p>The key is a client placeholder, not authentication. This service is loopback-only. Do not expose it through a tunnel or reverse proxy.</p>
+          <p id="connection-state" class="callout">Load a model before connecting.</p>
+        </section>
+        <section class="card"><div class="card-heading"><div><p class="eyebrow">QUICK CHECK</p><h2>Try the API</h2></div><button id="copy-example" class="secondary" type="button">Copy Python</button></div><p>This example uses only Python's standard library.</p><pre id="connect-example"></pre><p class="hint">Supported: model discovery and streamed or non-streamed chat completions. This is not a complete implementation of every OpenAI API.</p></section>
+      </div>
+    </section>
+    <footer><span id="execution-footer">Checking execution profile</span><a href="https://github.com/appatalks/unified-memory-scheduler" target="_blank" rel="noreferrer">Research behind SYNAPSE &#8599;</a></footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synapse-local"
+dynamic = ["version"]
+description = "A local GGUF model app with chat, an OpenAI-compatible API, and live hardware monitoring."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "appatalks"}]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[project.scripts]
+synapse = "synapse_app.app:main"
+
+[project.urls]
+Homepage = "https://github.com/appatalks/synapse"
+Issues = "https://github.com/appatalks/synapse/issues"
+Research = "https://github.com/appatalks/unified-memory-scheduler"
+
+[tool.setuptools]
+packages = ["synapse_app"]
+
+[tool.setuptools.dynamic]
+version = {attr = "synapse_app.__version__"}
+
+[tool.setuptools.package-data]
+synapse_app = ["web/*", "hybrid-profile.example.json"]
