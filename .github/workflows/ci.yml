@@ -29,10 +29,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Application lifecycle and API
-        run: python tests/test_local_app.py synapse_app/app.py
       - name: Native OS monitoring and counter contracts
         run: python tests/test_telemetry.py synapse_app/telemetry.py
+      - name: Backend readiness smoke
+        run: python tests/test_local_app.py synapse_app/app.py LocalAppTests.test_load_models_api_and_unload
+      - name: Application lifecycle and API
+        run: python tests/test_local_app.py synapse_app/app.py
       - name: Chat, navigation and monitoring
         run: node --test tests/test_chat_stream.mjs tests/test_monitor.mjs
       - name: Build and exercise the actual zipapp

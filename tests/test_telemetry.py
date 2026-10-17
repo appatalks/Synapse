@@ -27,7 +27,7 @@ class TelemetryTests(unittest.TestCase):
             probe = telemetry.SystemProbe()
         files = {"/proc/stat": "cpu 10 0 20 70 5 0 0 0\n",
                  "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\n"}
-        with mock.patch.object(Path, "read_text", autospec=True, side_effect=lambda p: files[str(p)]):
+        with mock.patch.object(Path, "read_text", autospec=True, side_effect=lambda p: files[p.as_posix()]):
             self.assertEqual(probe.cpu(), (105, 75))
             self.assertEqual(probe.memory(), (1024000, 409600))
 

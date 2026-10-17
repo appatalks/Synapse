@@ -371,6 +371,7 @@ class Runtime:
         self.state = "stopped"
         self.model: str | None = None
         self.error: str | None = None
+        self.readiness_error: str | None = None
         self.logs: deque[str] = deque(maxlen=80)
         self.port = 0
         self.key = ""
@@ -511,6 +512,7 @@ class Runtime:
                 "state": self.state,
                 "model": self.model,
                 "error": self.error,
+                "readiness_error": self.readiness_error,
                 "logs": list(self.logs),
                 "backend_available": self.executable is not None or self.hybrid_executable is not None,
                 "backend": self.executable or self.requested_executable,
@@ -761,6 +763,7 @@ class Runtime:
             self.execution_mode = mode
             self.selection_reason = reason
             self.error = None
+            self.readiness_error = None
             self.model = str(model)
             self.context = context
             self.requested_context = context
@@ -882,13 +885,19 @@ class Runtime:
                     response = connection.getresponse()
                     if response.status == 200:
                         with self.lock:
+                            self.readiness_error = None
                             if (self.process is process and self.state == "loading" and
                                     (not self.hybrid_active or
                                      self.required_hybrid_markers <= self.hybrid_markers)):
                                 self.state = "ready"
-                except (OSError, http.client.HTTPException):
-                    # A backend that is still starting need not have opened its socket yet.
-                    pass
+                    else:
+                        with self.lock:
+                            if self.process is process:
+                                self.readiness_error = f"Backend readiness returned HTTP {response.status}"
+                except (OSError, http.client.HTTPException) as exc:
+                    with self.lock:
+                        if self.process is process:
+                            self.readiness_error = f"Backend readiness is unavailable: {exc}"
                 finally:
                     connection.close()
                 with self.lock:
@@ -902,7 +911,8 @@ class Runtime:
                                       f"Unconfirmed: {missing or 'backend readiness response'}. "
                                       "Check the patched backend, plan and matching CUDA plugin."
                                       if self.hybrid_active else
-                                      "Model loading timed out. See backend output; try a smaller model or CPU mode.")
+                                      "Model loading timed out. See backend output; try a smaller model or CPU mode. "
+                                      + (self.readiness_error or ""))
                         LOG.error("%s", self.error)
                         return
             time.sleep(0.2)
@@ -960,6 +970,7 @@ class Runtime:
                 self.process = None
                 self.state = "stopped"
                 self.error = None
+                self.readiness_error = None
                 self.model = None
                 self.resources = None
                 self.resource_error = None

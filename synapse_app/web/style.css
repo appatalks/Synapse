@@ -28,6 +28,9 @@ h2 { font-size: 1.04rem; font-weight: 600; letter-spacing: -.02em; margin: 0 0 1
 p { color: var(--muted); font-size: .84rem; line-height: 1.75; margin: 10px 0; }
 #page-description { margin: 0; }
 #state { border: 1px solid #324738; background: #14241d; color: #a7d8b8; border-radius: 20px; padding: 8px 14px; font-size: .75rem; white-space: nowrap; }
+#state[data-state="error"] { background: #321c20; border-color: #6e3843; color: #f2aeb7; }
+#state[data-state="loading"], #state[data-state="stopping"] { background: #192738; border-color: #385374; color: #b3d4f5; }
+#state[data-state="stopped"] { background: #1b222c; border-color: #354253; color: #a5b7ca; }
 .card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 25px; min-width: 0; }
 .card-heading h2, .chat-heading h2 { margin-bottom: 0; }
 .tag { font-size: .62rem; padding: 5px 9px; color: #a8b7c6; border: 1px solid var(--border); border-radius: 5px; white-space: nowrap; }

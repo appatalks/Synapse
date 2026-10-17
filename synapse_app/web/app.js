@@ -100,6 +100,7 @@ function renderStatus() {
     ? `Experimental hybrid CPU / GPU (${transfer})` : "Automatic CPU / GPU placement";
   el("expert-cache").max = experimental ? "0" : "65536";
   el("state").textContent = labels[status.state] || status.state;
+  el("state").dataset.state = status.state;
   el("app-version").textContent = `v${status.app_version || "0.1.0rc1"} · Release candidate`;
   el("sidebar-model").textContent = status.model ? status.model.split(/[\\/]/).at(-1) : "No model loaded";
   el("connection-state").textContent = status.state === "ready" ? "Ready. Your apps can connect now."
@@ -188,6 +189,7 @@ async function poll() {
   } catch (error) {
     status = null;
     el("state").textContent = "Disconnected";
+    el("state").dataset.state = "error";
     notice(`Cannot reach the local service: ${error.message}`);
     controls();
   } finally {
