@@ -9,7 +9,7 @@ instead of forcing every operation through the same placement strategy.
 
 ## Why use it?
 
-Our research has demonstrated substantially faster generation on three
+Our research has demonstrated substantially faster generation on four
 larger-than-VRAM models, **without changing target weights or skipping selected experts**:
 
 | Model | Matched control | Accelerated | Gain |
@@ -17,14 +17,16 @@ larger-than-VRAM models, **without changing target weights or skipping selected 
 | GPT-OSS-120B MXFP4 | 25.69 tok/s | **39.46 tok/s** | **54%** |
 | Qwen3.8-Flash-Next IQ3_S | 25.39 tok/s | **43.88 tok/s** | **73%** |
 | GLM-4.5-Air 106B IQ4_XS | 12.67 tok/s | **17.28 tok/s** | **36%** |
+| Qwen3.6-35B-A3B Q8_0 | 45.50 tok/s | **77.99 tok/s** | **71%** |
 
 These are **three-run, 512-token technical-screen medians at 16K context** on a
 Ryzen 9 9950X, RTX 5070 Ti 16GB and 123.48 GiB usable RAM, with 8 generation /
-16 prompt threads. GPT's control uses standard automatic placement; Qwen's uses
-native CPU experts with a GPU backbone. They are different controls, not a
+16 prompt threads. GPT and Qwen3.6 use standard automatic-placement controls;
+Qwen3.8 uses native CPU experts with a GPU backbone. They are different controls, not a
 Strata comparison. GLM uses a **6 GiB manual causal cache** and the fastest
 observed non-hybrid control; its 8 GiB attempt failed to fit.
 [GLM measurements, RAM comparison and reproducible settings](docs/benchmarks/glm45-air-iq4-xs.md) ·
+[Qwen3.6 measurements and verification limits](docs/benchmarks/qwen36-q8.md) ·
 [All conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
