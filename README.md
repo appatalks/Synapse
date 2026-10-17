@@ -31,7 +31,10 @@ observed non-hybrid control; its 8 GiB attempt failed to fit.
 
 Not every MoE is hybrid-compatible: the
 [Mistral Small 4 study](docs/benchmarks/mistral4-compatibility.md) records its
-FP32 operation requirement, native controls and unpromoted GPU prototype.
+FP32 operation requirement and unpromoted prototype. Its
+[isolated native integration and research timings](docs/benchmarks/mistral4-native-experimental.md)
+are experimental only: strict native equivalence still fails, so it is not
+included in the headline table above.
 
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
 or standard llama.cpp mode. They are not promises for every model or machine.
@@ -46,6 +49,20 @@ comparison above or a sustained cross-workload 60 tok/s result.
 
 > **Release candidate. Experimental acceleration is not quality-qualified.**
 > Standard execution remains available. Check important model answers independently.
+
+## Tested compatibility
+
+These are tested text-generation paths, not universal model, fit or quality guarantees.
+
+| Target | Tested accelerated path | Status |
+| --- | --- | --- |
+| GPT-OSS-120B MXFP4 | Trained/direct-DMA hybrid | Runs; strict reference/quality limits remain. |
+| Qwen3.8-Flash-Next IQ3_S | Generic/hybrid expert dispatch | Runs; limited numerical/quality qualification. |
+| GLM-4.5-Air IQ4_XS | Manual 6 GiB causal bank at 16K | Runs; 8 GiB attempt and original answer failures retained. |
+| Qwen3.6-35B-A3B Q8_0 | 8 GiB causal bank | Targeted answer and same-placement checks pass; not broadly quality-qualified. |
+| Mistral Small 4 UD-IQ4_XS | Isolated prototype only; not default installation | Experimental generation/API proof; **native equivalence fails**. |
+
+[Detailed compatibility status and evidence](docs/compatibility.md).
 
 ## Install in one line
 

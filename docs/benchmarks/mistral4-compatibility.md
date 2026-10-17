@@ -15,7 +15,10 @@ The installed native backend and target weights remain unchanged.
 [Reviewed measurements, failures and prototype checks](mistral4-fp32-compatibility.json).
 The [fused-kernel follow-up](#fused-fp32-gpu-follow-up) removes the expanded-weight
 intermediate and improves primitive latency, but is still not integrated into
-full-model execution.
+the installed backend. The later
+[isolated native integration](mistral4-native-experimental.md) runs through a
+temporary SYNAPSE profile but still fails strict native equivalence. It is
+published only as experimental status and separately labeled research timings.
 
 ## Model And Native Controls
 
@@ -216,7 +219,8 @@ restoration. Final GPT settings are confirmed at 16K, 8/16 threads and
 12,000 MiB residency. No driver reset, installed-backend replacement or runtime
 default change was used.
 
-This is now a promising **integration candidate**, not a production fix. The
-next gate is an isolated llama.cpp graph integration with full-model numerical,
-answer-quality and matched-throughput checks against the 19.89 tok/s native
-control. The README's Mistral compatibility warning remains applicable.
+At this stage the kernel was an **integration candidate**, not a production fix.
+The subsequent [native integration study](mistral4-native-experimental.md)
+performs full-model and application tests, retains the failed native-reference
+gates, and records research-only timings. The README's Mistral compatibility
+warning remains applicable.
