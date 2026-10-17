@@ -334,6 +334,7 @@ class LocalAppTests(unittest.TestCase):
             self.assertIn("Backend context" if name == "hybrid-wrong-context" else "hybrid readiness timed out",
                           status["error"])
             self.assertFalse(status["hybrid_verified"])
+            self.runtime.process.wait(timeout=5)
             self.assertIsNotNone(self.runtime.process.poll())
 
     def test_decode_pipeline_flags_activation_and_standard_rollback(self):
