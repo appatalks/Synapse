@@ -436,6 +436,7 @@ class Runtime:
         with self.lock:
             if serial == self.generation_serial:
                 self.generation["active"] = False
+                self.generation["final_pending"] = self.generation.get("tokens_per_second") is not None
 
     def _monitor_backend(self) -> dict:
         with self.lock:
@@ -444,14 +445,18 @@ class Runtime:
             resources = dict(self.resources or {}) if running else {}
             state, context, port, key = self.state, self.context, self.port, self.key
             generation = dict(self.generation)
+            if generation.get("final_pending"):
+                self.generation["final_pending"] = False
             serial = self.generation_serial
             resource_error = self.resource_error
         result = {"state": state, "generation_active": generation.get("active", False),
-                  "tokens_per_second": generation.get("tokens_per_second") if generation.get("active") else 0,
+                  "tokens_per_second": generation.get("tokens_per_second")
+                  if generation.get("active") or generation.get("final_pending") else 0,
                   "last_tokens_per_second": generation.get("tokens_per_second"),
                   "output_tokens": generation.get("output_tokens"), "context_used": None,
                   "context_total": context if running else None, "context_source": None,
-                  "speed_source": "backend_timings" if generation.get("tokens_per_second") is not None else None,
+                  "speed_source": "backend_final_timings" if generation.get("final_pending") else
+                  "backend_timings" if generation.get("tokens_per_second") is not None else None,
                   "rss_bytes": resources.get("rss_bytes"), "cpu_logical_cores": resources.get("cpu_logical_cores"),
                   "pid": process.pid if running else None, "read_bytes": resources.get("read_bytes"),
                   "errors": {}}

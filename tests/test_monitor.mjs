@@ -56,3 +56,10 @@ test("context is capped and usage fallback is labeled", () => {
   assert.equal(context.value, 100);
   assert.match(context.note, /usage estimate/);
 });
+
+test("short generations retain a completed-rate sample before going idle", () => {
+  const sample = { backend: { state: "ready", generation_active: false,
+    tokens_per_second: 123.5, last_tokens_per_second: 123.5, speed_source: "backend_final_timings" } };
+  assert.equal(readings(sample).speed.value, 123.5);
+  assert.equal(readings(sample).speed.note, "Completed decode average");
+});

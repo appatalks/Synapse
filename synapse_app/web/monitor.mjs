@@ -23,7 +23,8 @@ export function readings(sample, selection = "all") {
   return {
     speed: { value: b.state === "ready" ? b.tokens_per_second : null,
       note: b.generation_active ? b.speed_source === "backend_slot_counter" ? "Rolling accepted-output counter" : "Backend-reported decode rate"
-        : valid(b.last_tokens_per_second) ? `Idle · last decode ${b.last_tokens_per_second.toFixed(1)} tok/s` : "No generation yet" },
+        : b.speed_source === "backend_final_timings" ? "Completed decode average"
+          : valid(b.last_tokens_per_second) ? `Idle · last decode ${b.last_tokens_per_second.toFixed(1)} tok/s` : "No generation yet" },
     gpu: { value: load === null ? null : load / devices.length, max: 100, note: devices.length > 1 ? "Average across selected GPUs" : "Device-wide load" },
     vram: { value: used === null ? null : used / gib, max: total === null ? null : total / gib,
       note: total === null ? "NVIDIA memory counter" : `of ${(total / gib).toFixed(1)} GiB · all apps` },

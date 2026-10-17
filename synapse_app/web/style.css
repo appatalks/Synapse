@@ -5,7 +5,7 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button, input, textarea, select { font: inherit; }
 button, .text-link { white-space: nowrap; }
-.sidebar { position: sticky; top: 0; height: 100vh; padding: 32px 18px 24px; background: #0e131b; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.sidebar { position: sticky; top: 0; height: 100vh; min-width: 0; padding: 32px 18px 24px; background: #0e131b; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .brand { display: flex; gap: 11px; align-items: center; padding: 0 6px 42px; color: #edf5f6; font-size: 1rem; font-weight: 750; letter-spacing: .12em; }
 .brand:hover { text-decoration: none; }
 .brand small { display: block; font-size: .51rem; letter-spacing: .16em; color: #718396; margin-top: 6px; }
@@ -97,7 +97,7 @@ footer a { color: #7c99af; white-space: nowrap; }
 [hidden] { display: none !important; }
 @media (max-width: 1050px) { .run-grid, .connect-grid { grid-template-columns: 1fr; } .run-details { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 760px) {
-  body { grid-template-columns: 1fr; }
+  body { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: relative; height: auto; padding: 18px 16px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
   .brand { padding: 0 4px 18px; }
   nav { flex-direction: row; gap: 4px; overflow-x: auto; }
