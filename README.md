@@ -35,8 +35,13 @@ FP32 operation requirement, native controls and unpromoted GPU prototype.
 
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
 or standard llama.cpp mode. They are not promises for every model or machine.
-Strict diagnostics and an answer-quality check remain failed. Later GPT tuning
-reached a separate 50.06 tok/s technical median, but that is **not** the matched
+Experimental acceleration is **not yet quality-qualified**: some strict
+CPU-reference logit comparisons and an earlier structured-answer check failed.
+Newer targeted checks pass, but do not establish equivalent answer quality
+across models and workloads. These failures do not by themselves establish that
+acceleration caused an incorrect answer.
+
+Later GPT tuning reached a separate 50.06 tok/s technical median, but that is **not** the matched
 comparison above or a sustained cross-workload 60 tok/s result.
 
 > **Release candidate. Experimental acceleration is not quality-qualified.**
