@@ -46,6 +46,16 @@ class UpdateTests(unittest.TestCase):
         for value in ("../other", "v1", "1.2.3+shell", "1.2.3/other"):
             self.assertIsNone(updates.version_key(value))
 
+    def test_windows_batch_launcher_quotes_paths_and_escapes_expansion(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        command = installer.windows_command([r"C:\a&b\python.exe", r"C:\模型\100% ready!\SYNAPSE.pyz"])
+        self.assertEqual(command, '"C:\\a&b\\python.exe" "C:\\模型\\100%% ready!\\SYNAPSE.pyz"')
+        for bad in ('bad"quote', "bad\ncommand"):
+            with self.assertRaises(ValueError):
+                installer.windows_command([bad])
+
     def test_release_selection_uses_only_versioned_public_releases_with_assets(self):
         assets = [{"name": "SYNAPSE.pyz"}, {"name": "SHA256SUMS"}]
         data = [{"tag_name": "v0.1.0rc1", "assets": assets},
@@ -201,6 +211,10 @@ class UpdateTests(unittest.TestCase):
         self.assertIn("SYNAPSE managed launcher", launcher.read_text())
         if sys.platform != "win32":
             result = subprocess.run([str(launcher), "--version"], check=True, capture_output=True, text=True, timeout=10)
+            self.assertIn("SYNAPSE", result.stdout)
+        else:
+            result = subprocess.run(["cmd.exe", "/d", "/c", str(launcher), "--version"],
+                                    check=True, capture_output=True, text=True, timeout=10)
             self.assertIn("SYNAPSE", result.stdout)
         subprocess.run(command, check=True, capture_output=True, timeout=20)
         foreign = self.root / "foreign"

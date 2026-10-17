@@ -14,6 +14,18 @@ import tempfile
 from synapse_app.updates import install_archive, latest_release, release_archive, validate_archive
 
 
+def windows_command(arguments):
+    quoted = []
+    for argument in arguments:
+        value = str(argument)
+        if any(character in value for character in ('"', "\r", "\n")):
+            raise ValueError("Windows launcher arguments cannot contain quotes or newlines")
+        value = value.replace("%", "%%")
+        trailing = len(value) - len(value.rstrip("\\"))
+        quoted.append('"' + value + "\\" * trailing + '"')
+    return " ".join(quoted)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, help="private installation directory (also puts the launcher in PREFIX/bin)")
@@ -113,7 +125,8 @@ def main():
             receipt_file.chmod(0o600)
         command = [sys.executable, str(target), *backend_args]
         if sys.platform == "win32":
-            text = "@rem # SYNAPSE managed launcher\n@chcp 65001 >nul\n@" + subprocess.list2cmdline(command) + " %*\n"
+            text = ("@rem # SYNAPSE managed launcher\n@chcp 65001 >nul\n"
+                    "@setlocal DisableDelayedExpansion\n@" + windows_command(command) + " %*\n")
         else:
             text = "#!/usr/bin/env bash\n# SYNAPSE managed launcher\nexec " + shlex.join(command) + ' "$@"\n'
         launcher_temp = launcher.with_suffix(".part")
