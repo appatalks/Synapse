@@ -1,90 +1,108 @@
 # SYNAPSE
 
-**Local models. A clear view of your machine.**
+**Run larger local models. Get more from the hardware you already own.**
 
-Run a GGUF model, chat with it, connect your tools, and watch the hardware doing the work.
-No account. No hosted inference. No model uploads.
+SYNAPSE brings local chat, model controls, hardware monitoring and an
+OpenAI-compatible API into one small app. Its optional experimental MoE engine
+keeps frequently used experts on the GPU and executes cold experts on the CPU,
+instead of forcing every operation through the same placement strategy.
 
-> **Release candidate — not a stable, quality-qualified inference engine.**
-> The application targets Linux, Windows and macOS. GPU sensor coverage and the
-> optional research engine have narrower support; see [platform notes](docs/monitoring.md).
+## Why use it?
 
-## What you get
+Our research has demonstrated substantially faster generation on two
+larger-than-VRAM models, **without changing target weights or skipping selected experts**:
 
-- **Chat:** streamed answers and reasoning, with a **Model Controls** pop-up for local model browsing, loading, resource settings, output budgets and reasoning effort.
-- **Monitor:** live tok/s, combined CPU/GPU load, VRAM, temperature, power, PCIe and read I/O, plus RAM/context pie charts.
-- **Connect an app:** a loopback OpenAI-compatible models/chat API for your local tools.
+| Model | Matched control | Accelerated | Gain |
+| --- | ---: | ---: | ---: |
+| GPT-OSS-120B MXFP4 | 25.69 tok/s | **39.46 tok/s** | **54%** |
+| Qwen3.8-Flash-Next IQ3_S | 25.39 tok/s | **43.88 tok/s** | **73%** |
 
-The app uses Python's standard library and a browser. Missing sensors are labeled
-**unavailable**, not guessed. No analytics or chat-history persistence is built in.
-Your chosen model and backend can have their own behavior and licenses.
+These are **three-run, 512-token technical-screen medians at 16K context** on a
+Ryzen 9 9950X, RTX 5070 Ti 16GB and 123.48 GiB usable RAM, with 8 generation /
+16 prompt threads. GPT's control uses standard automatic placement; Qwen's uses
+native CPU experts with a GPU backbone. They are different controls, not a
+Strata comparison. [Conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
-## Get started
+The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
+or standard llama.cpp mode. They are not promises for every model or machine.
+Strict diagnostics and an answer-quality check remain failed. Later GPT tuning
+reached a separate 50.06 tok/s technical median, but that is **not** the matched
+comparison above or a sustained cross-workload 60 tok/s result.
 
-You need **Python 3.10+**, a compatible [llama.cpp `llama-server`](https://github.com/ggml-org/llama.cpp) (tested with b11669),
-a local GGUF model, and enough RAM/VRAM for it. Backends, drivers and models are **not bundled or downloaded**.
+> **Release candidate. Experimental acceleration is not quality-qualified.**
+> Standard execution remains available. Check important model answers independently.
 
-Download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases), then:
+## Install in one line
 
-```sh
-python SYNAPSE.pyz --llama-server /path/to/llama-server
+On **Linux or macOS**, with Python 3.10+ and curl:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appatalks/synapse/main/install.sh | bash -s -- --launch
 ```
 
-On Windows, use `py SYNAPSE.pyz --llama-server C:\path\to\llama-server.exe`.
-Your browser opens at `http://127.0.0.1:8080` in **Chat**. Open **Model Controls**
-to browse for a local GGUF or enter its path, then load it.
-Use the sidebar to switch between **Chat**, **Monitor**, and **Connect an app**.
-Stop with **Ctrl+C** to unload the backend. Navigation preserves your chat; refreshing does not.
+This installs per-user, without sudo, and opens the app. On Linux it offers
+experimental NVIDIA acceleration; an existing compatible research profile can
+be reused. Building that backend requires Git, CMake, a C++ compiler and the
+CUDA toolkit. **Drivers, toolkits and model weights are never installed automatically.**
+macOS uses a separately installed llama.cpp CPU/Metal backend.
 
-Prefer an isolated install? Download the release wheel and run:
+The installer prefers a checksummed public release. Until the first release is
+published, it explicitly installs a **main-branch preview**. Prefer to inspect
+scripts before running them? [Download and review `install.sh`](install.sh) first.
 
-```sh
-pipx install /path/to/synapse_local-0.1.0rc1-py3-none-any.whl
-synapse --llama-server /path/to/llama-server
-```
+Already have a backend? Add `--llama-server /path/to/llama-server` to the
+installer arguments. Skip the acceleration offer with `--no-accelerated`;
+request it non-interactively with `--accelerated`.
 
-Use `--port 0` for a free port, `--no-browser` for a headless launch, or
-`--execution-mode standard` to explicitly bypass experimental profiles.
-To run directly from this repository instead of a release artifact:
+**Windows:** download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases)
+and run `py SYNAPSE.pyz --llama-server C:\path\to\llama-server.exe`.
+For a managed Windows install, [follow the short source-install instructions](docs/installing.md).
+Without a public release yet, use those source instructions on any platform.
 
-```sh
-git clone https://github.com/appatalks/synapse.git
-cd synapse
-python -m synapse_app --llama-server /path/to/llama-server
-```
+## Open it. Pick a model. Go.
 
-## How is it different from Strata?
+1. Open **Chat → Model Controls**. Browse for a local GGUF or paste its path.
+2. Load the model and chat. Output limits and reasoning effort are in the same pop-up.
+3. Open **Monitor** for speed, CPU/GPU, VRAM, temperature, power, PCIe, read I/O,
+   RAM and context fill—or **Connect an app** to use your local model in another tool.
 
-[Strata](https://github.com/Niko1221/Strata) is a **direct inspiration**.
-Its integrated monitoring and practical heterogeneous-inference work gave this
-project a needed push toward a more useful, observable local-model experience.
+No account, hosted inference or model uploads. Chats stay in the page.
+The app needs only Python and a browser; models and an appropriate
+[llama.cpp backend](https://github.com/ggml-org/llama.cpp) are separate.
+The reference backend revision is b11669. [Platform and sensor limits](docs/monitoring.md).
+
+## Updates without reinstalling
+
+Click the **version in the sidebar**. It lights up when a newer compatible
+public release is found. Managed installs can download a verified update and
+restart after your confirmation. Models, backends and local profiles are not
+replaced. Source/pip installs get release information, not overwritten files.
+
+Update checks contact GitHub for release metadata only, never prompts or
+hardware data. Use `--no-update-check` to disable automatic checks.
+Checksums verify the downloaded artifact's integrity; they are not a separate
+publisher signature. [Installation and update details](docs/installing.md).
+
+## Inspired by Strata, aimed at model-agnostic execution
+
+[Strata](https://github.com/Niko1221/Strata) is a **direct inspiration**. Its
+practical heterogeneous-inference work and integrated monitoring gave this
+project a needed push toward a more useful local-model experience.
 
 Strata offers an integrated engine/setup experience centered on its supported
-model lineup. SYNAPSE currently takes a **bring-your-own GGUF and llama.cpp backend**
-approach: a small, independent application with transparent local controls and monitoring.
-It does not bundle Strata, its engine, or its model packs, and is not affiliated with Strata.
-We do not claim feature parity or that SYNAPSE is faster.
+lineup. SYNAPSE aims for **metadata-driven MoE scheduling across models**, with
+transparent counters and an independently usable local app. It does not bundle
+Strata, its engine or model packs, is not affiliated with Strata, and does not
+claim feature parity or superior performance to it.
 
-Our longer-term direction is **model-agnostic MoE scheduling**: use model metadata,
-tensor layouts and measured hardware costs rather than a checkpoint-name whitelist.
-The experiments, benchmark conditions and retained failures live in
+The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
-
-## What is still experimental?
-
-Standard inference is performed by your llama.cpp backend. The optional patched
-CPU/GPU MoE dispatcher is **Linux/NVIDIA research software**, not installed by this
-package, and still has unresolved diagnostic/answer checks. Its benefits are
-model- and workload-dependent. Speculation is off by default. No universal
-speedup, model-fit guarantee, or 60 tok/s promise is made.
-
-Experimental-engine details and warnings are collected in **Monitor**, not repeated
-above every conversation. Model/backend failures remain visible wherever you are.
-
-The API is local-only and has no app authentication. **Do not expose it through
-a tunnel or reverse proxy.** Check important model answers independently.
 
 ---
 
-[Monitoring & platform details](docs/monitoring.md) · [Release/development guide](docs/releasing.md) ·
-[Research](https://github.com/appatalks/unified-memory-scheduler) · [MIT license](LICENSE)
+**Local only:** the API has no app authentication. Do not expose it through a
+tunnel or reverse proxy. No universal speedup, fit guarantee or quality
+qualification is implied.
+
+[Installation](docs/installing.md) · [Monitoring](docs/monitoring.md) ·
+[Development](docs/releasing.md) · [MIT license](LICENSE)

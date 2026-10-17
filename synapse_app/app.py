@@ -36,6 +36,7 @@ __version__ = import_module(APP_PACKAGE).__version__
 _telemetry = import_module(f"{APP_PACKAGE}.telemetry")
 HardwareMonitor, number, rate, system_probe = (
     _telemetry.HardwareMonitor, _telemetry.number, _telemetry.rate, _telemetry.system_probe)
+_updates = import_module(f"{APP_PACKAGE}.updates")
 
 LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
@@ -1024,7 +1025,7 @@ class Runtime:
 
     def connection(self) -> tuple[http.client.HTTPConnection, str]:
         with self.lock:
-            if self.state != "ready" or self.process is None or self.process.poll() is not None:
+            if self.closed or self.state != "ready" or self.process is None or self.process.poll() is not None:
                 raise AppError(503, "No model is ready. Load a model and check its status first.")
             return http.client.HTTPConnection("127.0.0.1", self.port, timeout=120), self.key
 
@@ -1033,9 +1034,33 @@ class AppServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
 
-    def __init__(self, address: tuple[str, int], runtime: Runtime):
+    def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True):
         self.runtime = runtime
+        archive = Path(sys.argv[0]).resolve() if sys.argv[0].endswith(".pyz") else None
+        self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
+        self.restart_requested = False
         super().__init__(address, Handler)
+
+    def install_update(self, staged: Path, receipt: dict) -> None:
+        if not self.runtime.chat_lock.acquire(blocking=False):
+            raise RuntimeError("A chat started while downloading. Wait for it to finish and retry the update.")
+        try:
+            with self.runtime.lock:
+                if self.runtime.closed or self.runtime.state in ("loading", "stopping"):
+                    raise RuntimeError("The model is changing. Wait until it is idle before updating.")
+                self.runtime.closed = True
+            self.runtime.stop()
+            _updates.install_archive(staged, self.updates.archive, receipt)
+            self.restart_requested = True
+            with self.updates.lock:
+                self.updates.state = "restarting"
+            threading.Thread(target=self.shutdown, daemon=True).start()
+        except (OSError, ValueError, RuntimeError):
+            with self.runtime.lock:
+                self.runtime.closed = False
+            raise
+        finally:
+            self.runtime.chat_lock.release()
 
     def server_bind(self) -> None:
         TCPServer.server_bind(self)
@@ -1124,6 +1149,22 @@ class Handler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if method == "GET" and path == "/api/v1/status":
                 self._json(200, self.server.runtime.status())
+            elif method == "GET" and path == "/api/v1/update":
+                self.server.updates.check()
+                self._json(200, self.server.updates.snapshot())
+            elif method == "POST" and path == "/api/v1/update/check":
+                self._body()
+                self.server.updates.check(force=True)
+                self._json(202, self.server.updates.snapshot())
+            elif method == "POST" and path == "/api/v1/update/apply":
+                data = self._body()
+                if self.server.runtime.chat_lock.locked() or self.server.runtime.state in ("loading", "stopping"):
+                    raise AppError(409, "Wait until the model is idle before updating.")
+                try:
+                    self.server.updates.apply(data.get("version"), self.server.install_update)
+                except ValueError as exc:
+                    raise AppError(400, str(exc)) from exc
+                self._json(202, self.server.updates.snapshot())
             elif method == "GET" and path == "/api/v1/monitor":
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
                 values = query.get("after", ["0"])
@@ -1154,7 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
                 if "stream" in data and not isinstance(data["stream"], bool):
                     raise AppError(400, "stream must be a boolean.")
                 self._proxy(method, path, data)
-            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/monitor.mjs", "/navigation.mjs",
+            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/monitor.mjs", "/navigation.mjs", "/updates.mjs",
                                              "/style.css", "/icon.svg"):
                 name, mime = {
                     "/": ("index.html", "text/html; charset=utf-8"),
@@ -1162,6 +1203,7 @@ class Handler(BaseHTTPRequestHandler):
                     "/chat-stream.mjs": ("chat-stream.mjs", "text/javascript; charset=utf-8"),
                     "/monitor.mjs": ("monitor.mjs", "text/javascript; charset=utf-8"),
                     "/navigation.mjs": ("navigation.mjs", "text/javascript; charset=utf-8"),
+                    "/updates.mjs": ("updates.mjs", "text/javascript; charset=utf-8"),
                     "/icon.svg": ("icon.svg", "image/svg+xml"),
                     "/style.css": ("style.css", "text/css; charset=utf-8"),
                 }[path]
@@ -1297,6 +1339,7 @@ def main() -> None:
                         help="optional Linux/CUDA experimental installation JSON; legacy VRAMBridge profiles are supported")
     parser.add_argument("--port", type=int, default=8080, help="local app port; 0 chooses a free port")
     parser.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    parser.add_argument("--no-update-check", action="store_true", help="disable automatic GitHub release checks")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
@@ -1328,7 +1371,7 @@ def main() -> None:
     if runtime.hybrid_plan is not None:
         LOG.warning("%s", HYBRID_WARNING)
     try:
-        server = AppServer(("127.0.0.1", args.port), runtime)
+        server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check)
     except OSError as exc:
         parser.exit(1, f"Cannot start local app: {exc}\n")
     url = f"http://127.0.0.1:{server.server_address[1]}"
@@ -1350,6 +1393,8 @@ def main() -> None:
     finally:
         runtime.stop(closing=True)
         server.server_close()
+    if server.restart_requested:
+        os.execv(sys.executable, [sys.executable, *sys.argv, "--port", str(server.server_address[1]), "--no-browser"])
 
 
 if __name__ == "__main__":

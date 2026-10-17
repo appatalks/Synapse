@@ -23,7 +23,7 @@
       <span class="local-indicator">On your machine. Under your control.</span>
       <p id="sidebar-model">No model loaded</p>
       <a href="https://github.com/appatalks/synapse" target="_blank" rel="noreferrer">Project &amp; help &#8599;</a>
-      <small id="app-version">Release candidate</small>
+      <button id="app-version" type="button" class="version-button" aria-haspopup="dialog" aria-controls="release-details">Release details</button>
     </div>
   </aside>
   <main id="workspace" tabindex="-1">
@@ -32,6 +32,16 @@
       <span id="state" role="status">Connecting</span>
     </header>
     <div id="notice" role="alert" hidden></div>
+    <dialog id="release-details" aria-labelledby="release-title">
+      <div class="dialog-header"><h2 id="release-title">Version &amp; updates</h2><button id="close-release" type="button" class="secondary">Close</button></div>
+      <div class="dialog-content">
+        <p id="release-current"></p><p id="release-status" role="status">Checking version details...</p>
+        <p id="release-installation"></p>
+        <p class="hint">Checks contact GitHub for public SYNAPSE release metadata only. No prompts or hardware information are sent. Disable automatic checks with <code>--no-update-check</code>.</p>
+        <label id="update-consent" hidden><input id="update-confirm" type="checkbox"> I understand that updating restarts the app and unloads the current model. Models and inference backends are not changed.</label>
+        <div class="actions"><button id="check-update" type="button" class="secondary">Check for updates</button><button id="install-update" type="button" hidden disabled>Install update &amp; restart</button><a id="release-link" class="text-link" target="_blank" rel="noreferrer" hidden>Release notes &#8599;</a></div>
+      </div>
+    </dialog>
 
     <dialog id="model-controls" aria-labelledby="model-title">
       <div class="dialog-header"><div><p class="eyebrow">YOUR LOCAL SESSION</p><h2 id="model-title">Model Controls</h2></div><button id="close-controls" type="button" class="secondary" aria-label="Close model controls">Close</button></div>

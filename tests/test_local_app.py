@@ -2,6 +2,8 @@
 
 import http.client
 import importlib.util
+import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from unittest import mock
 from urllib.parse import urlsplit
 
@@ -96,6 +99,7 @@ class LocalAppTests(unittest.TestCase):
         for path, expected in (("/", b"SYNAPSE"), ("/app.js", b"textContent"),
                                ("/chat-stream.mjs", b"class ChatStream"),
                                ("/monitor.mjs", b"class MonitorView"), ("/navigation.mjs", b"viewForHash"),
+                               ("/updates.mjs", b"class UpdateView"),
                                ("/icon.svg", b"<svg"),
                                ("/style.css", b"@media")):
             code, headers, body = self.request("GET", path)
@@ -126,6 +130,57 @@ class LocalAppTests(unittest.TestCase):
         code, _, body = self.request("POST", "/api/v1/model/load", {"model": str(self.model)})
         self.assertEqual(code, 503)
         self.assertIn(b"--llama-server", body)
+
+    def test_update_status_and_installation_guards(self):
+        self.server.updates.automatic = False
+        code, _, body = self.request("GET", "/api/v1/update")
+        self.assertEqual(code, 200)
+        self.assertFalse(json.loads(body)["managed"])
+        with mock.patch.object(self.server.updates, "check") as check:
+            self.assertEqual(self.request("POST", "/api/v1/update/check", {})[0], 202)
+            check.assert_called_once_with(force=True)
+        self.assertEqual(self.request("POST", "/api/v1/update/apply", {"version": "1.0.0"})[0], 400)
+        self.runtime.chat_lock.acquire()
+        try:
+            self.assertEqual(self.request("POST", "/api/v1/update/apply", {"version": "1.0.0"})[0], 409)
+        finally:
+            self.runtime.chat_lock.release()
+        self.assertEqual(self.request("POST", "/api/v1/update/check", {},
+                                     {"Origin": "https://untrusted.invalid"})[0], 403)
+
+    def test_managed_update_checks_artifact_and_requests_an_idle_restart(self):
+        archive = self.root / "SYNAPSE.pyz"
+        archive.write_bytes(b"previous app")
+        (self.root / "install.json").write_text(json.dumps(
+            {"schema_version": 1, "app": "SYNAPSE", "mode": "managed"}))
+        self.server.updates = app._updates.UpdateManager("0.1.0rc1", archive, automatic=False)
+        self.server.updates.state = "available"
+        self.server.updates.release = {"tag": "v0.2.0rc1", "version": "0.2.0rc1"}
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as output:
+            output.writestr("__main__.py", "")
+            output.writestr("synapse_app/app.py", "")
+            output.writestr("synapse_app/__init__.py", '__version__ = "0.2.0rc1"')
+        body = payload.getvalue()
+        checksum = (hashlib.sha256(body).hexdigest() + "  SYNAPSE.pyz\n").encode()
+        with mock.patch.object(app._updates, "download", side_effect=[checksum, body]):
+            code, _, response = self.request("POST", "/api/v1/update/apply", {"version": "0.2.0rc1"})
+            self.assertEqual(code, 202, response)
+            self.thread.join(timeout=5)
+        self.assertFalse(self.thread.is_alive())
+        self.assertTrue(self.server.restart_requested)
+        self.assertEqual(app._updates.validate_archive(archive), "0.2.0rc1")
+        self.assertEqual(archive.with_suffix(".pyz.previous").read_bytes(), b"previous app")
+
+    def test_update_restart_never_interrupts_a_chat_that_started_during_download(self):
+        self.runtime.chat_lock.acquire()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "chat started"):
+                self.server.install_update(self.root / "unused.pyz", {})
+            self.assertFalse(self.server.restart_requested)
+            self.assertFalse(self.runtime.closed)
+        finally:
+            self.runtime.chat_lock.release()
 
     def test_model_browser_only_lists_folders_and_gguf_files(self):
         (self.root / "nested folder").mkdir()

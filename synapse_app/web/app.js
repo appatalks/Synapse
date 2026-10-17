@@ -3,6 +3,7 @@
 import { ChatStream } from "./chat-stream.mjs";
 import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
+import { UpdateView } from "./updates.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -111,7 +112,7 @@ function renderStatus() {
   el("expert-cache").max = experimental ? "0" : "65536";
   el("state").textContent = labels[status.state] || status.state;
   el("state").dataset.state = status.state;
-  el("app-version").textContent = `v${status.app_version || "0.1.0rc1"} · Release candidate`;
+  updateView.setVersion(status.app_version);
   el("sidebar-model").textContent = status.model ? status.model.split(/[\\/]/).at(-1) : "No model loaded";
   el("connection-state").textContent = status.state === "ready" ? "Ready. Your apps can connect now."
     : "No model is ready. Open Chat → Model Controls to load a model before sending API requests.";
@@ -509,5 +510,7 @@ el("chat-form").addEventListener("submit", async (event) => {
 
 window.addEventListener("hashchange", () => navigate());
 navigate();
+const updateView = new UpdateView(request);
+updateView.poll();
 new MonitorView(request).poll();
 poll();

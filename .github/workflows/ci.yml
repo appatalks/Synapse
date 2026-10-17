@@ -31,6 +31,8 @@ jobs:
           node-version: "20"
       - name: Native OS monitoring and counter contracts
         run: python tests/test_telemetry.py synapse_app/telemetry.py
+      - name: Verified updates and offline installer
+        run: python tests/test_updates.py
       - name: Backend readiness smoke
         run: python tests/test_local_app.py synapse_app/app.py LocalAppTests.test_load_models_api_and_unload
       - name: Application lifecycle and API
