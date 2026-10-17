@@ -29,6 +29,10 @@ observed non-hybrid control; its 8 GiB attempt failed to fit.
 [Qwen3.6 measurements and verification limits](docs/benchmarks/qwen36-q8.md) ·
 [All conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
+Not every MoE is hybrid-compatible: the
+[Mistral Small 4 study](docs/benchmarks/mistral4-compatibility.md) records its
+FP32 operation requirement, native controls and unpromoted GPU prototype.
+
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
 or standard llama.cpp mode. They are not promises for every model or machine.
 Strict diagnostics and an answer-quality check remain failed. Later GPT tuning
