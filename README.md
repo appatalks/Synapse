@@ -101,6 +101,14 @@ transparent counters and an independently usable local app. It does not bundle
 Strata, its engine or model packs, is not affiliated with Strata, and does not
 claim feature parity or superior performance to it.
 
+The engine also builds on llama.cpp's upstream expert-cache machinery,
+including [ggml-org/llama.cpp#29887](https://github.com/ggml-org/llama.cpp/pull/29887),
+already included in our pinned backend. That cache uploads misses for GPU
+execution; SYNAPSE's experimental hybrid dispatcher extends the tensor/slot
+machinery with CPU cold-expert execution and guarded causal admissions.
+The PR's published speedups are not an additional multiplier on SYNAPSE's results.
+[Local upstream-cache investigation and the pinned-host-loading result](docs/benchmarks/upstream-pr29887.md).
+
 The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
 
