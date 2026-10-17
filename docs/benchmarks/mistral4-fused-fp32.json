@@ -1,0 +1,2239 @@
+{
+  "schema_version": 1,
+  "kind": "isolated-fused-quantized-weight-fp32-activation-cuda-probe",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "gpu": "NVIDIA RTX 5070 Ti 16GB",
+    "cuda_architecture": "sm_120"
+  },
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "target": "Mistral Small 4 UD-IQ4_XS, actual down-projection IQ4_XS and Q6_K weights",
+  "previous_study": "mistral4-fp32-compatibility-summary.json",
+  "model_revision": "bd93c721735aa32c035c0f19e738cb3371fd56ff",
+  "implementation": {
+    "original_weight_blocks_unchanged": true,
+    "activation_storage": "FP32",
+    "accumulation": "FP32 FMA/reduction",
+    "dequantization": "Reuse pinned CUDA dequantize_iq4_xs<float> and dequantize_q6_K<float> helpers",
+    "expanded_weight_intermediate_bytes": 0,
+    "shared_bytes_per_cta": {
+      "IQ4_XS": 4096,
+      "Q6_K": 2064
+    },
+    "error_flag_bytes": 4,
+    "baseline": "CTA barriers",
+    "refinement": "Warp-local barriers for IQ4_XS only",
+    "source_precision_guard_removed": false,
+    "installed_backend_modified": false,
+    "compile_options": [
+      "--std=c++17",
+      "-O3",
+      "--shared",
+      "-Xcompiler=-fPIC",
+      "-arch=sm_120",
+      "-lineinfo"
+    ],
+    "use_fast_math": false,
+    "existing_backend_rebuilt": false
+  },
+  "dimensions": {
+    "input": 2048,
+    "output": 4096,
+    "bank_slots": 8,
+    "active_experts": 4,
+    "positions": [
+      1,
+      3
+    ],
+    "activation_scales": [
+      1,
+      1000000
+    ]
+  },
+  "reference": "Original weights dequantized to FP32, CPU FP32 batched matmul",
+  "thresholds": {
+    "normalized_max_abs": 1e-05,
+    "relative_l2": 1e-05,
+    "finite_outputs_required": true
+  },
+  "completed_timing_cases": 24,
+  "sanitizer_cases": 4,
+  "worst_fused_relative_l2": 1.8703058686307147e-07,
+  "latest_single_position_ranges_ms": {
+    "fused_host_complete": [
+      0.07463,
+      0.087083
+    ],
+    "expanded_ggml_gpu": [
+      0.46443599785561673,
+      0.5029780004406348
+    ],
+    "native_cpu_quantized": [
+      0.3649200007203035,
+      0.4998219992558006
+    ]
+  },
+  "timing_runs": [
+    {
+      "status": "completed",
+      "cases": [
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9334789157024462e-07,
+          "relative_l2": 1.519938365604501e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.760657001810614,
+            "samples_ms": [
+              16.157030000613304,
+              10.760657001810614,
+              11.229281000851188,
+              10.71837700146716,
+              10.667983002349501
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.37429800067911856,
+            "samples_ms": [
+              0.3742180015251506,
+              0.37429800067911856,
+              0.3765130022657104,
+              0.373136001144303,
+              0.4862669993599411
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.08441600203514099,
+            "device_samples_ms": [
+              0.08441600203514099,
+              0.08556800335645676,
+              0.08441600203514099,
+              0.08457600325345993,
+              0.08441600203514099
+            ],
+            "median_complete_ms": 0.089948,
+            "complete_samples_ms": [
+              0.089847,
+              0.089717,
+              0.089958,
+              0.089948,
+              0.089998
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6112324297520384e-07,
+          "fused_relative_l2": 1.8583865451740628e-07,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 1.8538797645372885e-07,
+            "partial_output_tile_relative_l2": 1.3146081425908125e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.11773000005632639,
+            "samples_ms": [
+              0.1278790005017072,
+              0.12024399984511547,
+              0.11768900003517047,
+              0.11688800077536143,
+              0.11773000005632639
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120753074440724
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.3515996621271163e-07,
+          "relative_l2": 1.5442624249143265e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.828644000866916,
+            "samples_ms": [
+              10.967132999212481,
+              10.828644000866916,
+              10.842318999493727,
+              9.8753169986594,
+              9.736375999636948
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.37270499888109043,
+            "samples_ms": [
+              0.37270499888109043,
+              0.37318599788704887,
+              0.36955899849999696,
+              0.3701999994518701,
+              0.3760109975701198
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.08428800106048584,
+            "device_samples_ms": [
+              0.0841279998421669,
+              0.08428800106048584,
+              0.08556800335645676,
+              0.0854400023818016,
+              0.08403199911117554
+            ],
+            "median_complete_ms": 0.090128,
+            "complete_samples_ms": [
+              0.090128,
+              0.088775,
+              0.090999,
+              0.090619,
+              0.089967
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6894995776588956e-07,
+          "fused_relative_l2": 1.8703058686307147e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.127658000565134,
+            "samples_ms": [
+              0.127658000565134,
+              0.1290200016228482,
+              0.12629599950741976,
+              0.12890099969808944,
+              0.12089599840692244
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120733965136207
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.6194426396655915e-07,
+          "relative_l2": 1.5240595284195732e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 31.86978200028534,
+            "samples_ms": [
+              32.59559599973727,
+              31.105436999496305,
+              31.86978200028534,
+              32.10819699961576,
+              31.824819001485594
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.0757549971458502,
+            "samples_ms": [
+              1.072218998160679,
+              1.0732920018199366,
+              1.1988660007773433,
+              1.173438002297189,
+              1.0757549971458502
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.244159996509552,
+            "device_samples_ms": [
+              0.244159996509552,
+              0.24403199553489685,
+              0.2452159970998764,
+              0.24531200528144836,
+              0.24326400458812714
+            ],
+            "median_complete_ms": 0.249605,
+            "complete_samples_ms": [
+              0.249605,
+              0.248503,
+              0.250728,
+              0.250738,
+              0.248704
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.6194426396655915e-07,
+          "fused_relative_l2": 1.8515745530804884e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.30325600164360367,
+            "samples_ms": [
+              0.3245350017095916,
+              0.3162600005452987,
+              0.30325600164360367,
+              0.3001400000357535,
+              0.29287600045790896
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003164643484380141
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.1320724385983721e-07,
+          "relative_l2": 1.536207821319493e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 30.92806600034237,
+            "samples_ms": [
+              31.522104000032414,
+              30.7180050003808,
+              30.59812100036652,
+              31.273320000764215,
+              30.92806600034237
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.2356850020296406,
+            "samples_ms": [
+              1.1845490007544868,
+              1.2327689983067103,
+              1.3671000015165191,
+              1.2356850020296406,
+              1.2369669966574293
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.2452159970998764,
+            "device_samples_ms": [
+              0.2452159970998764,
+              0.2620159983634949,
+              0.24326400458812714,
+              0.2452159970998764,
+              0.2451840043067932
+            ],
+            "median_complete_ms": 0.250747,
+            "complete_samples_ms": [
+              0.254384,
+              0.278119,
+              0.248633,
+              0.250737,
+              0.250747
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.698108657897558e-07,
+          "fused_relative_l2": 1.862877262191877e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.3319890020065941,
+            "samples_ms": [
+              0.3323800010548439,
+              0.3319890020065941,
+              0.33163799889734946,
+              0.328903002809966,
+              0.3429099997447338
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0031646419828395287
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9583908529046756e-07,
+          "relative_l2": 1.5309715052382428e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.820177998539293,
+            "samples_ms": [
+              11.0816150008759,
+              10.854732001462253,
+              10.820177998539293,
+              10.385436999058584,
+              10.27755599716329
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.37813499875483103,
+            "samples_ms": [
+              0.4949020003550686,
+              0.575382997340057,
+              0.37813499875483103,
+              0.3779540020332206,
+              0.3739670028153341
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06915199756622314,
+            "device_samples_ms": [
+              0.06905599683523178,
+              0.07004799693822861,
+              0.06966400146484375,
+              0.06915199756622314,
+              0.06905599683523178
+            ],
+            "median_complete_ms": 0.074589,
+            "complete_samples_ms": [
+              0.074419,
+              0.074589,
+              0.075992,
+              0.074239,
+              0.074609
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3055939019364503e-07,
+          "fused_relative_l2": 9.524167014730147e-08,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 9.608291089627374e-08,
+            "partial_output_tile_relative_l2": 1.223169342624211e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.13297799887368456,
+            "samples_ms": [
+              0.17613800082472153,
+              0.1499600002716761,
+              0.12245900143170729,
+              0.1303429999097716,
+              0.13297799887368456
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802277946561388
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.7112682496491216e-07,
+          "relative_l2": 1.537583371772563e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.127105000719894,
+            "samples_ms": [
+              10.293585997715127,
+              9.47418899886543,
+              10.231860000203596,
+              9.808009999687783,
+              10.127105000719894
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.3762619999179151,
+            "samples_ms": [
+              0.3762619999179151,
+              0.49253899851464666,
+              0.3732760014827363,
+              0.3744790010387078,
+              0.3842670012090821
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06911999732255936,
+            "device_samples_ms": [
+              0.06982400268316269,
+              0.06867200136184692,
+              0.0689919963479042,
+              0.06911999732255936,
+              0.06921599805355072
+            ],
+            "median_complete_ms": 0.074619,
+            "complete_samples_ms": [
+              0.07544,
+              0.073187,
+              0.074599,
+              0.075621,
+              0.074619
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3690145997192972e-07,
+          "fused_relative_l2": 9.562483839268684e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.11291999908280559,
+            "samples_ms": [
+              0.1878709990705829,
+              0.13794799815514125,
+              0.11291999908280559,
+              0.10952400043606758,
+              0.10721000217017718
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802351065501557
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.4006048185100945e-07,
+          "relative_l2": 1.5219948534553175e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 32.63541999695008,
+            "samples_ms": [
+              33.28440999757731,
+              32.56966799744987,
+              32.92010100267362,
+              31.85792000294896,
+              32.63541999695008
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.0889609984587878,
+            "samples_ms": [
+              1.0912660000030883,
+              1.088569999410538,
+              1.1918330019398127,
+              1.0793830006150529,
+              1.0889609984587878
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19811199605464935,
+            "device_samples_ms": [
+              0.19811199605464935,
+              0.1971839964389801,
+              0.1982399970293045,
+              0.19808000326156616,
+              0.19811199605464935
+            ],
+            "median_complete_ms": 0.20357,
+            "complete_samples_ms": [
+              0.20381,
+              0.200935,
+              0.203329,
+              0.2037,
+              0.20357
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.337365456733963e-08,
+          "fused_relative_l2": 9.414611853145079e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.2649950001796242,
+            "samples_ms": [
+              0.2640130005602259,
+              0.25859200104605407,
+              0.2649950001796242,
+              0.26630700085661374,
+              0.26526399960857816
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032243118180546307
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.2238672521125418e-07,
+          "relative_l2": 1.5242390072725097e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 31.70610699817189,
+            "samples_ms": [
+              38.05814299994381,
+              33.6956770006509,
+              31.552009997540154,
+              31.70610699817189,
+              31.5928560012253
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.095581999834394,
+            "samples_ms": [
+              1.337895002507139,
+              1.0906539973802865,
+              1.0872570019273553,
+              1.095581999834394,
+              1.1967509999522008
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19696000218391418,
+            "device_samples_ms": [
+              0.1982080042362213,
+              0.19679999351501465,
+              0.19808000326156616,
+              0.19696000218391418,
+              0.19696000218391418
+            ],
+            "median_complete_ms": 0.202488,
+            "complete_samples_ms": [
+              0.2038,
+              0.201285,
+              0.20363,
+              0.202488,
+              0.202137
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.790938016900334e-08,
+          "fused_relative_l2": 9.474955689853974e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.2411900022707414,
+            "samples_ms": [
+              0.2577109989942983,
+              0.25375299810548313,
+              0.2411900022707414,
+              0.2324130000488367,
+              0.22741399880032986
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003224314777836898
+        }
+      ],
+      "restore": {
+        "status": "ready",
+        "original_settings_restored": true,
+        "hybrid_verified": true
+      },
+      "installed_backend_changed": false,
+      "whole_model_speed_claim": false,
+      "prototype": "On-the-fly block dequantization and FP32 dot products, no global expanded-weight tensor",
+      "cpu_cache_pressure_mib": 0,
+      "cache_pressure_cost_excluded_from_timings": true,
+      "source_sha256": "198d466ce7789aabda1c47e022d12622babe2c24e9283293e3b91c0792cbf320",
+      "kernel_source_sha256": "498e0f10e696d0d5c750adac4c97181124e10b455999f19fef4fedc483268d71",
+      "kernel_binary_sha256": "5a3c61c6560695bdf42c3d9b53b52b5935a72925d08ffbabe4d4a7361567a34a",
+      "installed_cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+      "all_fp32_reference_checks_passed": true,
+      "model_weights_requantized": false,
+      "native_cpu_equivalence_claim": false,
+      "source_report_sha256": "ac3922f9eec5111c92b3b217761cadedd8902e721457c49ba4bf3bdfad6731e2"
+    },
+    {
+      "status": "completed",
+      "cases": [
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9334789157024462e-07,
+          "relative_l2": 1.519938365604501e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.9109270015324,
+            "samples_ms": [
+              10.780974000226706,
+              11.055587998271221,
+              10.780543998407666,
+              10.9109270015324,
+              11.474488001113059
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.44827599776908755,
+            "samples_ms": [
+              0.44827599776908755,
+              0.4396799995447509,
+              0.43718500091927126,
+              0.450119001470739,
+              0.4692549991887063
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.08441600203514099,
+            "device_samples_ms": [
+              0.08435200154781342,
+              0.0843840017914772,
+              0.08441600203514099,
+              0.08457600325345993,
+              0.08441600203514099
+            ],
+            "median_complete_ms": 0.089978,
+            "complete_samples_ms": [
+              0.090118,
+              0.090719,
+              0.089647,
+              0.089938,
+              0.089978
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6112324297520384e-07,
+          "fused_relative_l2": 1.8583865451740628e-07,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 1.8538797645372885e-07,
+            "partial_output_tile_relative_l2": 1.3146081425908125e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.30507900009979494,
+            "samples_ms": [
+              0.2918940008385107,
+              0.2972740003315266,
+              0.32330300018657,
+              0.30507900009979494,
+              0.36221600021235645
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120753074440724
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.3515996621271163e-07,
+          "relative_l2": 1.5442624249143265e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.935784001048887,
+            "samples_ms": [
+              11.748749999242136,
+              10.985676999553107,
+              10.935784001048887,
+              10.447191998537164,
+              10.448404998896876
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.4655390002881177,
+            "samples_ms": [
+              0.4655390002881177,
+              0.45389599836198613,
+              0.4711479996331036,
+              0.44959899969398975,
+              0.46901499808882363
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.08575999736785889,
+            "device_samples_ms": [
+              0.08361600339412689,
+              0.08473599702119827,
+              0.08588799834251404,
+              0.08579199761152267,
+              0.08575999736785889
+            ],
+            "median_complete_ms": 0.090719,
+            "complete_samples_ms": [
+              0.089006,
+              0.090689,
+              0.090719,
+              0.09097,
+              0.09087
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6894995776588956e-07,
+          "fused_relative_l2": 1.8703058686307147e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.35236700205132365,
+            "samples_ms": [
+              0.36564200127031654,
+              0.32268200084217824,
+              0.37679199886042625,
+              0.32742099938332103,
+              0.35236700205132365
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120733965136207
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.6194426396655915e-07,
+          "relative_l2": 1.5240595284195732e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 31.51723599876277,
+            "samples_ms": [
+              31.471259997488232,
+              32.5191839983745,
+              31.020698999782326,
+              31.51723599876277,
+              31.80858899941086
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1614160030148923,
+            "samples_ms": [
+              1.154262001364259,
+              1.3253919969429262,
+              1.1614160030148923,
+              1.1421999988669995,
+              1.1660150012176018
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.24537600576877594,
+            "device_samples_ms": [
+              0.24556800723075867,
+              0.2439039945602417,
+              0.244159996509552,
+              0.24537600576877594,
+              0.24537600576877594
+            ],
+            "median_complete_ms": 0.251099,
+            "complete_samples_ms": [
+              0.420404,
+              0.355362,
+              0.249675,
+              0.250677,
+              0.251099
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.6194426396655915e-07,
+          "fused_relative_l2": 1.8515745530804884e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.599438000790542,
+            "samples_ms": [
+              0.580682997679105,
+              0.5504760010808241,
+              0.6428390006476548,
+              0.6157689967949409,
+              0.599438000790542
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003164643484380141
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.1320724385983721e-07,
+          "relative_l2": 1.536207821319493e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 31.374247999337967,
+            "samples_ms": [
+              31.374247999337967,
+              30.837517999316333,
+              30.799105999903986,
+              31.472311999095837,
+              31.901792997814482
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1667450016830117,
+            "samples_ms": [
+              1.1694610002450645,
+              1.1701930015988182,
+              1.131960001657717,
+              1.1667450016830117,
+              1.153611003246624
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.24515199661254883,
+            "device_samples_ms": [
+              0.2451840043067932,
+              0.24406400322914124,
+              0.24329599738121033,
+              0.24515199661254883,
+              0.2451840043067932
+            ],
+            "median_complete_ms": 0.250757,
+            "complete_samples_ms": [
+              0.251078,
+              0.248233,
+              0.248704,
+              0.250757,
+              0.250757
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.698108657897558e-07,
+          "fused_relative_l2": 1.862877262191877e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.5246279979473911,
+            "samples_ms": [
+              0.5637309986923356,
+              0.5246279979473911,
+              0.5313110013958067,
+              0.4375259995867964,
+              0.49195700194104575
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0031646419828395287
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9583908529046756e-07,
+          "relative_l2": 1.5309715052382428e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 11.1346150006284,
+            "samples_ms": [
+              11.313779003103264,
+              11.1346150006284,
+              10.793287998239975,
+              11.156445001688553,
+              10.93421100085834
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.4670109992730431,
+            "samples_ms": [
+              0.46416500117629766,
+              0.461409999843454,
+              0.4820790018129628,
+              0.4670109992730431,
+              0.49203800153918564
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06966400146484375,
+            "device_samples_ms": [
+              0.06988800317049026,
+              0.0697920024394989,
+              0.06966400146484375,
+              0.06908799707889557,
+              0.06950400024652481
+            ],
+            "median_complete_ms": 0.075551,
+            "complete_samples_ms": [
+              0.075982,
+              0.074178,
+              0.075551,
+              0.076633,
+              0.074729
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3055939019364503e-07,
+          "fused_relative_l2": 9.524167014730147e-08,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 9.608291089627374e-08,
+            "partial_output_tile_relative_l2": 1.223169342624211e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.4579540000122506,
+            "samples_ms": [
+              0.4610799987858627,
+              0.4579540000122506,
+              0.46466699859593064,
+              0.4528249992290512,
+              0.4489170023589395
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802277946561388
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.7112682496491216e-07,
+          "relative_l2": 1.537583371772563e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 11.069282001699321,
+            "samples_ms": [
+              10.693443000491243,
+              10.78705500185606,
+              11.557903999346308,
+              11.127691999718081,
+              11.069282001699321
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.46154099982231855,
+            "samples_ms": [
+              0.5076769994047936,
+              0.46154099982231855,
+              0.4584950002026744,
+              0.4619110004568938,
+              0.46008800200070255
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06918399780988693,
+            "device_samples_ms": [
+              0.06918399780988693,
+              0.06908799707889557,
+              0.06969600170850754,
+              0.06915199756622314,
+              0.06918399780988693
+            ],
+            "median_complete_ms": 0.074759,
+            "complete_samples_ms": [
+              0.074759,
+              0.073137,
+              0.075922,
+              0.07528,
+              0.07461
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3690145997192972e-07,
+          "fused_relative_l2": 9.562483839268684e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.46400499923038296,
+            "samples_ms": [
+              0.4864469992753584,
+              0.43587199979810975,
+              0.40496500150766224,
+              0.46400499923038296,
+              0.5443949994514696
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802351065501557
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.4006048185100945e-07,
+          "relative_l2": 1.5219948534553175e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 32.66248100044322,
+            "samples_ms": [
+              30.80254299857188,
+              32.38860099736485,
+              32.66248100044322,
+              33.64543399948161,
+              32.67924299871083
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1797299994213972,
+            "samples_ms": [
+              1.160745003289776,
+              1.183016000140924,
+              1.1797299994213972,
+              1.1816229998657946,
+              1.1604140017880127
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19811199605464935,
+            "device_samples_ms": [
+              0.19811199605464935,
+              0.1972160041332245,
+              0.1982399970293045,
+              0.19811199605464935,
+              0.19811199605464935
+            ],
+            "median_complete_ms": 0.203569,
+            "complete_samples_ms": [
+              0.20382,
+              0.201326,
+              0.203569,
+              0.203639,
+              0.20334
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.337365456733963e-08,
+          "fused_relative_l2": 9.414611853145079e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.5145690010976978,
+            "samples_ms": [
+              0.5145690010976978,
+              0.679706998198526,
+              0.5131560028530657,
+              0.5490339972311631,
+              0.493931001983583
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032243118180546307
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.2238672521125418e-07,
+          "relative_l2": 1.5242390072725097e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 31.7563299977337,
+            "samples_ms": [
+              30.96379400085425,
+              31.7563299977337,
+              31.77547699669958,
+              33.2484629980172,
+              30.698339000082342
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1662950018944684,
+            "samples_ms": [
+              1.17562299783458,
+              1.1662950018944684,
+              1.1592410010052845,
+              1.1794899983215146,
+              1.1580099999264348
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19811199605464935,
+            "device_samples_ms": [
+              0.1982399970293045,
+              0.19811199605464935,
+              0.19811199605464935,
+              0.19699199497699738,
+              0.1982080042362213
+            ],
+            "median_complete_ms": 0.20367,
+            "complete_samples_ms": [
+              0.20378,
+              0.202378,
+              0.20388,
+              0.202217,
+              0.20367
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.790938016900334e-08,
+          "fused_relative_l2": 9.474955689853974e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.4694050003308803,
+            "samples_ms": [
+              0.4694050003308803,
+              0.4696360010711942,
+              0.46827400001347996,
+              0.4572430007101502,
+              0.5351580002752598
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003224314777836898
+        }
+      ],
+      "restore": {
+        "status": "ready",
+        "original_settings_restored": true,
+        "hybrid_verified": true
+      },
+      "installed_backend_changed": false,
+      "whole_model_speed_claim": false,
+      "prototype": "On-the-fly block dequantization and FP32 dot products, no global expanded-weight tensor",
+      "cpu_cache_pressure_mib": 256,
+      "cache_pressure_cost_excluded_from_timings": true,
+      "source_sha256": "198d466ce7789aabda1c47e022d12622babe2c24e9283293e3b91c0792cbf320",
+      "kernel_source_sha256": "498e0f10e696d0d5c750adac4c97181124e10b455999f19fef4fedc483268d71",
+      "kernel_binary_sha256": "5a3c61c6560695bdf42c3d9b53b52b5935a72925d08ffbabe4d4a7361567a34a",
+      "installed_cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+      "all_fp32_reference_checks_passed": true,
+      "model_weights_requantized": false,
+      "native_cpu_equivalence_claim": false,
+      "source_report_sha256": "a03e831f82ccae8571f28f2754fa7114366677fc3ce67307b96fe4e2082e6303"
+    },
+    {
+      "status": "completed",
+      "cases": [
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9334789157024462e-07,
+          "relative_l2": 1.519938365604501e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 11.602157999732299,
+            "samples_ms": [
+              10.971542000334011,
+              10.79039400065085,
+              11.602157999732299,
+              12.307704000704689,
+              12.28771699970821
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.4681530008383561,
+            "samples_ms": [
+              0.44557100045494735,
+              0.47632800124119967,
+              0.44788499872083776,
+              0.4761479976878036,
+              0.4681530008383561
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.07814399898052216,
+            "device_samples_ms": [
+              0.07756800204515457,
+              0.07833600044250488,
+              0.07827199995517731,
+              0.07689599692821503,
+              0.07814399898052216
+            ],
+            "median_complete_ms": 0.087083,
+            "complete_samples_ms": [
+              0.087083,
+              0.084698,
+              0.085779,
+              0.205814,
+              0.276376
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6112324297520384e-07,
+          "fused_relative_l2": 1.8583865451740628e-07,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 1.8538797645372885e-07,
+            "partial_output_tile_relative_l2": 1.3146081425908125e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.3649200007203035,
+            "samples_ms": [
+              0.3649200007203035,
+              0.42185700294794515,
+              0.3760010004043579,
+              0.3312379994895309,
+              0.27795900314231403
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120753074440724
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.3515996621271163e-07,
+          "relative_l2": 1.5442624249143265e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 11.157509001350263,
+            "samples_ms": [
+              11.975633999099955,
+              11.694619999616407,
+              10.969748000206891,
+              11.02716499735834,
+              11.157509001350263
+            ],
+            "buffer_bytes": 170033184,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.4861759989580605,
+            "samples_ms": [
+              0.5839689983986318,
+              0.4416839983605314,
+              0.4861759989580605,
+              0.4991509995306842,
+              0.45166300333221443
+            ],
+            "buffer_bytes": 170033280,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.0772479996085167,
+            "device_samples_ms": [
+              0.0772479996085167,
+              0.07715199887752533,
+              0.07737600058317184,
+              0.07814399898052216,
+              0.0772479996085167
+            ],
+            "median_complete_ms": 0.082794,
+            "complete_samples_ms": [
+              0.082914,
+              0.081251,
+              0.082765,
+              0.083866,
+              0.082794
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35749908
+          },
+          "fused_normalized_max_abs": 1.6894995776588956e-07,
+          "fused_relative_l2": 1.8703058686307147e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.38610000046901405,
+            "samples_ms": [
+              0.38610000046901405,
+              0.37416800114442594,
+              0.3865710023092106,
+              0.5538130026252475,
+              0.38409599801525474
+            ],
+            "buffer_bytes": 35749920,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032120733965136207
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.6194426396655915e-07,
+          "relative_l2": 1.5240595284195732e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 33.027997000317555,
+            "samples_ms": [
+              33.027997000317555,
+              32.64774800118175,
+              33.14544599925284,
+              32.53458600011072,
+              33.08356100023957
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1698820017045364,
+            "samples_ms": [
+              1.1759530025301501,
+              1.1531509990163613,
+              1.1698820017045364,
+              1.1469490018498618,
+              1.1726670018106233
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.2231680005788803,
+            "device_samples_ms": [
+              0.22915199398994446,
+              0.22368000447750092,
+              0.2229440063238144,
+              0.2231680005788803,
+              0.22111999988555908
+            ],
+            "median_complete_ms": 0.231241,
+            "complete_samples_ms": [
+              0.237433,
+              0.229348,
+              0.231241,
+              0.231562,
+              0.228987
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.6194426396655915e-07,
+          "fused_relative_l2": 1.8515745530804884e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.514790001034271,
+            "samples_ms": [
+              0.48635700295562856,
+              0.5276139963825699,
+              0.514790001034271,
+              0.5286560008244123,
+              0.5090390004625078
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003164643484380141
+        },
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.1320724385983721e-07,
+          "relative_l2": 1.536207821319493e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 32.87061399896629,
+            "samples_ms": [
+              32.01879500193172,
+              32.52061099919956,
+              32.87061399896629,
+              32.92323200003011,
+              32.89611199943465
+            ],
+            "buffer_bytes": 438796352,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1518080027599353,
+            "samples_ms": [
+              1.1489130010886583,
+              1.160143998276908,
+              1.1518080027599353,
+              1.151487998868106,
+              1.2274189975869376
+            ],
+            "buffer_bytes": 438796416,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.22281600534915924,
+            "device_samples_ms": [
+              0.22307200729846954,
+              0.22191999852657318,
+              0.22281600534915924,
+              0.2226559966802597,
+              0.22380800545215607
+            ],
+            "median_complete_ms": 0.228776,
+            "complete_samples_ms": [
+              0.229377,
+              0.23048,
+              0.227825,
+              0.228476,
+              0.228776
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 4096,
+            "device_allocation_bytes": 35946548
+          },
+          "fused_normalized_max_abs": 1.698108657897558e-07,
+          "fused_relative_l2": 1.862877262191877e-07,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.537472002179129,
+            "samples_ms": [
+              0.5415899977379013,
+              0.583577999350382,
+              0.537472002179129,
+              0.5309699990903027,
+              0.4452300017874222
+            ],
+            "buffer_bytes": 35946560,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0031646419828395287
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.9583908529046756e-07,
+          "relative_l2": 1.5309715052382428e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 10.415295000711922,
+            "samples_ms": [
+              10.272578998410609,
+              10.232755001197802,
+              10.415295000711922,
+              11.142570998345036,
+              11.3079699985974
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.46443599785561673,
+            "samples_ms": [
+              0.46443599785561673,
+              0.470827999379253,
+              0.46315399958984926,
+              0.45979800052009523,
+              0.46679099978064187
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06940799951553345,
+            "device_samples_ms": [
+              0.06940799951553345,
+              0.06995200365781784,
+              0.06940799951553345,
+              0.06956800073385239,
+              0.06940799951553345
+            ],
+            "median_complete_ms": 0.077715,
+            "complete_samples_ms": [
+              0.078847,
+              0.076443,
+              0.077685,
+              0.077715,
+              0.077735
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3055939019364503e-07,
+          "fused_relative_l2": 9.524167014730147e-08,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 9.608291089627374e-08,
+            "partial_output_tile_relative_l2": 1.223169342624211e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          },
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.4998219992558006,
+            "samples_ms": [
+              0.4998219992558006,
+              0.529357999766944,
+              0.4975279989594128,
+              0.6411360009224154,
+              0.49650599976303056
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802277946561388
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.7112682496491216e-07,
+          "relative_l2": 1.537583371772563e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 11.508162002428435,
+            "samples_ms": [
+              11.508162002428435,
+              10.58739500149386,
+              10.820941002748441,
+              11.577452001802158,
+              13.476313997671241
+            ],
+            "buffer_bytes": 189431840,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 0.5029780004406348,
+            "samples_ms": [
+              0.475787997856969,
+              0.5150910001248121,
+              0.5029780004406348,
+              0.5054620014561806,
+              0.4953940006089397
+            ],
+            "buffer_bytes": 189431936,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.06924799829721451,
+            "device_samples_ms": [
+              0.06921599805355072,
+              0.0700799971818924,
+              0.06905599683523178,
+              0.06992000341415405,
+              0.06924799829721451
+            ],
+            "median_complete_ms": 0.07463,
+            "complete_samples_ms": [
+              0.074729,
+              0.074108,
+              0.07463,
+              0.076643,
+              0.074619
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55148564
+          },
+          "fused_normalized_max_abs": 1.3690145997192972e-07,
+          "fused_relative_l2": 9.562483839268684e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.4281389992684126,
+            "samples_ms": [
+              0.42554299943731166,
+              0.5330740023055114,
+              0.4281389992684126,
+              0.4398809978738427,
+              0.4132009999011643
+            ],
+            "buffer_bytes": 55148576,
+            "selected_fp32_scratch_bytes": 134217728,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032802351065501557
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1.0,
+          "activations_exceed_fp16_range": false,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.4006048185100945e-07,
+          "relative_l2": 1.5219948534553175e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 34.00652200070908,
+            "samples_ms": [
+              34.18252100163954,
+              35.45955200024764,
+              34.00652200070908,
+              32.75425699757761,
+              33.934538001631154
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1691510007949546,
+            "samples_ms": [
+              1.1656940005195793,
+              1.1033280025003478,
+              1.1774659978982527,
+              1.1691510007949546,
+              1.1770050004997756
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19811199605464935,
+            "device_samples_ms": [
+              0.20262399315834045,
+              0.20236800611019135,
+              0.19811199605464935,
+              0.19808000326156616,
+              0.19811199605464935
+            ],
+            "median_complete_ms": 0.20372,
+            "complete_samples_ms": [
+              0.212486,
+              0.206325,
+              0.20372,
+              0.203329,
+              0.20365
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.337365456733963e-08,
+          "fused_relative_l2": 9.414611853145079e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.5975439999019727,
+            "samples_ms": [
+              0.5256910008029081,
+              0.612513002124615,
+              0.5975439999019727,
+              0.6023630012350623,
+              0.5523399995581713
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.0032243118180546307
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 3,
+          "active_experts": 4,
+          "activation_scale": 1000000.0,
+          "activations_exceed_fp16_range": true,
+          "fp32_reference_dequantized_weights_exact": true,
+          "normalized_max_abs": 1.2238672521125418e-07,
+          "relative_l2": 1.5242390072725097e-07,
+          "passed": true,
+          "cpu_fp32_gather_gemm": {
+            "median_ms": 33.13610799887101,
+            "samples_ms": [
+              34.7538860005443,
+              32.87753599943244,
+              33.13610799887101,
+              32.84750999955577,
+              33.448890997533454
+            ],
+            "buffer_bytes": 458195008,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "gpu_fp32_gather_gemm": {
+            "median_ms": 1.1876749995280989,
+            "samples_ms": [
+              1.1793499979830813,
+              1.210206999530783,
+              1.1627189996943343,
+              1.1876749995280989,
+              1.3226970004325267
+            ],
+            "buffer_bytes": 458195072,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": false
+          },
+          "fused_quantized_fp32": {
+            "median_device_ms": 0.19686399400234222,
+            "device_samples_ms": [
+              0.19676800072193146,
+              0.19740800559520721,
+              0.19811199605464935,
+              0.19673599302768707,
+              0.19686399400234222
+            ],
+            "median_complete_ms": 0.202839,
+            "complete_samples_ms": [
+              0.202839,
+              0.205724,
+              0.20367,
+              0.202618,
+              0.202628
+            ],
+            "expanded_weight_scratch_bytes": 0,
+            "cta_shared_scratch_bytes": 2064,
+            "device_allocation_bytes": 55345204
+          },
+          "fused_normalized_max_abs": 9.790938016900334e-08,
+          "fused_relative_l2": 9.474955689853974e-08,
+          "additional_checks": {},
+          "native_cpu_quantized_expert_id": {
+            "median_ms": 0.5925149998802226,
+            "samples_ms": [
+              0.6316079998214263,
+              0.6545110009028576,
+              0.5778770027973223,
+              0.5498659993463662,
+              0.5925149998802226
+            ],
+            "buffer_bytes": 55345216,
+            "selected_fp32_scratch_bytes": 402653184,
+            "original_fp32_expert_id_supported": true
+          },
+          "native_cpu_relative_l2_diagnostic": 0.003224314777836898
+        }
+      ],
+      "restore": {
+        "status": "ready",
+        "original_settings_restored": true,
+        "hybrid_verified": true
+      },
+      "installed_backend_changed": false,
+      "whole_model_speed_claim": false,
+      "prototype": "On-the-fly block dequantization and FP32 dot products, no global expanded-weight tensor",
+      "cpu_cache_pressure_mib": 256,
+      "kernel_variant": "warp",
+      "safety_only_not_timing_evidence": false,
+      "cache_pressure_cost_excluded_from_timings": true,
+      "source_sha256": "e2bf60dbb61c92b4a999c75a601bd855b864ada0371e89762485cff21ce08e28",
+      "kernel_source_sha256": "04c787616baa16ca011f0bbf4491e30376f06a23437ac0901e961034dbb8b5dd",
+      "kernel_binary_sha256": "e8968361a9542d379c4aaf99eb5dfded0571d532872e977ba06ffa799eb8c703",
+      "installed_cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+      "all_fp32_reference_checks_passed": true,
+      "model_weights_requantized": false,
+      "native_cpu_equivalence_claim": false,
+      "worker_exit_code": 0,
+      "gpu_context_released_before_model_restore": true,
+      "sanitizer": null,
+      "source_report_sha256": "82c772345ffe39603e21faae4d62018b5700ff9bb9a338ca571dc57905257887"
+    }
+  ],
+  "sanitizer_runs": [
+    {
+      "tool": "memcheck",
+      "summary": "ERROR SUMMARY: 0 errors",
+      "worker_exit_code": 0,
+      "source_report_sha256": "e92f24e106d88541284cef03e1a49acc4f0c62cdb0961b8420f6761f3c35f2d7",
+      "sanitizer_log_sha256": "a9d061cee538182f762e132abeea7bac7bddb844338f25751bbbb043f242c425",
+      "kernel_filter": "kns=quantized_fp32_matvec",
+      "root_application_only": true,
+      "cases": [
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "activation_scale": 1000000.0,
+          "passed": true,
+          "fused_normalized_max_abs": 1.6894995776588956e-07,
+          "fused_relative_l2": 1.8703058686307147e-07,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 1.853894289284061e-07,
+            "partial_output_tile_relative_l2": 1.0338498998819757e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          }
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "activation_scale": 1000000.0,
+          "passed": true,
+          "fused_normalized_max_abs": 1.3690145997192972e-07,
+          "fused_relative_l2": 9.562483839268684e-08,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 9.624318740364004e-08,
+            "partial_output_tile_relative_l2": 8.042156282875271e-08,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          }
+        }
+      ],
+      "restored_after_worker_exit": true,
+      "timing_evidence": false
+    },
+    {
+      "tool": "racecheck",
+      "summary": "RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)",
+      "worker_exit_code": 0,
+      "source_report_sha256": "8b255495ad8f235145fc41089e3abc8ee4bfdcee3b786594fa60e145bef81270",
+      "sanitizer_log_sha256": "91dbb142f8feb8786cd6fde6ac035e816b67db14e4b7b400a01386ec106b75c4",
+      "kernel_filter": "kns=quantized_fp32_matvec",
+      "root_application_only": true,
+      "cases": [
+        {
+          "layer": 0,
+          "quantization": "IQ4_XS",
+          "tokens": 1,
+          "activation_scale": 1000000.0,
+          "passed": true,
+          "fused_normalized_max_abs": 1.6894995776588956e-07,
+          "fused_relative_l2": 1.8703058686307147e-07,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 1.853894289284061e-07,
+            "partial_output_tile_relative_l2": 1.0338498998819757e-07,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          }
+        },
+        {
+          "layer": 32,
+          "quantization": "Q6_K",
+          "tokens": 1,
+          "activation_scale": 1000000.0,
+          "passed": true,
+          "fused_normalized_max_abs": 1.3690145997192972e-07,
+          "fused_relative_l2": 9.562483839268684e-08,
+          "additional_checks": {
+            "negative_one_mask_matches_zero_slot": true,
+            "repeated_expert_ids_relative_l2": 9.624318740364004e-08,
+            "partial_output_tile_relative_l2": 8.042156282875271e-08,
+            "invalid_id_-2": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_id_8": {
+              "rejected": true,
+              "cuda_status": 1
+            },
+            "invalid_block_dimension": {
+              "rejected": true,
+              "cuda_status": 1
+            }
+          }
+        }
+      ],
+      "restored_after_worker_exit": true,
+      "timing_evidence": false
+    }
+  ],
+  "retained_failed_lifecycle_run": {
+    "source_report_sha256": "add8357bab7d73b04c72f7a39570a12d6776de79d6678d153395fc0659dbbe48",
+    "log_sha256": "a0fdff7845ef313d2358705448fcaf8b7431c900832761f6e144044570da129c",
+    "original_status": "testing",
+    "original_restore": {
+      "status": "pending"
+    },
+    "passed_primitive_cases_before_restore": 8,
+    "failure_kind": "gpt_restore_cuda_oom_while_probe_context_retained",
+    "included_in_headline": false,
+    "recovery": "Original GPT restored after worker exit; parent/child isolation adopted for subsequent runs"
+  },
+  "restoration_fix": "Non-CUDA parent restores only after CUDA child and its context have exited",
+  "final_original_settings_verification": {
+    "state": "ready",
+    "all_original_settings_verified": true,
+    "context": 16384,
+    "expert_cache_mib": 12000,
+    "cpu_threads": 8,
+    "batch_threads": 16,
+    "hybrid_verified": true
+  },
+  "limitations": [
+    "Standalone primitive only: no llama.cpp graph integration, full-model logit gate or new Mistral tok/s result.",
+    "Actual quantized down weights with synthetic activations are not a general model-quality evaluation.",
+    "Native CPU quantized matmul differs numerically from dequantized FP32 reference; CPU equivalence remains unproved.",
+    "Small resident bank and sequential microbenchmarks are not full-model cache or throughput simulations.",
+    "GPU fused completion timings include launch/events/synchronization but not H2D upload or final error-flag copy.",
+    "GGML comparator timings have a different API boundary; device events and host-completion timings are separately retained.",
+    "CPU cache-pressure buffer is outside timing, not a direct measurement of DRAM cache residency.",
+    "Safety-instrumented runs are excluded from timing evidence.",
+    "No multiplied whole-model speed claim follows from primitive speed ratios."
+  ],
+  "whole_model_speedup_claim": false,
+  "production_promotion": false
+}
