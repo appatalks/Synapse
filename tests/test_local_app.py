@@ -367,7 +367,7 @@ class LocalAppTests(unittest.TestCase):
         self.assertFalse(status["hybrid_verified"])
 
     def test_async_ids_require_verified_backend_and_do_not_leak_into_standard(self):
-        self.hybrid_runtime(hybrid_decode_pipeline=True, hybrid_async_ids=True, load_timeout=0.4)
+        self.hybrid_runtime(hybrid_decode_pipeline=True, hybrid_async_ids=True)
         status = self.load()
         self.assertTrue(status["hybrid_async_ids"])
         self.assertTrue(status["hybrid_async_ids_verified"])
@@ -375,8 +375,9 @@ class LocalAppTests(unittest.TestCase):
         self.runtime.stop()
         missing = self.root / "hybrid-no-async-ids.gguf"
         write_metadata(missing, HYBRID_METADATA)
-        self.request("POST", "/api/v1/model/load", {"model": str(missing)})
-        status = self.wait_state("error")
+        with mock.patch.object(self.runtime, "load_timeout", 0.4):
+            self.request("POST", "/api/v1/model/load", {"model": str(missing)})
+            status = self.wait_state("error")
         self.assertFalse(status["hybrid_verified"])
         self.assertIn("async-ids", status["error"])
         self.runtime.stop()
