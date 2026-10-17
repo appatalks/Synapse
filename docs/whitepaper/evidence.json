@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "title": "SYNAPSE: Model-Agnostic Hybrid MoE Inference",
+  "subtitle": "Architecture, benchmark evidence, and validation limits",
+  "edition": "Technical white paper / research edition 1.0",
+  "publication_date": "2026-10-17",
+  "quality_qualified": false,
+  "peer_reviewed": false,
+  "application_baseline": "e601f9316745fe92a50b9790dde67ff8041f4516",
+  "research_evidence_snapshot": "934bbbf3c763dc77cb74ff2a4ceebd868f6f89ac",
+  "native_base_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "physical_cores": 16,
+    "logical_cpus": 32,
+    "gpu": "NVIDIA RTX 5070 Ti (16GB class)",
+    "usable_host_ram_gib": 123.48
+  },
+  "protocol": {
+    "context": 16384,
+    "generation_threads": 8,
+    "prompt_threads": 16,
+    "repetitions": 3,
+    "output_tokens": 512,
+    "temperature": 0,
+    "seed": 42,
+    "ignore_eos": true,
+    "cache_prompt": false,
+    "speculation": false
+  },
+  "headline_models": [
+    {
+      "model": "GPT-OSS-120B MXFP4",
+      "control_tok_s": 25.686796480825258,
+      "accelerated_tok_s": 39.463943953108156,
+      "control": "Standard automatic placement",
+      "cache_mib": 10240,
+      "initialization": "Trained residency seed",
+      "patch_sha256": "a0f61f4e86aa6468d9b76ed4c9ee801dbee30ff2ec034566e8f86cf25be472a1",
+      "source": {
+        "repository": "appatalks/unified-memory-scheduler",
+        "commit": "934bbbf3c763dc77cb74ff2a4ceebd868f6f89ac",
+        "path": "benchmarks/results/20261016-downloaded-model-matrix.json",
+        "sha256": "eda3189aa08eb11122a3d158e0f36f967a3bd89cbbd0e059256e224faa385d33",
+        "url": "https://github.com/appatalks/unified-memory-scheduler/blob/934bbbf3c763dc77cb74ff2a4ceebd868f6f89ac/benchmarks/results/20261016-downloaded-model-matrix.json"
+      },
+      "relative_gain_percent": 53.63513306366288,
+      "display_gain_percent": 54
+    },
+    {
+      "model": "Qwen3.8-Flash-Next IQ3_S",
+      "control_tok_s": 25.3941147905332,
+      "accelerated_tok_s": 43.87802320509431,
+      "control": "Native CPU experts / GPU backbone",
+      "cache_mib": 8192,
+      "initialization": "Empty causal bank",
+      "patch_sha256": "5dd780e3e0f3080bb3184d340b291f506918f44b42f586f086ac558c72ec7d12",
+      "source": {
+        "repository": "appatalks/unified-memory-scheduler",
+        "commit": "934bbbf3c763dc77cb74ff2a4ceebd868f6f89ac",
+        "path": "benchmarks/results/moe-cold-work-and-qwen38-summary.json",
+        "sha256": "b6e4cfa07b72f11ad2455cf0b97115022e8cc604b5f20cb7fd67574708bbc99d",
+        "url": "https://github.com/appatalks/unified-memory-scheduler/blob/934bbbf3c763dc77cb74ff2a4ceebd868f6f89ac/benchmarks/results/moe-cold-work-and-qwen38-summary.json"
+      },
+      "relative_gain_percent": 72.78815807138044,
+      "display_gain_percent": 73
+    },
+    {
+      "model": "GLM-4.5-Air IQ4_XS",
+      "control_tok_s": 12.669915132208427,
+      "accelerated_tok_s": 17.282220967715933,
+      "control": "Fastest observed non-hybrid control",
+      "cache_mib": 6144,
+      "initialization": "Empty causal bank",
+      "patch_sha256": "961544562fa0f9c45c1b5ee71e91196d693b01285572c40197c5c260df07319b",
+      "source": {
+        "repository": "appatalks/Synapse",
+        "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
+        "path": "docs/benchmarks/glm45-air-iq4-xs.json",
+        "sha256": "eb15af2451e298d985bb171808ac2bcab66f585908947c1ec839ca7034215cb5",
+        "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/glm45-air-iq4-xs.json",
+        "local_record": "docs/benchmarks/glm45-air-iq4-xs.json"
+      },
+      "relative_gain_percent": 36.4036048180187,
+      "display_gain_percent": 36
+    },
+    {
+      "model": "Qwen3.6-35B-A3B Q8_0",
+      "control_tok_s": 45.49807516933567,
+      "accelerated_tok_s": 77.9933891011198,
+      "control": "Standard automatic placement",
+      "cache_mib": 8192,
+      "initialization": "Empty causal bank",
+      "patch_sha256": "961544562fa0f9c45c1b5ee71e91196d693b01285572c40197c5c260df07319b",
+      "source": {
+        "repository": "appatalks/Synapse",
+        "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
+        "path": "docs/benchmarks/qwen36-q8.json",
+        "sha256": "bc2944a71175a89357e48300303542e368390213ea3a27d260cefff15e50c397",
+        "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/qwen36-q8.json",
+        "local_record": "docs/benchmarks/qwen36-q8.json"
+      },
+      "relative_gain_percent": 71.42129378186308,
+      "display_gain_percent": 71
+    }
+  ],
+  "mistral_research_only": {
+    "headline_eligible": false,
+    "native_equivalence_passed": false,
+    "medians": {
+      "native": 21.086659240633303,
+      "standard-fp32": 23.95672742475713,
+      "hybrid": 33.00671778188857
+    },
+    "source": {
+      "repository": "appatalks/Synapse",
+      "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
+      "path": "docs/benchmarks/mistral4-native-experimental.json",
+      "sha256": "2e17d10c2ececc2ffa6deb20fc7fcd6c619219e77bc9c37963a702e657e95f42",
+      "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/mistral4-native-experimental.json",
+      "local_record": "docs/benchmarks/mistral4-native-experimental.json"
+    }
+  },
+  "memory_path_control": {
+    "mapped_lru_tok_s": 17.309001682795277,
+    "copied_lru_tok_s": 29.36183642571807,
+    "source": {
+      "repository": "appatalks/Synapse",
+      "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
+      "path": "docs/benchmarks/upstream-pr29887-gpt120b.json",
+      "sha256": "5141b97376f4aa03bd99abab0eea787dfeb71f692b1415203495464441fd72a7",
+      "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/upstream-pr29887-gpt120b.json",
+      "local_record": "docs/benchmarks/upstream-pr29887-gpt120b.json"
+    }
+  },
+  "strict_native_gates": {
+    "maximum_absolute_logit_error": 0.01,
+    "relative_l2": 0.001
+  },
+  "evidence_policy": "Project-reported technical screens. No universal speedup, native equivalence, broad quality, or hardware-optimality claim."
+}

@@ -48,3 +48,8 @@ jobs:
           python -m pip wheel --no-deps --wheel-dir dist .
           python -m pip install --no-deps --no-index --find-links dist synapse-local
           python -I -m synapse_app --version
+      - name: White-paper evidence and PDF contracts
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: |
+          python -m pip install -e '.[paper]'
+          python tests/test_whitepaper.py

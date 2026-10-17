@@ -7,6 +7,10 @@ OpenAI-compatible API into one small app. Its optional experimental MoE engine
 keeps frequently used experts on the GPU and executes cold experts on the CPU,
 instead of forcing every operation through the same placement strategy.
 
+For the architecture, methods, benchmark evidence and qualification limits,
+read the [technical white paper (PDF)](docs/whitepaper/synapse-whitepaper.pdf).
+[Editable sources and offline build instructions](docs/whitepaper/README.md) are included.
+
 ## Why use it?
 
 Our research has demonstrated substantially faster generation on four

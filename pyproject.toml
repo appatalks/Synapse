@@ -19,6 +19,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+paper = ["reportlab>=4.0,<5", "pypdf>=4,<7"]
+
 [project.scripts]
 synapse = "synapse_app.app:main"
 
