@@ -113,11 +113,11 @@ def main():
             receipt_file.chmod(0o600)
         command = [sys.executable, str(target), *backend_args]
         if sys.platform == "win32":
-            text = "@rem # SYNAPSE managed launcher\n@" + subprocess.list2cmdline(command) + " %*\n"
+            text = "@rem # SYNAPSE managed launcher\n@chcp 65001 >nul\n@" + subprocess.list2cmdline(command) + " %*\n"
         else:
             text = "#!/usr/bin/env bash\n# SYNAPSE managed launcher\nexec " + shlex.join(command) + ' "$@"\n'
         launcher_temp = launcher.with_suffix(".part")
-        with launcher_temp.open("x") as stream:
+        with launcher_temp.open("x", encoding="utf-8") as stream:
             stream.write(text)
         launcher_temp.chmod(0o755)
         os.replace(launcher_temp, launcher)
