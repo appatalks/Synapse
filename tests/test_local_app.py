@@ -127,6 +127,56 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(code, 503)
         self.assertIn(b"--llama-server", body)
 
+    def test_model_browser_only_lists_folders_and_gguf_files(self):
+        (self.root / "nested folder").mkdir()
+        (self.root / "ignored.txt").write_text("private contents must not be returned")
+        (self.root / ".hidden.gguf").write_bytes(b"GGUF")
+        code, _, body = self.request("POST", "/api/v1/models/browse", {"path": str(self.root)})
+        self.assertEqual(code, 200, body)
+        data = json.loads(body)
+        self.assertEqual(data["path"], str(self.root))
+        self.assertEqual([e["name"] for e in data["entries"]], ["nested folder", self.model.name])
+        self.assertTrue(data["entries"][0]["directory"])
+        self.assertFalse(data["entries"][1]["directory"])
+        self.assertNotIn(b"private contents", body)
+        self.assertNotIn(b"GGUF-test-model", body)
+        self.assertFalse(data["truncated"])
+        self.assertIsNone(self.runtime.process)
+        code, _, body = self.request("POST", "/api/v1/models/browse", {"path": str(self.model)})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)["path"], str(self.root))
+
+    def test_model_browser_validates_paths_permissions_and_request_guard(self):
+        for value in ("", "relative/folder", True, 5, [], "x" * 4097):
+            with self.subTest(value=str(value)[:30]):
+                self.assertEqual(self.request("POST", "/api/v1/models/browse", {"path": value})[0], 400)
+        self.assertEqual(self.request("POST", "/api/v1/models/browse", {"unknown": 1})[0], 400)
+        self.assertEqual(self.request("POST", "/api/v1/models/browse", {"path": str(self.root / "absent")})[0], 404)
+        with mock.patch.object(app.os, "scandir", side_effect=PermissionError("denied")):
+            self.assertEqual(self.request("POST", "/api/v1/models/browse", {"path": str(self.root)})[0], 403)
+        with mock.patch.object(Path, "home", return_value=self.root):
+            code, _, body = self.request("POST", "/api/v1/models/browse", {})
+            self.assertEqual(code, 200)
+            self.assertEqual(json.loads(body)["path"], str(self.root))
+        self.assertEqual(self.request("POST", "/api/v1/models/browse", {},
+                                     {"Origin": "https://untrusted.invalid"})[0], 403)
+        root = Path(self.root.anchor)
+        with mock.patch.object(app.os, "scandir") as scan:
+            scan.return_value.__enter__.return_value = iter([])
+            self.assertIsNone(app.browse_models(str(root))["parent"])
+
+    def test_model_browser_listing_is_bounded_and_surfaces_truncation(self):
+        entry = mock.Mock(name="entry")
+        entry.name = "model.gguf"
+        entry.is_dir.return_value = False
+        entry.is_file.return_value = True
+        with mock.patch.object(app.os, "scandir") as scan:
+            scan.return_value.__enter__.return_value = iter([entry] * 5000)
+            data = app.browse_models(str(self.root))
+        self.assertEqual(len(data["entries"]), 512)
+        self.assertTrue(data["truncated"])
+        self.assertEqual(entry.is_dir.call_count, 4096)
+
     def test_load_models_api_and_unload(self):
         status = self.load()
         self.assertEqual(status["model"], str(self.model))

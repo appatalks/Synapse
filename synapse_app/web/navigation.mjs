@@ -1,5 +1,4 @@
 export const views = {
-  run: ["Run a model", "Start with a local model. Nothing to upload."],
   chat: ["Chat", "A direct conversation with the model on your machine."],
   monitor: ["Monitor", "Live performance, hardware and context. One clear view."],
   connect: ["Connect an app", "Your local model, available to your favorite tools."],
@@ -7,7 +6,7 @@ export const views = {
 
 export function viewForHash(hash) {
   const name = String(hash).replace(/^#/, "");
-  return Object.hasOwn(views, name) ? name : "run";
+  return Object.hasOwn(views, name) ? name : "chat";
 }
 
 export function navigate(hash = window.location.hash) {

@@ -11,9 +11,8 @@ No account. No hosted inference. No model uploads.
 
 ## What you get
 
-- **Run a model:** start and stop your own llama.cpp backend with explicit model and resource settings.
-- **Chat:** streamed answers and reasoning, cancellation, output budgets, and backend-reported speed.
-- **Monitor:** graphs for tok/s, GPU load, VRAM, temperature, power, PCIe, CPU, RAM, read I/O and context fill.
+- **Chat:** streamed answers and reasoning, with a **Model Controls** pop-up for local model browsing, loading, resource settings, output budgets and reasoning effort.
+- **Monitor:** live tok/s, combined CPU/GPU load, VRAM, temperature, power, PCIe and read I/O, plus RAM/context pie charts.
 - **Connect an app:** a loopback OpenAI-compatible models/chat API for your local tools.
 
 The app uses Python's standard library and a browser. Missing sensors are labeled
@@ -32,8 +31,9 @@ python SYNAPSE.pyz --llama-server /path/to/llama-server
 ```
 
 On Windows, use `py SYNAPSE.pyz --llama-server C:\path\to\llama-server.exe`.
-Your browser opens at `http://127.0.0.1:8080`. Choose a model in **Run a model**,
-then open **Chat**, **Monitor**, or **Connect an app** in the sidebar.
+Your browser opens at `http://127.0.0.1:8080` in **Chat**. Open **Model Controls**
+to browse for a local GGUF or enter its path, then load it.
+Use the sidebar to switch between **Chat**, **Monitor**, and **Connect an app**.
 Stop with **Ctrl+C** to unload the backend. Navigation preserves your chat; refreshing does not.
 
 Prefer an isolated install? Download the release wheel and run:
@@ -77,6 +77,9 @@ CPU/GPU MoE dispatcher is **Linux/NVIDIA research software**, not installed by t
 package, and still has unresolved diagnostic/answer checks. Its benefits are
 model- and workload-dependent. Speculation is off by default. No universal
 speedup, model-fit guarantee, or 60 tok/s promise is made.
+
+Experimental-engine details and warnings are collected in **Monitor**, not repeated
+above every conversation. Model/backend failures remain visible wherever you are.
 
 The API is local-only and has no app authentication. **Do not expose it through
 a tunnel or reverse proxy.** Check important model answers independently.

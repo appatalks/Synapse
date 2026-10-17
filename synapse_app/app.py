@@ -86,6 +86,45 @@ class AppError(Exception):
         self.status = status
 
 
+def browse_models(value: object = None) -> dict:
+    if value is not None and (not isinstance(value, str) or not value.strip() or len(value) > 4096):
+        raise AppError(400, "Enter a local folder path or leave it unspecified to start at Home.")
+    try:
+        folder = Path.home() if value is None else Path(value).expanduser()
+        if not folder.is_absolute():
+            raise AppError(400, "Use an absolute local folder path.")
+        folder = folder.resolve(strict=True)
+        if folder.is_file() and folder.suffix.lower() == ".gguf":
+            folder = folder.parent
+        if not folder.is_dir():
+            raise AppError(400, "Choose a folder or a local GGUF model.")
+        entries = []
+        scanned, truncated = 0, False
+        with os.scandir(folder) as iterator:
+            for entry in iterator:
+                scanned += 1
+                if scanned > 4096:
+                    truncated = True
+                    break
+                if entry.name.startswith("."):
+                    continue
+                directory = entry.is_dir()
+                if directory or entry.name.lower().endswith(".gguf") and entry.is_file():
+                    entries.append({"name": entry.name, "path": str(folder / entry.name),
+                                    "directory": directory})
+        entries.sort(key=lambda entry: (not entry["directory"], entry["name"].casefold(), entry["name"]))
+        truncated = truncated or len(entries) > 512
+        return {"path": str(folder), "parent": str(folder.parent) if folder.parent != folder else None,
+                "home": str(Path.home()), "root": folder.anchor, "entries": entries[:512],
+                "truncated": truncated}
+    except FileNotFoundError as exc:
+        raise AppError(404, "That folder no longer exists. Check the path and try again.") from exc
+    except PermissionError as exc:
+        raise AppError(403, "SYNAPSE does not have permission to browse that folder.") from exc
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AppError(400, f"Cannot browse this folder: {exc}") from exc
+
+
 def readable_gguf(value: object, label: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise AppError(400, f"Enter the path to a local GGUF {label.lower()}.")
@@ -1096,6 +1135,11 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "POST" and path == "/api/v1/model/load":
                 self.server.runtime.load(self._body())
                 self._json(202, self.server.runtime.status())
+            elif method == "POST" and path == "/api/v1/models/browse":
+                data = self._body()
+                if set(data) - {"path"}:
+                    raise AppError(400, "Model browsing accepts only a local folder path.")
+                self._json(200, browse_models(data.get("path")))
             elif method == "POST" and path == "/api/v1/model/unload":
                 self._body()
                 self.server.runtime.stop()

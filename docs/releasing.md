@@ -14,6 +14,8 @@ python -m synapse_app --llama-server /path/to/llama-server
 Python 3.10+ is the only application runtime dependency. A recent compatible
 llama.cpp server, GPU driver where applicable, and user-provided GGUF weights
 are separate requirements. No backend/model downloads happen during installation.
+The loopback app listener does not perform reverse DNS during startup; local
+name-service problems must not delay opening the UI or checking backend health.
 
 ## Validate and build
 

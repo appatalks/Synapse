@@ -5,10 +5,10 @@ const sum = (devices, key) => devices.length && devices.every((d) => valid(d[key
   ? devices.reduce((total, d) => total + d[key], 0) : null;
 
 export const metrics = [
-  ["speed", "Generation speed", "tok/s"], ["gpu", "GPU load", "%"],
+  ["speed", "Generation speed", "tok/s"], ["load", "CPU & GPU load", "%"],
   ["vram", "VRAM", "GiB"], ["temperature", "GPU temperature", "C"],
   ["power", "GPU power", "W"], ["pcie", "PCIe throughput", "MiB/s"],
-  ["cpu", "CPU load", "%"], ["ram", "System RAM", "GiB"],
+  ["ram", "System RAM", "GiB"],
   ["disk", "Disk read", "MiB/s"], ["context", "Context fill", "%"],
 ];
 
@@ -26,6 +26,8 @@ export function readings(sample, selection = "all") {
         : b.speed_source === "backend_final_timings" ? "Completed decode average"
           : valid(b.last_tokens_per_second) ? `Idle · last decode ${b.last_tokens_per_second.toFixed(1)} tok/s` : "No generation yet" },
     gpu: { value: load === null ? null : load / devices.length, max: 100, note: devices.length > 1 ? "Average across selected GPUs" : "Device-wide load" },
+    load: { value: s.cpu_percent, secondary: load === null ? null : load / devices.length, max: 100,
+      note: valid(b.cpu_logical_cores) ? `System CPU · backend ${b.cpu_logical_cores.toFixed(1)} cores · device-wide GPU` : "System CPU and selected device-wide GPU" },
     vram: { value: used === null ? null : used / gib, max: total === null ? null : total / gib,
       note: total === null ? "NVIDIA memory counter" : `of ${(total / gib).toFixed(1)} GiB · all apps` },
     temperature: { value: temps.length && temps.every(valid) ? Math.max(...temps) : null, max: 100, note: devices.length > 1 ? "Hottest selected GPU" : "GPU sensor" },
@@ -58,6 +60,10 @@ export function segments(values, maximum) {
   return result;
 }
 
+export function fraction(value, maximum) {
+  return valid(value) && valid(maximum) && maximum > 0 ? Math.min(1, value / maximum) : null;
+}
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -82,17 +88,20 @@ export class MonitorView {
     this.status = document.getElementById("monitor-status");
     this.error = document.getElementById("monitor-error");
     for (const [key, title, unit] of metrics) {
+      const pie = key === "ram" || key === "context";
       const card = element("article", "card metric");
       card.dataset.metric = key;
+      card.classList.toggle("pie-metric", pie);
       const value = element("div", "metric-value", "Sampling...");
       const description = element("p", "metric-description");
-      const chart = svg("svg", { viewBox: "0 0 100 42", preserveAspectRatio: "none",
+      const chart = svg("svg", { viewBox: pie ? "0 0 120 120" : "0 0 100 42",
+        preserveAspectRatio: pie ? "xMidYMid meet" : "none",
         role: "img", "aria-label": `${title} history; waiting for samples` });
       const scale = element("div", "chart-scale");
       scale.append(element("span", "", "0"), element("span", "", unit));
       card.append(element("h3", "", title), value, description, chart, scale);
       document.getElementById("monitor-cards").append(card);
-      this.cards[key] = { card, value, description, chart, scale, title, unit };
+      this.cards[key] = { card, value, description, chart, scale, title, unit, pie };
     }
     this.gpu.addEventListener("change", () => this.render());
     document.getElementById("monitor-pause").addEventListener("click", (event) => {
@@ -161,11 +170,35 @@ export class MonitorView {
     for (const [key, view] of Object.entries(this.cards)) {
       const reading = values[key];
       const value = reading.value;
-      view.card.classList.toggle("unavailable", !valid(value));
-      view.value.replaceChildren(document.createTextNode(valid(value)
-        ? value.toFixed(key === "temperature" || key === "power" ? 0 : 1) : "Unavailable"));
-      if (valid(value)) view.value.append(element("small", "", view.unit));
+      const available = valid(value) || key === "load" && valid(reading.secondary);
+      view.card.classList.toggle("unavailable", !available);
+      if (key === "load") {
+        view.value.replaceChildren();
+        for (const [label, number, style] of [["CPU", value, "cpu-value"], ["GPU", reading.secondary, "gpu-value"]]) {
+          const stat = element("span", style, valid(number) ? `${number.toFixed(1)}%` : "Unavailable");
+          stat.prepend(element("small", "", label));
+          view.value.append(stat);
+        }
+      } else {
+        view.value.replaceChildren(document.createTextNode(valid(value)
+          ? value.toFixed(key === "temperature" || key === "power" ? 0 : 1) : "Unavailable"));
+        if (valid(value)) view.value.append(element("small", "", view.unit));
+      }
       view.description.textContent = reading.note;
+      if (view.pie) {
+        const part = fraction(value, reading.max);
+        const label = part === null ? "Unavailable" : `${(part * 100).toFixed(1)}%`;
+        view.chart.replaceChildren(svg("circle", { cx: 60, cy: 60, r: 44, class: "pie-track" }));
+        if (part !== null) view.chart.append(svg("circle", { cx: 60, cy: 60, r: 44, pathLength: 100,
+          "stroke-dasharray": `${part * 100} 100`, transform: "rotate(-90 60 60)", class: "pie-used" }));
+        const text = svg("text", { x: 60, y: 64, "text-anchor": "middle", class: "pie-label" });
+        text.textContent = label;
+        view.chart.append(text);
+        view.chart.setAttribute("aria-label", `${view.title}: ${label} used; ${reading.note}`);
+        view.scale.firstChild.textContent = "Used";
+        view.scale.lastChild.textContent = part === null ? "Available: unknown" : `${((1 - part) * 100).toFixed(1)}% available`;
+        continue;
+      }
       const all = this.history.map((sample) => readings(sample, this.gpu.value)[key]);
       const maximum = Math.max(1, reading.max || 0, ...all.flatMap((r) =>
         [r.value, r.secondary].filter(valid)));
@@ -176,7 +209,10 @@ export class MonitorView {
             class: `chart-line${secondary ? " secondary-line" : ""}` }));
         }
       }
-      view.chart.setAttribute("aria-label", `${view.title}: ${valid(value) ? `${value.toFixed(1)} ${view.unit}` : "unavailable"}; ${this.history.length} historical samples`);
+      const summary = key === "load"
+        ? `CPU ${valid(value) ? value.toFixed(1) + "%" : "unavailable"}, GPU ${valid(reading.secondary) ? reading.secondary.toFixed(1) + "%" : "unavailable"}`
+        : valid(value) ? `${value.toFixed(1)} ${view.unit}` : "unavailable";
+      view.chart.setAttribute("aria-label", `${view.title}: ${summary}; ${this.history.length} historical samples`);
       view.scale.lastChild.textContent = `${maximum.toFixed(1)} ${view.unit}`;
     }
   }

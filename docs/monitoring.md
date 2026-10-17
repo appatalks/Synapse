@@ -4,6 +4,13 @@ SYNAPSE keeps at most 300 one-second samples in memory. There is no telemetry
 upload or disk history. Opening Monitor does not restart a model or clear a chat.
 Pausing charts pauses display updates, not sampling.
 
+CPU and GPU load share one history graph with independently labeled values:
+mint is whole-machine CPU, blue is the selected device-wide GPU load. They
+are not added into a misleading utilization total. System RAM and context
+fill use live used/available doughnut pie charts, not historical line charts.
+Missing capacity or usage leaves an explicitly unavailable ring.
+Experimental-engine details and warnings live on this tab.
+
 | Counter | Scope and source |
 | --- | --- |
 | Generation speed | Backend timings, including reasoning, or a rolling difference of actual accepted-output token counters. Never text-length estimates. |
@@ -36,3 +43,24 @@ The loopback-only `/api/v1/monitor?after=N` endpoint supplies incremental,
 bounded numeric samples. It never returns prompts, generated text, token IDs,
 backend credentials or raw slot responses. Model reload resets request metrics;
 historical points retain their own context denominator.
+
+## Model Controls and browsing
+
+Chat is the default page. **Model Controls** opens a keyboard-accessible dialog
+for loading/unloading, runtime settings, max output tokens and reasoning effort.
+Closing it preserves the settings; they apply to the next message. Runtime
+selection stays locked while a model is loaded, and generation settings cannot
+change during a browser request.
+
+**Browse models** lists local folders and GGUF filenames with Home, parent and
+root navigation. Selecting a model fills its absolute path; it does not upload
+or read the model into the browser. Hidden dotfiles are excluded. Each request
+examines at most 4,096 entries and displays at most 512 matches, with an explicit
+truncation notice. Enter a more specific folder to narrow a large listing.
+Filesystem permissions are respected, and missing/inaccessible folders are
+reported instead of appearing empty. You can still supply a direct model path,
+including another Windows drive's folder.
+
+The guarded local `POST /api/v1/models/browse` endpoint accepts `{"path":"..."}`
+or `{}` for Home. It returns directory/file names and paths, never file contents.
+Like the rest of the local API, it must not be exposed to remote users.

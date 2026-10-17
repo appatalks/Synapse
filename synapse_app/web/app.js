@@ -10,10 +10,14 @@ let controller = null;
 let actionPending = false;
 let history = [];
 let settingsInitialized = false;
+let browserLocation = null;
+let browserBusy = false;
 
 function notice(message = "") {
   el("notice").textContent = message;
   el("notice").hidden = !message;
+  el("controls-notice").textContent = message;
+  el("controls-notice").hidden = !message;
 }
 
 async function request(path, body) {
@@ -36,6 +40,12 @@ function controls() {
   el("clear").disabled = !!controller;
   el("max-output").disabled = !!controller;
   el("reasoning-effort").disabled = !!controller;
+  el("browse-models").disabled = active || actionPending || browserBusy;
+  for (const button of el("model-browser").querySelectorAll("button")) {
+    button.disabled = active || actionPending || browserBusy;
+  }
+  el("browser-path").disabled = active || actionPending || browserBusy;
+  if (browserLocation && !browserLocation.parent) el("browser-up").disabled = true;
   for (const id of ["model", "context", "placement", "cpu-threads", "batch-threads", "cpu-poll", "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target", "draft-model", "draft-tokens"]) {
     el(id).disabled = active || actionPending;
   }
@@ -104,7 +114,8 @@ function renderStatus() {
   el("app-version").textContent = `v${status.app_version || "0.1.0rc1"} · Release candidate`;
   el("sidebar-model").textContent = status.model ? status.model.split(/[\\/]/).at(-1) : "No model loaded";
   el("connection-state").textContent = status.state === "ready" ? "Ready. Your apps can connect now."
-    : "No model is ready. Load a model in Run a model before sending API requests.";
+    : "No model is ready. Open Chat → Model Controls to load a model before sending API requests.";
+  el("controls-action-status").textContent = labels[status.state] || status.state;
   el("model-status").textContent = status.model || "No model loaded.";
   el("run-status").textContent = status.model
     ? `${status.backend_kind}${experimental || hybrid ? " (experimental)" : ""} · ${hybrid ? `Hybrid ${transfer}${status.hybrid_verified ? " (activation verified)" : " (verifying activation)"}` : status.placement === "cpu" ? "CPU only" : "Automatic placement"} · ${status.context.toLocaleString()} context · ${status.cpu_threads} generation / ${status.batch_threads} prompt threads · ${status.load_mode} loading · ${status.expert_cache_mib} MiB ${hybrid ? "resident expert bank · fitting off" : `expert cache · ${status.fit_target_mib} MiB reserve`} · polling ${status.cpu_poll} · host-op offload ${status.host_op_offload ? "on" : "off"} (min batch ${status.op_offload_min_batch})${status.draft_model ? ` · DFlash (${status.draft_tokens} draft tokens)` : ""}`
@@ -156,11 +167,84 @@ function renderStatus() {
 
 function contextNote() {
   el("context-note").textContent = status?.state === "ready" && Number(el("max-output").value) > status.context
-    ? `Loaded context: ${status.context.toLocaleString()} tokens. This may stop generation before the output budget is reached. Unload and reload with a larger context in Run settings.`
+    ? `Loaded context: ${status.context.toLocaleString()} tokens. This may stop generation before the output budget is reached. Unload and reload with a larger context in Run settings below.`
     : "";
 }
 
 el("max-output").addEventListener("input", contextNote);
+el("open-controls").addEventListener("click", () => el("model-controls").showModal());
+el("close-controls").addEventListener("click", () => el("model-controls").close());
+el("model-controls").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    el("model-controls").close();
+  }
+});
+
+async function browseModels(path) {
+  if (browserBusy || el("browse-models").disabled) return;
+  browserBusy = true;
+  el("model-browser").hidden = false;
+  el("browser-status").textContent = "Reading local folder...";
+  el("browser-error").hidden = true;
+  el("browser-files").replaceChildren();
+  controls();
+  try {
+    const data = await request("/api/v1/models/browse", path ? { path } : {});
+    browserLocation = data;
+    el("browser-path").value = data.path;
+    for (const entry of data.entries) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "file-entry";
+      const kind = document.createElement("span");
+      kind.className = "file-kind";
+      kind.textContent = entry.directory ? "FOLDER" : "GGUF";
+      const name = document.createElement("span");
+      name.textContent = entry.name;
+      button.append(kind, name);
+      button.addEventListener("click", () => {
+        if (entry.directory) browseModels(entry.path);
+        else {
+          el("model").value = entry.path;
+          el("model-browser").hidden = true;
+          el("model").focus();
+        }
+      });
+      item.append(button);
+      el("browser-files").append(item);
+    }
+    el("browser-status").textContent = data.truncated
+      ? "This folder is large. Showing a bounded selection; enter a more specific folder path to narrow it."
+      : `${data.entries.length} folders / GGUF files${data.entries.length ? "" : " — no models here"}. Select a GGUF to use its path.`;
+  } catch (error) {
+    el("browser-status").textContent = "Folder could not be opened.";
+    el("browser-error").textContent = error.message;
+    el("browser-error").hidden = false;
+  } finally {
+    browserBusy = false;
+    controls();
+  }
+}
+
+el("browse-models").addEventListener("click", () => browseModels(el("model").value.trim() || undefined));
+el("close-browser").addEventListener("click", () => {
+  el("model-browser").hidden = true;
+  el("browse-models").focus();
+});
+el("browser-go").addEventListener("click", () => browseModels(el("browser-path").value.trim()));
+el("browser-home").addEventListener("click", () => browseModels());
+el("browser-root").addEventListener("click", () => browseModels(browserLocation?.root));
+el("browser-up").addEventListener("click", () => {
+  if (browserLocation?.parent) browseModels(browserLocation.parent);
+});
+el("browser-path").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    browseModels(el("browser-path").value.trim());
+  }
+});
 el("execution-mode").addEventListener("change", () => {
   if (el("execution-mode").value !== "auto") {
     const hybrid = el("execution-mode").value === "hybrid";
@@ -258,9 +342,12 @@ el("load-form").addEventListener("submit", async (event) => {
       : settings;
     status = await request("/api/v1/model/load", payload);
     clearChat();
+    el("model-browser").hidden = true;
+    el("model-controls").close();
     renderStatus();
   } catch (error) {
     notice(error.message);
+    el("controls-action-status").textContent = error.message;
   } finally {
     actionPending = false;
     controls();
@@ -277,6 +364,7 @@ el("unload").addEventListener("click", async () => {
     renderStatus();
   } catch (error) {
     notice(error.message);
+    el("controls-action-status").textContent = error.message;
   } finally {
     actionPending = false;
     controls();
@@ -288,7 +376,7 @@ function clearChat() {
   el("messages").replaceChildren();
   const empty = document.createElement("p");
   empty.id = "empty";
-  empty.textContent = "Start a new conversation. Your chat is not saved.";
+  empty.textContent = "Start a new conversation. Open Model Controls to load a model or adjust generation. Your chat is not saved.";
   el("messages").append(empty);
   el("timing").textContent = "";
 }

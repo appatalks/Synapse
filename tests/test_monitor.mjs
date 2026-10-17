@@ -3,17 +3,17 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 const web = existsSync(new URL("../synapse_app/web/", import.meta.url))
   ? "../synapse_app/web/" : "../tools/vrambridge/web/";
-const { readings, segments, metrics } = await import(new URL(`${web}monitor.mjs`, import.meta.url));
+const { readings, segments, metrics, fraction } = await import(new URL(`${web}monitor.mjs`, import.meta.url));
 const { viewForHash } = await import(new URL(`${web}navigation.mjs`, import.meta.url));
 
 test("navigation accepts only existing views", () => {
-  for (const view of ["run", "chat", "monitor", "connect"]) assert.equal(viewForHash(`#${view}`), view);
-  for (const view of ["", "#", "#constructor", "#<script>", "#unknown"]) assert.equal(viewForHash(view), "run");
+  for (const view of ["chat", "monitor", "connect"]) assert.equal(viewForHash(`#${view}`), view);
+  for (const view of ["", "#", "#run", "#constructor", "#<script>", "#unknown"]) assert.equal(viewForHash(view), "chat");
 });
 
 test("all requested monitors plus RAM are present", () => {
   assert.deepEqual(metrics.map(([key]) => key),
-    ["speed", "gpu", "vram", "temperature", "power", "pcie", "cpu", "ram", "disk", "context"]);
+    ["speed", "load", "vram", "temperature", "power", "pcie", "ram", "disk", "context"]);
 });
 
 test("real numeric units and multi-GPU aggregation", () => {
@@ -26,6 +26,8 @@ test("real numeric units and multi-GPU aggregation", () => {
   gpus: [{ ...gpu, index: 0 }, { ...gpu, index: 1, load_percent: 80, temperature_c: 60 }] };
   const all = readings(sample);
   assert.equal(all.gpu.value, 60);
+  assert.equal(all.load.value, 20);
+  assert.equal(all.load.secondary, 60);
   assert.equal(all.vram.value, 4);
   assert.equal(all.vram.max, 16);
   assert.equal(all.temperature.value, 60);
@@ -62,4 +64,23 @@ test("short generations retain a completed-rate sample before going idle", () =>
     tokens_per_second: 123.5, last_tokens_per_second: 123.5, speed_source: "backend_final_timings" } };
   assert.equal(readings(sample).speed.value, 123.5);
   assert.equal(readings(sample).speed.note, "Completed decode average");
+});
+
+test("pie fractions handle zero, full capacity and unavailable totals", () => {
+  assert.equal(fraction(0, 128), 0);
+  assert.equal(fraction(32, 128), 0.25);
+  assert.equal(fraction(128, 128), 1);
+  assert.equal(fraction(256, 128), 1);
+  for (const [value, total] of [[null, 128], [32, null], [0, 0], [NaN, 1], [-1, 1]]) {
+    assert.equal(fraction(value, total), null);
+  }
+});
+
+test("combined load keeps CPU when GPU sensors are unavailable", () => {
+  const load = readings({ system: {cpu_percent: 24}, gpus: [] }).load;
+  assert.equal(load.value, 24);
+  assert.equal(load.secondary, null);
+  const gpuOnly = readings({ system: {}, gpus: [{index:0, load_percent: 30}] }).load;
+  assert.equal(gpuOnly.value, undefined);
+  assert.equal(gpuOnly.secondary, 30);
 });
