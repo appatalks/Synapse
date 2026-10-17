@@ -7,7 +7,7 @@ Pausing charts pauses display updates, not sampling.
 CPU and GPU load share one history graph with independently labeled values:
 mint is whole-machine CPU, blue is the selected device-wide GPU load. They
 are not added into a misleading utilization total. System RAM and context
-fill use live used/available doughnut pie charts, not historical line charts.
+fill use live doughnut pie charts, not historical line charts.
 Missing capacity or usage leaves an explicitly unavailable ring.
 Experimental-engine details and warnings live on this tab.
 
@@ -17,11 +17,21 @@ Experimental-engine details and warnings live on this tab.
 | GPU load / VRAM / temperature / power | Installed NVIDIA driver's NVML, per GPU or aggregated. Device-wide, including other apps. Missing individual counters remain unavailable. |
 | PCIe | NVML RX/TX snapshots, converted from driver KB/s counters with a 1024-byte unit. RX is into the GPU; TX is out. Short driver measurement windows can miss bursts; this is not a transfer integral or bus utilization percentage. |
 | CPU | Whole-machine OS CPU-time deltas. Backend logical-core use is shown separately. Windows systems with more than 64 processors may report the calling processor group's load. |
-| System RAM | OS total minus available. macOS available memory is estimated as free plus inactive pages, not a memory-pressure measurement. |
+| System RAM | Linux/macOS physical occupancy (total minus free), including cache. Windows uses OS-unavailable RAM (total minus OS availability). Cache/buffers, backend RSS and OS availability are separate values and overlap. |
 | Disk read | Backend process read-counter deltas. Linux uses physical `read_bytes`; macOS uses `ri_diskio_bytesread`. Windows counts process read transfers, which can include cached/non-disk I/O. |
 | Context fill | Backend slot-token occupancy divided by actual context size. When slots are unsupported, reported input + output usage is labeled as an estimate. It is not the physical KV-cache byte allocation. |
 
 ## Release-candidate targets
+
+File-backed model weights are resident RAM even when Linux counts them in its
+reclaimable page cache. A low `total - MemAvailable` value does not mean the
+model is not using RAM. The RAM pie therefore shows physical occupancy where
+the OS provides a separate free-page counter, while keeping the original
+OS-available value and pressure estimate separate in the API. macOS availability
+is estimated as free plus inactive pages. Driver-pinned pages can make
+OS-reported availability optimistic; it is not a safe-allocation guarantee.
+Backend RSS and cache overlap: adding them would double-count mapped model pages.
+Higher occupancy by itself is not evidence of faster generation.
 
 | Platform | Application / native backend | CPU, RAM, process read I/O | GPU sensors | Research hybrid engine |
 | --- | --- | --- | --- | --- |

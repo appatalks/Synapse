@@ -26,10 +26,16 @@ class TelemetryTests(unittest.TestCase):
         with mock.patch.object(telemetry.platform, "system", return_value="Linux"):
             probe = telemetry.SystemProbe()
         files = {"/proc/stat": "cpu 10 0 20 70 5 0 0 0\n",
-                 "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\n"}
+                 "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 100 kB\nCached: 300 kB\nBuffers: 10 kB\n"}
         with mock.patch.object(Path, "read_text", autospec=True, side_effect=lambda p: files[p.as_posix()]):
             self.assertEqual(probe.cpu(), (105, 75))
             self.assertEqual(probe.memory(), (1024000, 409600))
+            memory = probe.memory_details()
+            self.assertEqual(memory["occupied_bytes"], 900 * 1024)
+            self.assertEqual(memory["pressure_bytes"], 600 * 1024)
+            self.assertEqual(memory["cache_bytes"], 310 * 1024)
+            self.assertEqual(memory["free_bytes"], 100 * 1024)
+            self.assertEqual(memory["basis"], "physical_occupied")
 
     def test_native_process_and_memory_on_this_platform(self):
         probe = telemetry.SystemProbe()
@@ -42,14 +48,32 @@ class TelemetryTests(unittest.TestCase):
         self.assertGreater(total, 0)
         self.assertGreaterEqual(available, 0)
         self.assertLessEqual(available, total)
+        memory = probe.memory_details()
+        self.assertGreaterEqual(memory["occupied_bytes"], 0)
+        self.assertLessEqual(memory["occupied_bytes"], memory["total_bytes"])
+        self.assertEqual(memory["pressure_bytes"], memory["total_bytes"] - memory["available_bytes"])
         total_cpu, idle = probe.cpu()
         self.assertGreater(total_cpu, 0)
         self.assertLessEqual(idle, total_cpu)
 
+    def test_missing_or_invalid_memory_counters_are_errors_not_empty_or_clamped_usage(self):
+        with mock.patch.object(telemetry.platform, "system", return_value="Linux"):
+            probe = telemetry.SystemProbe()
+        with mock.patch.object(Path, "read_text", return_value="MemTotal: 1000 kB\nMemAvailable: 400 kB\n"):
+            with self.assertRaises(KeyError):
+                probe.memory_details()
+        invalid = "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 1200 kB\nCached: 100 kB\nBuffers: 0 kB\n"
+        with mock.patch.object(Path, "read_text", return_value=invalid):
+            with self.assertRaisesRegex(ValueError, "inconsistent"):
+                probe.memory_details()
+
     def test_bounded_history_rates_restart_and_explicit_unavailable_gpu(self):
         probe = mock.Mock()
         probe.cpu.side_effect = [(100, 50), (200, 100), (300, 150)]
-        probe.memory.return_value = (8192, 4096)
+        probe.memory_details.return_value = {
+            "total_bytes": 8192, "available_bytes": 4096, "free_bytes": 1024,
+            "occupied_bytes": 7168, "cache_bytes": 4096, "pressure_bytes": 4096,
+            "basis": "physical_occupied"}
         backend = mock.Mock(side_effect=[
             {"pid": 10, "read_bytes": 0, "state": "ready"},
             {"pid": 10, "read_bytes": 2 * 1024 ** 2, "state": "ready"},
@@ -61,6 +85,9 @@ class TelemetryTests(unittest.TestCase):
             first, second, third = monitor.collect(), monitor.collect(), monitor.collect()
         self.assertIsNone(first["system"]["cpu_percent"])
         self.assertEqual(second["system"]["cpu_percent"], 50)
+        self.assertEqual(second["system"]["ram_used_bytes"], 7168)
+        self.assertEqual(second["system"]["ram_available_bytes"], 4096)
+        self.assertEqual(second["system"]["ram_cache_bytes"], 4096)
         self.assertEqual(second["system"]["disk_read_bytes_s"], 2 * 1024 ** 2)
         self.assertIsNone(third["system"]["disk_read_bytes_s"])
         self.assertIn("No GPU fixture", second["errors"]["gpu"])
@@ -79,7 +106,10 @@ class TelemetryTests(unittest.TestCase):
                                    "power_w": None, "errors": {"power_w": "Not supported"}}]
         probe = mock.Mock()
         probe.cpu.return_value = (100, 50)
-        probe.memory.return_value = (8192, 4096)
+        probe.memory_details.return_value = {
+            "total_bytes": 8192, "available_bytes": 4096, "free_bytes": 1024,
+            "occupied_bytes": 7168, "cache_bytes": 4096, "pressure_bytes": 4096,
+            "basis": "physical_occupied"}
         monitor = telemetry.HardwareMonitor(lambda: {"state": "stopped"})
         with mock.patch.object(telemetry, "system_probe", return_value=probe), \
                 mock.patch.object(telemetry, "NvidiaProbe", return_value=gpu):

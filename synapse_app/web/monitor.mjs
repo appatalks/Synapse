@@ -37,7 +37,14 @@ export function readings(sample, selection = "all") {
     cpu: { value: s.cpu_percent, max: 100, note: valid(b.cpu_logical_cores) ? `System · backend ${b.cpu_logical_cores.toFixed(1)} logical cores` : "Whole-machine CPU usage" },
     ram: { value: valid(s.ram_used_bytes) ? s.ram_used_bytes / gib : null,
       max: valid(s.ram_total_bytes) ? s.ram_total_bytes / gib : null,
-      note: valid(s.ram_total_bytes) ? `of ${(s.ram_total_bytes / gib).toFixed(1)} GiB · includes other apps` : "System memory" },
+      usedLabel: s.ram_basis === "physical_occupied" ? "Occupied incl. cache" : "OS-unavailable",
+      freeLabel: s.ram_basis === "physical_occupied" ? "free" : "OS available",
+      note: [
+        valid(s.ram_total_bytes) ? `${(s.ram_total_bytes / gib).toFixed(1)} GiB total` : "System memory",
+        valid(s.ram_cache_bytes) ? `cache/buffers ${(s.ram_cache_bytes / gib).toFixed(1)} GiB` : null,
+        valid(b.rss_bytes) ? `backend RSS ${(b.rss_bytes / gib).toFixed(1)} GiB (overlaps)` : null,
+        valid(s.ram_available_bytes) ? `OS available ${(s.ram_available_bytes / gib).toFixed(1)} GiB` : null,
+      ].filter(Boolean).join(" · ") },
     disk: { value: valid(s.disk_read_bytes_s) ? s.disk_read_bytes_s / mib : null, note: "Backend read I/O · see platform notes" },
     context: { value: context, max: 100, note: valid(b.context_used)
       ? `${Math.round(b.context_used).toLocaleString()} / ${b.context_total?.toLocaleString()} tokens · ${b.context_source === "backend_slot" ? "slot occupancy" : "usage estimate"}` : "Waiting for backend context counters" },
@@ -194,9 +201,10 @@ export class MonitorView {
         const text = svg("text", { x: 60, y: 64, "text-anchor": "middle", class: "pie-label" });
         text.textContent = label;
         view.chart.append(text);
-        view.chart.setAttribute("aria-label", `${view.title}: ${label} used; ${reading.note}`);
-        view.scale.firstChild.textContent = "Used";
-        view.scale.lastChild.textContent = part === null ? "Available: unknown" : `${((1 - part) * 100).toFixed(1)}% available`;
+        view.chart.setAttribute("aria-label", `${view.title}: ${label} ${reading.usedLabel || "used"}; ${reading.note}`);
+        view.scale.firstChild.textContent = reading.usedLabel || "Used";
+        view.scale.lastChild.textContent = part === null ? "Remaining: unknown"
+          : `${((1 - part) * 100).toFixed(1)}% ${reading.freeLabel || "available"}`;
         continue;
       }
       const all = this.history.map((sample) => readings(sample, this.gpu.value)[key]);

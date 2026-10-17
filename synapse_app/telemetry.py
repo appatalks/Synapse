@@ -71,17 +71,25 @@ class SystemProbe:
                                              ct.c_void_p, ct.c_size_t]
 
     def memory(self) -> tuple[int, int]:
+        sample = self.memory_details()
+        return sample["total_bytes"], sample["available_bytes"]
+
+    def memory_details(self) -> dict:
         if self.platform == "Linux":
             values = {parts[0].rstrip(":"): int(parts[1]) * 1024
                       for line in Path("/proc/meminfo").read_text().splitlines()
-                      if (parts := line.split()) and parts[0] in ("MemTotal:", "MemAvailable:")}
-            return values["MemTotal"], values["MemAvailable"]
+                      if (parts := line.split()) and parts[0] in
+                      ("MemTotal:", "MemAvailable:", "MemFree:", "Cached:", "Buffers:")}
+            total, available, free = values["MemTotal"], values["MemAvailable"], values["MemFree"]
+            cache = values["Cached"] + values["Buffers"]
+            basis = "physical_occupied"
         if self.platform == "Windows":
             values = MemoryStatus()
             values.length = ct.sizeof(values)
             if not self.kernel.GlobalMemoryStatusEx(ct.byref(values)):
                 raise OSError(ct.get_last_error(), "GlobalMemoryStatusEx failed")
-            return values.total, values.available
+            total, available, free, cache = values.total, values.available, None, None
+            basis = "os_unavailable"
         if self.platform == "Darwin":
             total = ct.c_uint64()
             size = ct.c_size_t(ct.sizeof(total))
@@ -92,8 +100,17 @@ class SystemProbe:
             if self.lib.host_statistics64(host, 4, ct.byref(values), ct.byref(count)) or \
                     self.lib.host_page_size(host, ct.byref(pages)):
                 raise OSError("Mach memory counters unavailable")
-            return total.value, (values[0] + values[2]) * pages.value
-        raise OSError(f"Memory monitoring is unsupported on {self.platform}")
+            total, available, free, cache = total.value, (values[0] + values[2]) * pages.value, values[0] * pages.value, None
+            basis = "physical_occupied"
+        if self.platform not in ("Linux", "Windows", "Darwin"):
+            raise OSError(f"Memory monitoring is unsupported on {self.platform}")
+        if (total <= 0 or not 0 <= available <= total or
+                free is not None and not 0 <= free <= total or
+                cache is not None and not 0 <= cache <= total):
+            raise ValueError("OS memory counters are inconsistent")
+        return {"total_bytes": total, "available_bytes": available, "free_bytes": free,
+                "occupied_bytes": total - (available if free is None else free),
+                "cache_bytes": cache, "pressure_bytes": total - available, "basis": basis}
 
     def cpu(self) -> tuple[int, int]:
         if self.platform == "Linux":
@@ -250,7 +267,8 @@ class HardwareMonitor:
     def collect(self) -> dict:
         now, errors = time.monotonic(), {}
         values = {"cpu_percent": None, "ram_used_bytes": None, "ram_total_bytes": None,
-                  "disk_read_bytes_s": None}
+                  "ram_available_bytes": None, "ram_free_bytes": None, "ram_cache_bytes": None,
+                  "ram_pressure_bytes": None, "ram_basis": None, "disk_read_bytes_s": None}
         try:
             probe = system_probe()
             current = probe.cpu()
@@ -259,8 +277,11 @@ class HardwareMonitor:
                 if total > 0 and 0 <= idle <= total:
                     values["cpu_percent"] = 100 * (total - idle) / total
             self.previous_cpu = current
-            total, available = probe.memory()
-            values.update(ram_used_bytes=total - available, ram_total_bytes=total)
+            memory = probe.memory_details()
+            values.update(ram_used_bytes=memory["occupied_bytes"], ram_total_bytes=memory["total_bytes"],
+                          ram_available_bytes=memory["available_bytes"], ram_free_bytes=memory["free_bytes"],
+                          ram_cache_bytes=memory["cache_bytes"], ram_pressure_bytes=memory["pressure_bytes"],
+                          ram_basis=memory["basis"])
         except (OSError, ValueError, KeyError, IndexError) as exc:
             errors["system"] = str(exc)
         if not self.gpu_initialized:
@@ -316,7 +337,9 @@ class HardwareMonitor:
                     "platform": platform.system(), "samples": samples, "reset": reset,
                     "disk_scope": "Backend process read I/O; Windows includes cached and non-disk reads.",
                     "gpu_scope": "Device-wide NVIDIA counters, including other apps. Unsupported metrics stay unavailable.",
-                    "memory_scope": "System memory; macOS available memory is estimated as free plus inactive pages."}
+                    "memory_scope": "Linux/macOS RAM occupancy includes cached pages. Windows uses OS-unavailable RAM. "
+                                    "OS-reported availability is a separate estimate, not a free-physical-memory guarantee. "
+                                    "Backend RSS overlaps cache and must not be added to it."}
 
     def close(self) -> None:
         self.stop_event.set()

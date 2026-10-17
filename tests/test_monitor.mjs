@@ -84,3 +84,23 @@ test("combined load keeps CPU when GPU sensors are unavailable", () => {
   assert.equal(gpuOnly.value, undefined);
   assert.equal(gpuOnly.secondary, 30);
 });
+
+test("RAM pie separates occupied cache from pressure and never adds overlapping RSS", () => {
+  const ram = readings({
+    system: {ram_total_bytes: 128 * 1024 ** 3, ram_used_bytes: 80 * 1024 ** 3,
+      ram_available_bytes: 110 * 1024 ** 3, ram_cache_bytes: 64 * 1024 ** 3,
+      ram_pressure_bytes: 18 * 1024 ** 3, ram_basis: "physical_occupied"},
+    backend: {rss_bytes: 62 * 1024 ** 3}
+  }).ram;
+  assert.equal(ram.value, 80);
+  assert.equal(ram.max, 128);
+  assert.equal(ram.freeLabel, "free");
+  assert.match(ram.note, /cache\/buffers 64.0 GiB/);
+  assert.match(ram.note, /RSS 62.0 GiB \(overlaps\)/);
+  assert.match(ram.note, /OS available 110.0 GiB/);
+  assert.equal(fraction(ram.value, ram.max), 0.625);
+});
+
+test("Windows RAM remainder is labeled OS available, not cache-free physical RAM", () => {
+  assert.equal(readings({system: {ram_basis: "os_unavailable"}}).ram.freeLabel, "OS available");
+});
