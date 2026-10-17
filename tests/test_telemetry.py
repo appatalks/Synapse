@@ -26,14 +26,15 @@ class TelemetryTests(unittest.TestCase):
         with mock.patch.object(telemetry.platform, "system", return_value="Linux"):
             probe = telemetry.SystemProbe()
         files = {"/proc/stat": "cpu 10 0 20 70 5 0 0 0\n",
-                 "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 100 kB\nCached: 300 kB\nBuffers: 10 kB\n"}
+                 "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 100 kB\nCached: 300 kB\nBuffers: 10 kB\nShmem: 50 kB\n"}
         with mock.patch.object(Path, "read_text", autospec=True, side_effect=lambda p: files[p.as_posix()]):
             self.assertEqual(probe.cpu(), (105, 75))
             self.assertEqual(probe.memory(), (1024000, 409600))
             memory = probe.memory_details()
             self.assertEqual(memory["occupied_bytes"], 900 * 1024)
             self.assertEqual(memory["pressure_bytes"], 600 * 1024)
-            self.assertEqual(memory["cache_bytes"], 310 * 1024)
+            self.assertEqual(memory["cache_bytes"], 260 * 1024)
+            self.assertEqual(memory["shared_system_bytes"], 50 * 1024)
             self.assertEqual(memory["free_bytes"], 100 * 1024)
             self.assertEqual(memory["basis"], "physical_occupied")
 
@@ -44,6 +45,11 @@ class TelemetryTests(unittest.TestCase):
         self.assertGreater(result["rss_bytes"], 0)
         self.assertGreaterEqual(result["cpu_seconds"], 0)
         self.assertGreaterEqual(result["read_bytes"], 0)
+        if sys.platform == "linux":
+            self.assertGreaterEqual(result["shared_bytes"], 0)
+            self.assertLessEqual(result["shared_bytes"], result["rss_bytes"])
+        else:
+            self.assertIsNone(result["shared_bytes"])
         total, available = probe.memory()
         self.assertGreater(total, 0)
         self.assertGreaterEqual(available, 0)
@@ -62,7 +68,7 @@ class TelemetryTests(unittest.TestCase):
         with mock.patch.object(Path, "read_text", return_value="MemTotal: 1000 kB\nMemAvailable: 400 kB\n"):
             with self.assertRaises(KeyError):
                 probe.memory_details()
-        invalid = "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 1200 kB\nCached: 100 kB\nBuffers: 0 kB\n"
+        invalid = "MemTotal: 1000 kB\nMemAvailable: 400 kB\nMemFree: 1200 kB\nCached: 100 kB\nBuffers: 0 kB\nShmem: 0 kB\n"
         with mock.patch.object(Path, "read_text", return_value=invalid):
             with self.assertRaisesRegex(ValueError, "inconsistent"):
                 probe.memory_details()
@@ -73,6 +79,7 @@ class TelemetryTests(unittest.TestCase):
         probe.memory_details.return_value = {
             "total_bytes": 8192, "available_bytes": 4096, "free_bytes": 1024,
             "occupied_bytes": 7168, "cache_bytes": 4096, "pressure_bytes": 4096,
+            "shared_system_bytes": 512,
             "basis": "physical_occupied"}
         backend = mock.Mock(side_effect=[
             {"pid": 10, "read_bytes": 0, "state": "ready"},
@@ -109,6 +116,7 @@ class TelemetryTests(unittest.TestCase):
         probe.memory_details.return_value = {
             "total_bytes": 8192, "available_bytes": 4096, "free_bytes": 1024,
             "occupied_bytes": 7168, "cache_bytes": 4096, "pressure_bytes": 4096,
+            "shared_system_bytes": 512,
             "basis": "physical_occupied"}
         monitor = telemetry.HardwareMonitor(lambda: {"state": "stopped"})
         with mock.patch.object(telemetry, "system_probe", return_value=probe), \

@@ -67,9 +67,10 @@ function controls() {
     el("op-offload-min-batch").disabled = true;
   }
   if (selectedMode === "hybrid") {
-    for (const id of ["placement", "context", "load-mode", "expert-cache", "fit-target", "host-op-offload", "op-offload-min-batch"]) {
+    for (const id of ["placement", "context", "load-mode", "fit-target", "host-op-offload", "op-offload-min-batch"]) {
       el(id).disabled = true;
     }
+    el("expert-cache").disabled = active || actionPending || !status?.hybrid_generic;
   }
   el("placement").querySelector('option[value="cpu"]').disabled =
     status?.backend_kind === "ik_llama.cpp" || selectedMode !== "standard";
@@ -102,6 +103,8 @@ function renderStatus() {
   el("cache-note").textContent = hybrid
     ? `Residency is derived from routed expert tensors, not a model-name allowlist. Cold experts execute on CPU; causal admissions use ${transfer}. Original weights, biases, activations and router probabilities are retained. New chat does not reset residency; unload/reload does.`
     : "Fewer threads can be faster. RAM loading can increase memory pressure. The upstream experimental expert cache uses VRAM and may be slower. Zero disables it.";
+  if (status.hybrid_generic) el("cache-note").textContent +=
+    " Require hybrid mode allows a smaller manual cache for unbound causal layouts. Bound training plans retain their configured budget. Automatic defaults are unchanged.";
   el("speculation-note").textContent = status.speculation_enabled
     ? "Experimental speculation is enabled. A compatible target-trained draft and backend are required; speed is not guaranteed."
     : "Speculation is disabled by default. Research trials require --experimental-speculation at launch.";
@@ -130,8 +133,11 @@ function renderStatus() {
     const gib = (bytes) => typeof bytes === "number" ? (bytes / 1024 ** 3).toFixed(1) : "unavailable";
     const cpu = resources.cpu_logical_cores === null ? "sampling"
       : `${resources.cpu_logical_cores.toFixed(1)} logical cores (${(100 * resources.cpu_logical_cores / status.logical_cpus).toFixed(0)}% of machine)`;
+    const breakdown = [["file-backed", resources.file_backed_bytes], ["anonymous", resources.anonymous_bytes],
+      ["shared/driver-mapped", resources.shared_bytes]]
+      .filter(([, bytes]) => typeof bytes === "number").map(([name, bytes]) => `${gib(bytes)} GiB ${name}`).join(", ");
     el("resources").textContent = `CPU: ${cpu}. Resident RAM: ${gib(resources.rss_bytes)} GiB `
-      + `(${gib(resources.file_backed_bytes)} GiB file-backed, ${gib(resources.anonymous_bytes)} GiB private). `
+      + `(${breakdown || "breakdown unavailable on this platform"}). `
       + `System available: ${gib(resources.system_available_ram_bytes)} GiB, including reclaimable cache.`;
   } else {
     el("resources").textContent = status.model ? "Collecting process resource usage..." : "";
@@ -340,7 +346,8 @@ el("load-form").addEventListener("submit", async (event) => {
     };
     const payload = settings.execution_mode === "auto" ? { model: settings.model, execution_mode: "auto" }
       : settings.execution_mode === "hybrid" ? { model: settings.model, execution_mode: "hybrid",
-        cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll }
+        cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll,
+        expert_cache_mib: settings.expert_cache_mib }
       : settings;
     status = await request("/api/v1/model/load", payload);
     clearChat();

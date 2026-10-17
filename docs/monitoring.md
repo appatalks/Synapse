@@ -31,6 +31,10 @@ OS-available value and pressure estimate separate in the API. macOS availability
 is estimated as free plus inactive pages. Driver-pinned pages can make
 OS-reported availability optimistic; it is not a safe-allocation guarantee.
 Backend RSS and cache overlap: adding them would double-count mapped model pages.
+On Linux, shared memory is separated from disk-backed file cache, and process
+RSS is broken down into file-backed, anonymous, and shared/driver-mapped pages
+where the OS provides those counters. CUDA host allocations need not appear
+as ordinary anonymous memory; do not assume every RAM copy is private memory.
 Higher occupancy by itself is not evidence of faster generation.
 
 | Platform | Application / native backend | CPU, RAM, process read I/O | GPU sensors | Research hybrid engine |
@@ -61,6 +65,12 @@ for loading/unloading, runtime settings, max output tokens and reasoning effort.
 Closing it preserves the settings; they apply to the next message. Runtime
 selection stays locked while a model is loaded, and generation settings cannot
 change during a browser request.
+
+For an unbound causal layout, **Require hybrid** permits a manual GPU expert-cache
+budget in Advanced performance. This can leave room for a model's larger KV
+cache/backbone without lowering context or dropping experts. It does not guarantee
+fit. Automatic mode retains the installation budget, and checkpoint-bound training
+plans retain their fixed budgets; a manual override cannot borrow or alter them.
 
 In the composer, Enter uses the same Send action; Shift+Enter keeps a new line.
 IME text composition, modified Enter shortcuts and held/repeated keys do not

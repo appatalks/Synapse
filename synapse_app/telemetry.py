@@ -79,16 +79,17 @@ class SystemProbe:
             values = {parts[0].rstrip(":"): int(parts[1]) * 1024
                       for line in Path("/proc/meminfo").read_text().splitlines()
                       if (parts := line.split()) and parts[0] in
-                      ("MemTotal:", "MemAvailable:", "MemFree:", "Cached:", "Buffers:")}
+                      ("MemTotal:", "MemAvailable:", "MemFree:", "Cached:", "Buffers:", "Shmem:")}
             total, available, free = values["MemTotal"], values["MemAvailable"], values["MemFree"]
-            cache = values["Cached"] + values["Buffers"]
+            shared = values["Shmem"]
+            cache = values["Cached"] + values["Buffers"] - shared
             basis = "physical_occupied"
         if self.platform == "Windows":
             values = MemoryStatus()
             values.length = ct.sizeof(values)
             if not self.kernel.GlobalMemoryStatusEx(ct.byref(values)):
                 raise OSError(ct.get_last_error(), "GlobalMemoryStatusEx failed")
-            total, available, free, cache = values.total, values.available, None, None
+            total, available, free, cache, shared = values.total, values.available, None, None, None
             basis = "os_unavailable"
         if self.platform == "Darwin":
             total = ct.c_uint64()
@@ -100,17 +101,19 @@ class SystemProbe:
             if self.lib.host_statistics64(host, 4, ct.byref(values), ct.byref(count)) or \
                     self.lib.host_page_size(host, ct.byref(pages)):
                 raise OSError("Mach memory counters unavailable")
-            total, available, free, cache = total.value, (values[0] + values[2]) * pages.value, values[0] * pages.value, None
+            total, available, free, cache, shared = total.value, (values[0] + values[2]) * pages.value, values[0] * pages.value, None, None
             basis = "physical_occupied"
         if self.platform not in ("Linux", "Windows", "Darwin"):
             raise OSError(f"Memory monitoring is unsupported on {self.platform}")
         if (total <= 0 or not 0 <= available <= total or
                 free is not None and not 0 <= free <= total or
-                cache is not None and not 0 <= cache <= total):
+                cache is not None and not 0 <= cache <= total or
+                shared is not None and not 0 <= shared <= total):
             raise ValueError("OS memory counters are inconsistent")
         return {"total_bytes": total, "available_bytes": available, "free_bytes": free,
                 "occupied_bytes": total - (available if free is None else free),
-                "cache_bytes": cache, "pressure_bytes": total - available, "basis": basis}
+                "cache_bytes": cache, "shared_system_bytes": shared,
+                "pressure_bytes": total - available, "basis": basis}
 
     def cpu(self) -> tuple[int, int]:
         if self.platform == "Linux":
@@ -134,11 +137,12 @@ class SystemProbe:
             fields = (root / "stat").read_text().rsplit(")", 1)[1].split()
             memory = {parts[0].rstrip(":"): int(parts[1]) * 1024
                       for line in (root / "status").read_text().splitlines()
-                      if (parts := line.split()) and parts[0] in ("VmRSS:", "RssAnon:", "RssFile:")}
+                      if (parts := line.split()) and parts[0] in ("VmRSS:", "RssAnon:", "RssFile:", "RssShmem:")}
             io = dict(line.split(": ", 1) for line in (root / "io").read_text().splitlines())
             return {"cpu_seconds": (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK"),
                     "rss_bytes": memory["VmRSS"], "anonymous_bytes": memory["RssAnon"],
-                    "file_backed_bytes": memory["RssFile"], "read_bytes": int(io["read_bytes"])}
+                    "file_backed_bytes": memory["RssFile"], "shared_bytes": memory["RssShmem"],
+                    "read_bytes": int(io["read_bytes"])}
         if self.platform == "Windows":
             handle = self.kernel.OpenProcess(0x1000 | 0x10, False, pid)
             if not handle:
@@ -153,7 +157,7 @@ class SystemProbe:
                         not self.kernel.GetProcessIoCounters(handle, ct.byref(io)):
                     raise OSError(ct.get_last_error(), "Windows process counters unavailable")
                 return {"cpu_seconds": (kernel.value + user.value) / 10_000_000,
-                        "rss_bytes": memory.rss, "anonymous_bytes": None, "file_backed_bytes": None,
+                        "rss_bytes": memory.rss, "anonymous_bytes": None, "file_backed_bytes": None, "shared_bytes": None,
                         "read_bytes": io[3]}
             finally:
                 self.kernel.CloseHandle(handle)
@@ -162,7 +166,7 @@ class SystemProbe:
             if self.proc.proc_pid_rusage(pid, 2, ct.byref(usage)):
                 raise OSError(ct.get_errno(), "proc_pid_rusage failed")
             return {"cpu_seconds": (usage.user + usage.system) / 1_000_000_000,
-                    "rss_bytes": usage.rss, "anonymous_bytes": None, "file_backed_bytes": None,
+                    "rss_bytes": usage.rss, "anonymous_bytes": None, "file_backed_bytes": None, "shared_bytes": None,
                     "read_bytes": usage.read_bytes}
         raise OSError(f"Process monitoring is unsupported on {self.platform}")
 
@@ -268,7 +272,7 @@ class HardwareMonitor:
         now, errors = time.monotonic(), {}
         values = {"cpu_percent": None, "ram_used_bytes": None, "ram_total_bytes": None,
                   "ram_available_bytes": None, "ram_free_bytes": None, "ram_cache_bytes": None,
-                  "ram_pressure_bytes": None, "ram_basis": None, "disk_read_bytes_s": None}
+                  "ram_shared_bytes": None, "ram_pressure_bytes": None, "ram_basis": None, "disk_read_bytes_s": None}
         try:
             probe = system_probe()
             current = probe.cpu()
@@ -281,6 +285,7 @@ class HardwareMonitor:
             values.update(ram_used_bytes=memory["occupied_bytes"], ram_total_bytes=memory["total_bytes"],
                           ram_available_bytes=memory["available_bytes"], ram_free_bytes=memory["free_bytes"],
                           ram_cache_bytes=memory["cache_bytes"], ram_pressure_bytes=memory["pressure_bytes"],
+                          ram_shared_bytes=memory["shared_system_bytes"],
                           ram_basis=memory["basis"])
         except (OSError, ValueError, KeyError, IndexError) as exc:
             errors["system"] = str(exc)

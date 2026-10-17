@@ -673,6 +673,12 @@ class Runtime:
             raise AppError(400, "Load mode must be 'auto' or 'none'.")
         if type(expert_cache_mib) is not int or not 0 <= expert_cache_mib <= 65536:
             raise AppError(400, "Expert cache must be an integer between 0 and 65536 MiB.")
+        if hybrid and mode == "hybrid" and selected_plan == "auto":
+            if expert_cache_mib == 0:
+                raise AppError(400, "A causal hybrid cache must have a positive residency budget.")
+            if expert_cache_mib != selected_cache_mib:
+                reason += f" Explicit causal residency budget: {expert_cache_mib} MiB; fit is still model-dependent."
+            selected_cache_mib = expert_cache_mib
         if expert_cache_mib and placement != "auto":
             raise AppError(400, "The experimental GPU expert cache requires automatic placement.")
         if self.backend_kind == "ik_llama.cpp" and (placement != "auto" or expert_cache_mib):

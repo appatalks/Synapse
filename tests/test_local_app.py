@@ -609,6 +609,38 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(self.runtime.status()["hybrid_plan_sha256"], before["hybrid_plan_sha256"])
         self.assertEqual(self.runtime.status()["model"], str(slow))
 
+    def test_manual_causal_budget_does_not_change_automatic_or_bound_plan_budgets(self):
+        self.hybrid_runtime(hybrid_generic=True, hybrid_context=2048, hybrid_cache_mib=64,
+                            hybrid_generic_cache_mib=32, hybrid_generic_transfer="direct")
+        other = {"general.architecture": "future-moe", "future-moe.block_count": 3,
+                 "future-moe.embedding_length": 96, "future-moe.feed_forward_length": 192,
+                 "future-moe.expert_count": 7, "future-moe.expert_used_count": 3,
+                 "future-moe.context_length": 1024, "split.count": 2}
+        write_metadata(self.model, other)
+        status = self.load(execution_mode="hybrid", expert_cache_mib=24)
+        self.assertEqual(status["expert_cache_mib"], 24)
+        self.assertEqual(status["hybrid_generic_cache_mib"], 32)
+        self.assertEqual(status["hybrid_cache_mib"], 64)
+        self.assertIn("Explicit causal residency budget: 24 MiB", status["selection_reason"])
+        flags = json.loads(status["logs"][0])
+        self.assertEqual(flags["hybrid_plan"], "auto")
+        self.assertEqual(flags["expert_cache_mib"], "24")
+        self.runtime.stop()
+        for value in (0, -1, True, 65537):
+            code, _, _ = self.request("POST", "/api/v1/model/load",
+                                     {"model": str(self.model), "execution_mode": "hybrid", "expert_cache_mib": value})
+            self.assertEqual(code, 400)
+        code, _, _ = self.request("POST", "/api/v1/model/load",
+                                 {"model": str(self.model), "execution_mode": "auto", "expert_cache_mib": 24})
+        self.assertEqual(code, 400)
+        write_metadata(self.model, HYBRID_METADATA)
+        code, _, _ = self.request("POST", "/api/v1/model/load",
+                                 {"model": str(self.model), "execution_mode": "hybrid", "expert_cache_mib": 24})
+        self.assertEqual(code, 400)
+        status = self.load(execution_mode="hybrid")
+        self.assertEqual(status["expert_cache_mib"], 64)
+        self.assertEqual(json.loads(status["logs"][0])["hybrid_plan"], str(self.plan))
+
     def test_generic_budget_and_direct_transfer_are_independent_of_bound_plan(self):
         self.hybrid_runtime(hybrid_generic=True, hybrid_context=2048, hybrid_cache_mib=64,
                             hybrid_generic_cache_mib=32, hybrid_generic_transfer="direct")
@@ -636,19 +668,25 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(status["hybrid_plan_sha256"], self.runtime.hybrid_plan_sha256)
         self.assertEqual(json.loads(status["logs"][0])["hybrid_plan"], str(self.plan))
 
-    def test_generic_profile_rejects_wrong_budget_without_poisoning_live_model(self):
+    def test_generic_budget_requests_do_not_poison_live_model(self):
         self.hybrid_runtime(hybrid_generic=True, hybrid_cache_mib=64, hybrid_generic_cache_mib=32)
         other = {"general.architecture": "future-moe", "future-moe.block_count": 3,
                  "future-moe.embedding_length": 96, "future-moe.feed_forward_length": 192,
-                 "future-moe.expert_count": 7, "future-moe.expert_used_count": 3}
+                 "future-moe.expert_count": 7, "future-moe.expert_used_count": 3, "split.count": 2}
         write_metadata(self.model, other)
         before = self.load(execution_mode="hybrid")
-        code, _, body = self.request("POST", "/api/v1/model/load",
-                                    {"model": str(self.model), "execution_mode": "hybrid", "expert_cache_mib": 64})
-        self.assertEqual(code, 400, body)
-        self.assertIn("32 MiB residency", body.decode())
-        self.assertEqual(self.runtime.status()["hybrid_plan_sha256"], before["hybrid_plan_sha256"])
-        self.assertTrue(self.runtime.status()["hybrid_verified"])
+        for mode, expected_code, message in (("auto", 400, "32 MiB residency"),
+                                             ("hybrid", 409, "Unload the current model")):
+            with self.subTest(mode=mode):
+                code, _, body = self.request("POST", "/api/v1/model/load",
+                                            {"model": str(self.model), "execution_mode": mode,
+                                             "expert_cache_mib": 64})
+                self.assertEqual(code, expected_code, body)
+                self.assertIn(message, body.decode())
+                status = self.runtime.status()
+                self.assertEqual(status["hybrid_plan_sha256"], before["hybrid_plan_sha256"])
+                self.assertEqual(status["expert_cache_mib"], 32)
+                self.assertTrue(status["hybrid_verified"])
 
     def test_generic_options_are_validated_and_preserve_auto_plan_defaults(self):
         self.hybrid_runtime()

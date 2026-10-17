@@ -41,7 +41,8 @@ export function readings(sample, selection = "all") {
       freeLabel: s.ram_basis === "physical_occupied" ? "free" : "OS available",
       note: [
         valid(s.ram_total_bytes) ? `${(s.ram_total_bytes / gib).toFixed(1)} GiB total` : "System memory",
-        valid(s.ram_cache_bytes) ? `cache/buffers ${(s.ram_cache_bytes / gib).toFixed(1)} GiB` : null,
+        valid(s.ram_cache_bytes) ? `file cache/buffers ${(s.ram_cache_bytes / gib).toFixed(1)} GiB` : null,
+        valid(s.ram_shared_bytes) && s.ram_shared_bytes >= gib ? `shared ${(s.ram_shared_bytes / gib).toFixed(1)} GiB` : null,
         valid(b.rss_bytes) ? `backend RSS ${(b.rss_bytes / gib).toFixed(1)} GiB (overlaps)` : null,
         valid(s.ram_available_bytes) ? `OS available ${(s.ram_available_bytes / gib).toFixed(1)} GiB` : null,
       ].filter(Boolean).join(" · ") },
