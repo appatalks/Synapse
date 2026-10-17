@@ -45,7 +45,7 @@ def write_metadata(path, metadata):
 class LocalAppTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.backend = self.root / "llama-server.py"
         shutil.copyfile(Path(__file__).with_name("fake_llama_server.py"), self.backend)
         self.backend.chmod(0o755)
@@ -672,9 +672,16 @@ class LocalAppTests(unittest.TestCase):
         def topology(path, *args, **kwargs):
             cpu = int(path.parent.parent.name.removeprefix("cpu"))
             return "0" if path.name == "physical_package_id" else str(cpu % 2)
-        with mock.patch.object(app.os, "sched_getaffinity", return_value={0, 1, 2, 3}):
+        with mock.patch.object(app, "available_cpus", return_value={0, 1, 2, 3}), \
+                mock.patch.object(app.sys, "platform", "linux"):
             with mock.patch.object(Path, "read_text", autospec=True, side_effect=topology):
                 self.assertEqual(app.default_cpu_threads(), 2)
+
+    def test_portable_thread_default_does_not_read_linux_topology(self):
+        with mock.patch.object(app, "available_cpus", return_value={0, 1, 2, 3}), \
+                mock.patch.object(app.sys, "platform", "darwin"), \
+                mock.patch.object(Path, "read_text", side_effect=AssertionError("Linux topology read")):
+            self.assertEqual(app.default_cpu_threads(), 4)
 
     def test_explicit_experimental_backend_adapter(self):
         self.runtime.backend_kind = "ik_llama.cpp"
@@ -909,10 +916,34 @@ class LocalAppTests(unittest.TestCase):
                                      {"Content-Type": "text/plain"})[0], 415)
         self.assertEqual(self.request("POST", "/api/v1/model/load", {},
                                      {"Transfer-Encoding": "chunked"})[0], 400)
-        self.assertEqual(self.request("POST", "/api/v1/model/load", {"model": "x" * app.BODY_LIMIT})[0], 413)
         self.assertEqual(self.request("POST", "/v1/chat/completions", {"messages": []})[0], 400)
         self.assertEqual(self.request("POST", "/v1/chat/completions",
                                      {"messages": [{}], "stream": "yes"})[0], 400)
+
+    def test_request_size_boundary_is_checked_before_reading_oversized_body(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.putrequest("POST", "/api/v1/model/load")
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(app.BODY_LIMIT + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            self.assertEqual(response.status, 413)
+            self.assertIn(b"1 MiB", response.read())
+        finally:
+            connection.close()
+        base = json.dumps({"model": 3, "padding": ""})
+        body = json.dumps({"model": 3, "padding": "x" * (app.BODY_LIMIT - len(base))})
+        self.assertEqual(len(body.encode()), app.BODY_LIMIT)
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.request("POST", "/api/v1/model/load", body, {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"local GGUF", response.read())
+        finally:
+            connection.close()
+        self.assertIsNone(self.runtime.process)
 
     @unittest.skipIf(sys.platform == "win32", "Windows TerminateProcess does not deliver a Python SIGTERM")
     def test_launcher_shuts_down_on_sigterm(self):
