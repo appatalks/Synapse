@@ -18,10 +18,12 @@ class ReleaseTests(unittest.TestCase):
     def test_version_and_public_payload(self):
         result = subprocess.run([sys.executable, str(ARCHIVE), "--version"],
                                 capture_output=True, text=True, check=True, timeout=10)
-        self.assertIn("SYNAPSE 0.1.0rc1", result.stdout)
+        self.assertIn("SYNAPSE 0.1.0rc2", result.stdout)
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
+        self.assertIn("synapse_app/tuning.py", names)
+        self.assertIn("synapse_app/web/model-controls.mjs", names)
         self.assertFalse(any(name.endswith((".gguf", ".bin", ".log")) or
                              "/results/" in name or "__pycache__" in name for name in names))
 
@@ -37,6 +39,7 @@ class ReleaseTests(unittest.TestCase):
             port = urlsplit(line.split(" ", 1)[1].strip()).port
             for path, content in (("/", b"SYNAPSE"), ("/monitor.mjs", b"MonitorView"),
                                   ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
+                                  ("/model-controls.mjs", b"bindReasoningEffort"),
                                   ("/navigation.mjs", b"navigate"), ("/style.css", b"sidebar"),
                                   ("/icon.svg", b"<svg"), ("/api/v1/status", b'"app_name": "SYNAPSE"'),
                                   ("/api/v1/monitor", b'"samples"')):

@@ -16,9 +16,9 @@ def main():
     source = root / "synapse_app"
     if not source.is_dir():
         source = root / "tools/vrambridge"
-    public = ["__init__.py", "__main__.py", "app.py", "telemetry.py", "updates.py", "hybrid-profile.example.json",
+    public = ["__init__.py", "__main__.py", "app.py", "telemetry.py", "updates.py", "tuning.py", "hybrid-profile.example.json",
               "web/index.html", "web/app.js", "web/chat-stream.mjs", "web/chat-input.mjs", "web/theme.js", "web/style.css",
-              "web/monitor.mjs", "web/navigation.mjs", "web/updates.mjs", "web/icon.svg"]
+              "web/monitor.mjs", "web/navigation.mjs", "web/updates.mjs", "web/model-controls.mjs", "web/icon.svg"]
     args.output.mkdir(parents=True, exist_ok=True)
     target = args.output / "SYNAPSE.pyz"
     with tempfile.TemporaryDirectory(prefix="synapse-build-") as directory:

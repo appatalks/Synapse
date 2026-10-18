@@ -95,10 +95,20 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["state"], "loading")
         return self.wait_state("ready")
 
+    def wait_tuning(self, wanted):
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            result = self.server.tuner.snapshot()
+            if not result["active"] and result["state"] == wanted:
+                return result
+            time.sleep(0.03)
+        self.fail(f"Expected tuning {wanted}: {self.server.tuner.snapshot()}")
+
     def test_static_assets_status_and_unknown_routes(self):
         for path, expected in (("/", b"SYNAPSE"), ("/app.js", b"textContent"),
                                ("/chat-stream.mjs", b"class ChatStream"),
                                ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
+                               ("/model-controls.mjs", b"bindReasoningEffort"),
                                ("/monitor.mjs", b"class MonitorView"), ("/navigation.mjs", b"viewForHash"),
                                ("/updates.mjs", b"class UpdateView"),
                                ("/icon.svg", b"<svg"),
@@ -248,6 +258,191 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(self.runtime.status()["state"], "stopped")
         self.assertEqual(self.request("GET", "/v1/models")[0], 503)
 
+    def test_standard_context_boundaries_and_ui_limit(self):
+        code, _, body = self.request("GET", "/")
+        self.assertEqual(code, 200)
+        self.assertRegex(body.decode(), r'<input id="context"[^>]*max="262144"')
+        for context in (512, 65536, 65537, 131072, 262144):
+            with self.subTest(context=context):
+                status = self.load(context=context, execution_mode="standard")
+                self.assertEqual(status["requested_context"], context)
+                self.assertEqual(status["context"], context)
+                arguments = self.runtime.process.args
+                self.assertEqual(arguments[arguments.index("--ctx-size") + 1], str(context))
+                self.runtime.stop()
+
+    def test_large_context_prompt_body_is_forwarded(self):
+        self.load(context=262144)
+        payload = {"model": "local-model", "messages": [{"role": "user", "content": "sample " * 220000}]}
+        self.assertGreater(len(json.dumps(payload).encode()), 1024 * 1024)
+        code, _, body = self.request("POST", "/v1/chat/completions", payload)
+        self.assertEqual(code, 200, body)
+        self.assertEqual(json.loads(body)["choices"][0]["message"]["content"], "Hello")
+
+    def test_loading_progress_and_cancellation_are_visible(self):
+        model = self.root / "slow.gguf"
+        model.write_bytes(b"GGUF")
+        code, _, body = self.request("POST", "/api/v1/model/load", {"model": str(model)})
+        self.assertEqual(code, 202)
+        loading = json.loads(body)["loading"]
+        self.assertIsNotNone(loading)
+        self.assertGreaterEqual(loading["elapsed_seconds"], 0)
+        self.assertEqual(loading["phase"], "Starting backend")
+        self.assertEqual(self.request("POST", "/api/v1/model/unload", {})[0], 200)
+        self.assertEqual(self.runtime.status()["state"], "stopped")
+        self.assertIsNone(self.runtime.status()["loading"])
+        self.assertIsNone(self.runtime.process)
+
+    def test_hybrid_verification_has_visible_pending_checks_and_separate_deadline(self):
+        self.hybrid_runtime(load_timeout=5)
+        model = self.root / "hybrid-no-markers.gguf"
+        write_metadata(model, HYBRID_METADATA)
+        with mock.patch.object(app, "HYBRID_VERIFICATION_TIMEOUT", 0.5):
+            started = time.monotonic()
+            self.assertEqual(self.request("POST", "/api/v1/model/load", {"model": str(model)})[0], 202)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                current = self.runtime.status()
+                if current["loading"] and current["loading"]["waiting_for"]:
+                    break
+                time.sleep(0.03)
+            self.assertEqual(current["loading"]["phase"], "Verifying experimental hybrid execution")
+            self.assertIn("hybrid dispatcher activation", current["loading"]["waiting_for"])
+            failed = self.wait_state("error")
+            self.assertIn("Unconfirmed", failed["error"])
+            self.assertLess(time.monotonic() - started, 3)
+
+    def test_auto_tune_balanced_measures_capacity_applies_and_saves_app_limits(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 262144})
+        self.server.tuner.store = self.root / "tuning.json"
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                    {"model": str(self.model), "confirm": True})
+        self.assertEqual(code, 202, body)
+        result = self.wait_tuning("completed")
+        self.assertEqual([trial["settings"]["context"] for trial in result["trials"]], [8192, 16384, 32768])
+        self.assertTrue(all(trial["capacity_passed"] for trial in result["trials"]))
+        self.assertEqual(self.runtime.status()["context"], 32768)
+        apps = result["recommendation"]["apps"]
+        self.assertEqual(apps["maxInputTokens"], 24576)
+        self.assertEqual(apps["maxOutputTokens"], 4096)
+        self.assertLess(apps["maxInputTokens"] + apps["maxOutputTokens"], apps["context"])
+        self.assertEqual(json.loads(self.server.tuner.store.read_text())["state"], "completed")
+        self.assertNotIn("ANCHOR", self.server.tuner.store.read_text())
+        code, _, body = self.request("GET", "/api/v1/status")
+        self.assertEqual(json.loads(body)["tuning"]["state"], "completed")
+
+    def test_auto_tune_maximum_respects_model_context_limit(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 65536})
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                    {"model": str(self.model), "goal": "maximum", "confirm": True})
+        self.assertEqual(code, 202, body)
+        result = self.wait_tuning("completed")
+        self.assertEqual(result["recommendation"]["settings"]["context"], 65536)
+        self.assertEqual(max(trial["settings"]["context"] for trial in result["trials"]), 65536)
+
+    def test_auto_tune_cancel_restores_model_and_excludes_other_operations(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 32768})
+        self.load(context=4096)
+        entered = threading.Event()
+
+        def probe(runtime, context):
+            entered.set()
+            self.server.tuner.cancelled.wait(5)
+            raise app._tuning.Cancelled("Cancelled fixture probe.")
+
+        with mock.patch.object(self.server.tuner, "_probe", side_effect=probe):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(self.model), "confirm": True})[0], 202)
+            self.assertTrue(entered.wait(3))
+            for path, payload in (("/api/v1/model/load", {"model": str(self.model)}),
+                                  ("/api/v1/model/unload", {}),
+                                  ("/v1/chat/completions", {"messages": [{"role": "user", "content": "hello"}]}),
+                                  ("/api/v1/tuning/start", {"model": str(self.model), "confirm": True})):
+                self.assertEqual(self.request("POST", path, payload)[0], 409, path)
+            with self.assertRaisesRegex(RuntimeError, "Auto Tune"):
+                self.server.install_update(self.root / "unused.pyz", {})
+            self.assertEqual(self.request("POST", "/api/v1/tuning/cancel", {})[0], 202)
+            self.assertEqual(self.wait_tuning("cancelled")["recommendation"], None)
+        self.assertEqual(self.runtime.status()["state"], "ready")
+        self.assertEqual(self.runtime.status()["context"], 4096)
+
+    def test_auto_tune_failed_probe_restores_previous_model_without_recommendations(self):
+        model = self.root / "tuning-wrong-answer.gguf"
+        write_metadata(model, {"general.architecture": "fixture", "fixture.context_length": 32768})
+        self.load(model=model, context=4096)
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True})[0], 202)
+        result = self.wait_tuning("error")
+        self.assertIn("No context passed", result["error"])
+        self.assertIn("anchors", result["trials"][0]["error"])
+        self.assertIsNone(result["recommendation"])
+        self.assertEqual(self.runtime.status()["context"], 4096)
+
+    def test_auto_tune_validates_consent_goal_and_hybrid_opt_in(self):
+        for changes in ({}, {"confirm": False}, {"confirm": True, "goal": "unknown"},
+                        {"confirm": True, "include_hybrid": "yes"},
+                        {"confirm": True, "include_hybrid": True}, {"confirm": True, "unknown": 1}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                             {"model": str(self.model), **changes})[0], 400)
+        self.assertFalse(self.server.tuner.active)
+        self.runtime.chat_lock.acquire()
+        try:
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(self.model), "confirm": True})[0], 409)
+        finally:
+            self.runtime.chat_lock.release()
+        self.assertEqual(self.request("POST", "/api/v1/tuning/cancel", {"unknown": True})[0], 400)
+
+    def test_auto_tune_hybrid_trials_reduce_unbound_cache_without_changing_the_plan(self):
+        self.hybrid_runtime(hybrid_generic=True, hybrid_context=8192, hybrid_cache_mib=8192)
+        model = self.root / "tuning-cache-limit.gguf"
+        metadata = {"general.architecture": "qwen2moe", "general.file_type": 7,
+                    "qwen2moe.block_count": 3, "qwen2moe.embedding_length": 96,
+                    "qwen2moe.feed_forward_length": 192, "qwen2moe.expert_count": 7,
+                    "qwen2moe.expert_used_count": 3, "qwen2moe.context_length": 16384}
+        write_metadata(model, metadata)
+        original = self.plan.read_bytes()
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                    {"model": str(model), "confirm": True, "include_hybrid": True})
+        self.assertEqual(code, 202, body)
+        result = self.wait_tuning("completed")
+        trials = [trial for trial in result["trials"] if trial["settings"]["execution_mode"] == "hybrid"]
+        self.assertEqual([trial["settings"]["expert_cache_mib"] for trial in trials], [8192, 6144, 4096])
+        self.assertFalse(trials[0]["capacity_passed"])
+        self.assertFalse(trials[1]["capacity_passed"])
+        self.assertTrue(trials[2]["capacity_passed"])
+        self.assertEqual(self.plan.read_bytes(), original)
+        self.assertEqual(self.runtime.status()["state"], "ready")
+        self.assertEqual(self.runtime.status()["context"], 16384)
+
+    def test_auto_tune_cancellation_while_applying_restores_previous_settings(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        self.load(context=4096)
+        apply = self.server.tuner._apply
+
+        def cancel_apply(runtime, settings, budget, *, restoring):
+            if not restoring:
+                self.server.tuner.cancel()
+            return apply(runtime, settings, budget, restoring=restoring)
+
+        with mock.patch.object(self.server.tuner, "_apply", side_effect=cancel_apply):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(self.model), "confirm": True})[0], 202)
+            result = self.wait_tuning("cancelled")
+        self.assertIsNone(result["recommendation"])
+        self.assertEqual(self.runtime.status()["context"], 4096)
+
+    def test_auto_tune_refuses_to_start_without_ram_headroom(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        with mock.patch.object(self.server.tuner, "memory", return_value=(16 * 1024**3, 1024**3)):
+            code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                        {"model": str(self.model), "confirm": True})
+        self.assertEqual(code, 409)
+        self.assertIn(b"RAM safety reserve", body)
+        self.assertFalse(self.server.tuner.active)
+        self.assertIsNone(self.runtime.process)
+
     def test_cpu_flags_and_environment_isolation(self):
         with mock.patch.dict(os.environ, {"LLAMA_ARG_MODEL": "bad",
                                          "GGML_CUDA_ENABLE_UNIFIED_MEMORY": "1",
@@ -270,6 +465,60 @@ class LocalAppTests(unittest.TestCase):
         status = self.load()
         self.assertIn('"gpu_layers": "auto"', "\n".join(status["logs"]))
         self.assertIn('"fit_target": "1024"', "\n".join(status["logs"]))
+
+    def test_q8_cache_requires_explicit_selection_and_is_backend_verified(self):
+        default = self.load()
+        self.assertEqual(default["kv_cache_type"], "f16")
+        arguments = self.runtime.process.args
+        self.assertNotIn("--cache-type-k", arguments)
+        self.assertNotIn("--cache-type-v", arguments)
+        self.assertNotIn("--flash-attn", arguments)
+        self.assertNotIn("--log-verbosity", arguments)
+        self.runtime.stop()
+        selected = self.load(kv_cache_type="q8_0")
+        arguments = self.runtime.process.args
+        self.assertEqual(arguments[arguments.index("--cache-type-k") + 1], "q8_0")
+        self.assertEqual(arguments[arguments.index("--cache-type-v") + 1], "q8_0")
+        self.assertEqual(arguments[arguments.index("--flash-attn") + 1], "on")
+        self.assertEqual(arguments.count("--flash-attn"), 1)
+        self.assertEqual(arguments[arguments.index("--log-verbosity") + 1], "4")
+        self.assertTrue(selected["kv_cache_verified"])
+        self.assertTrue(selected["flash_attention_verified"])
+        self.assertEqual(selected["kv_cache_type"], "q8_0")
+        retained_logs = "\n".join(selected["logs"])
+        self.assertNotIn("api_keys:", retained_logs)
+        self.assertNotIn("[fixture marker]", retained_logs)
+        self.assertIn("Backend authentication configured.", selected["logs"])
+
+    def test_q8_cache_rejects_invalid_values_and_unsupported_backends(self):
+        for value in (None, True, 0, "q4_0", "unknown"):
+            self.assertEqual(self.request("POST", "/api/v1/model/load",
+                                         {"model": str(self.model), "kv_cache_type": value})[0], 400)
+        self.runtime.backend_kind = "ik_llama.cpp"
+        code, _, body = self.request("POST", "/api/v1/model/load",
+                                    {"model": str(self.model), "kv_cache_type": "q8_0"})
+        self.assertEqual(code, 400)
+        self.assertIn(b"official llama.cpp", body)
+        self.assertIsNone(self.runtime.process)
+
+    def test_q8_cache_does_not_accept_a_silent_precision_fallback(self):
+        model = self.root / "q8-cache-fallback.gguf"
+        model.write_bytes(b"GGUF")
+        self.assertEqual(self.request("POST", "/api/v1/model/load",
+                                     {"model": str(model), "kv_cache_type": "q8_0"})[0], 202)
+        failed = self.wait_state("error")
+        self.assertIn("No precision fallback was accepted", failed["error"])
+        self.assertFalse(failed["kv_cache_verified"])
+
+    def test_auto_tune_preserves_explicit_q8_precision_in_trials_and_applied_result(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(self.model), "confirm": True, "kv_cache_type": "q8_0"})[0], 202)
+        result = self.wait_tuning("completed")
+        self.assertEqual(result["recommendation"]["settings"]["kv_cache_type"], "q8_0")
+        self.assertTrue(all(trial["settings"]["kv_cache_type"] == "q8_0" for trial in result["trials"]))
+        self.assertEqual(self.runtime.status()["kv_cache_type"], "q8_0")
+        self.assertTrue(self.runtime.status()["kv_cache_verified"])
 
     def hybrid_runtime(self, **extra):
         self.plan = self.root / "hot experts.txt"
@@ -406,6 +655,23 @@ class LocalAppTests(unittest.TestCase):
                 code, _, body = self.request("POST", "/api/v1/model/load", {"model": str(self.model), **extra})
                 self.assertEqual(code, 400, body)
                 self.assertIsNone(self.runtime.process)
+
+    def test_hybrid_large_context_requires_explicit_profile_budget(self):
+        self.hybrid_runtime(hybrid_context=262144)
+        code, _, body = self.request("POST", "/api/v1/model/load",
+                                    {"model": str(self.model), "context": 65536})
+        self.assertEqual(code, 400, body)
+        self.assertIn(b"262144 context", body)
+        self.assertIsNone(self.runtime.process)
+        status = self.load()
+        self.assertEqual(status["requested_context"], 262144)
+        self.assertEqual(status["context"], 262144)
+        self.assertTrue(status["hybrid_verified"])
+
+    def test_hybrid_context_budget_validation(self):
+        for context in (True, 511, 262145, 262144.0, "262144"):
+            with self.subTest(context=context), self.assertRaises(ValueError):
+                app.Runtime(str(self.backend), hybrid_context=context)
 
     def test_monitor_cursor_validation_and_bounded_endpoint(self):
         for query in ("after=-1", "after=1.5", "after=abc", "after=", "after=1&after=2",
@@ -936,7 +1202,9 @@ class LocalAppTests(unittest.TestCase):
         for values in ({}, {"model": 5}, {"model": "/missing.gguf"},
                        {"model": str(self.model), "context": True},
                        {"model": str(self.model), "context": 511},
-                       {"model": str(self.model), "context": 65537},
+                       {"model": str(self.model), "context": 262145},
+                       {"model": str(self.model), "context": 262144.0},
+                       {"model": str(self.model), "context": "262144"},
                        {"model": str(self.model), "placement": "magic"}):
             self.assertEqual(self.request("POST", "/api/v1/model/load", values)[0], 400)
         self.model.write_bytes(b"not-a-model")
@@ -1086,7 +1354,7 @@ class LocalAppTests(unittest.TestCase):
             connection.endheaders()
             response = connection.getresponse()
             self.assertEqual(response.status, 413)
-            self.assertIn(b"1 MiB", response.read())
+            self.assertIn(b"8 MiB", response.read())
         finally:
             connection.close()
         base = json.dumps({"model": 3, "padding": ""})

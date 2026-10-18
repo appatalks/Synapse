@@ -5,6 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
+import { bindReasoningEffort, elapsed, loadingText } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -14,6 +15,7 @@ let history = [];
 let settingsInitialized = false;
 let browserLocation = null;
 let browserBusy = false;
+let appliedTuningAt = null;
 
 function notice(message = "") {
   el("notice").textContent = message;
@@ -34,21 +36,30 @@ async function request(path, body) {
 }
 
 function controls() {
-  const active = status && ["loading", "ready", "stopping"].includes(status.state);
+  const tuning = !!status?.tuning?.active;
+  const active = tuning || (status && ["loading", "ready", "stopping"].includes(status.state));
   el("load").disabled = !status?.backend_available || active || actionPending || !!controller;
-  el("unload").disabled = !active || status?.state === "stopping" || actionPending;
-  el("send").disabled = status?.state !== "ready" || !!controller || actionPending || status?.chat_busy;
+  el("unload").disabled = !active || tuning || status?.state === "stopping" || actionPending;
+  el("send").disabled = status?.state !== "ready" || tuning || !!controller || actionPending || status?.chat_busy;
   el("stop").disabled = !controller;
   el("clear").disabled = !!controller;
   el("max-output").disabled = !!controller;
   el("reasoning-effort").disabled = !!controller;
+  el("quick-reasoning-effort").disabled = !!controller;
+  el("start-tuning").disabled = tuning || !!controller || actionPending || status?.chat_busy ||
+    !status?.backend_available || ["loading", "stopping"].includes(status?.state) || !el("tuning-consent").checked;
+  el("cancel-tuning").disabled = !tuning || actionPending;
+  el("cancel-work").disabled = actionPending || status?.state === "stopping";
+  el("tuning-goal").disabled = tuning || actionPending;
+  el("tuning-hybrid").disabled = tuning || actionPending || !status?.hybrid_available;
+  el("tuning-consent").disabled = tuning || actionPending;
   el("browse-models").disabled = active || actionPending || browserBusy;
   for (const button of el("model-browser").querySelectorAll("button")) {
     button.disabled = active || actionPending || browserBusy;
   }
   el("browser-path").disabled = active || actionPending || browserBusy;
   if (browserLocation && !browserLocation.parent) el("browser-up").disabled = true;
-  for (const id of ["model", "context", "placement", "cpu-threads", "batch-threads", "cpu-poll", "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target", "draft-model", "draft-tokens"]) {
+  for (const id of ["model", "context", "placement", "kv-cache-type", "cpu-threads", "batch-threads", "cpu-poll", "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target", "draft-model", "draft-tokens"]) {
     el(id).disabled = active || actionPending;
   }
   el("execution-mode").disabled = active || actionPending;
@@ -62,6 +73,7 @@ function controls() {
     el(id).disabled = active || actionPending || selectedMode === "auto" || !status?.speculation_enabled;
   }
   if (status?.backend_kind !== "llama.cpp") {
+    el("kv-cache-type").disabled = true;
     el("cpu-poll").disabled = true;
     el("host-op-offload").disabled = true;
     el("op-offload-min-batch").disabled = true;
@@ -99,7 +111,7 @@ function renderStatus() {
     : `Release candidate - ${experimental ? "Experimental ik_llama.cpp" : "Standard llama.cpp"} execution - Local only`;
   el("placement-note").textContent = hybrid
     ? `Experimental MoE profile: ${hybridContext.toLocaleString()} context and ${hybridBudget.toLocaleString()} MiB resident expert bank from the installation policy. Fitting, repacking, and host-op offload are disabled. Unload releases resources.`
-    : "Automatic uses llama.cpp fitting with the selected VRAM margin. It is not a RAM-fit guarantee. Larger contexts need more memory.";
+    : "Automatic uses llama.cpp fitting with the selected VRAM margin. It is not a RAM-fit guarantee. Larger contexts need more memory; 256K requires model and backend support.";
   el("cache-note").textContent = hybrid
     ? `Residency is derived from routed expert tensors, not a model-name allowlist. Cold experts execute on CPU; causal admissions use ${transfer}. Original weights, biases, activations and router probabilities are retained. New chat does not reset residency; unload/reload does.`
     : "Fewer threads can be faster. RAM loading can increase memory pressure. The upstream experimental expert cache uses VRAM and may be slower. Zero disables it.";
@@ -114,17 +126,20 @@ function renderStatus() {
   el("placement").querySelector('option[value="auto"]').textContent = hybrid
     ? `Experimental hybrid CPU / GPU (${transfer})` : "Automatic CPU / GPU placement";
   el("expert-cache").max = experimental ? "0" : "65536";
-  el("state").textContent = labels[status.state] || status.state;
-  el("state").dataset.state = status.state;
+  el("state").textContent = status.tuning?.active ? "Auto tuning" : labels[status.state] || status.state;
+  el("state").dataset.state = status.tuning?.active ? "loading" : status.state;
   updateView.setVersion(status.app_version);
   el("sidebar-model").textContent = status.model ? status.model.split(/[\\/]/).at(-1) : "No model loaded";
-  el("connection-state").textContent = status.state === "ready" ? "Ready. Your apps can connect now."
+  el("connection-state").textContent = status.tuning?.active ? "Auto Tune owns this model. Cancel it or wait before connecting apps."
+    : status.state === "ready" ? "Ready. Your apps can connect now."
     : "No model is ready. Open Chat → Model Controls to load a model before sending API requests.";
   el("controls-action-status").textContent = labels[status.state] || status.state;
   el("model-status").textContent = status.model || "No model loaded.";
   el("run-status").textContent = status.model
     ? `${status.backend_kind}${experimental || hybrid ? " (experimental)" : ""} · ${hybrid ? `Hybrid ${transfer}${status.hybrid_verified ? " (activation verified)" : " (verifying activation)"}` : status.placement === "cpu" ? "CPU only" : "Automatic placement"} · ${status.context.toLocaleString()} context · ${status.cpu_threads} generation / ${status.batch_threads} prompt threads · ${status.load_mode} loading · ${status.expert_cache_mib} MiB ${hybrid ? "resident expert bank · fitting off" : `expert cache · ${status.fit_target_mib} MiB reserve`} · polling ${status.cpu_poll} · host-op offload ${status.host_op_offload ? "on" : "off"} (min batch ${status.op_offload_min_batch})${status.draft_model ? ` · DFlash (${status.draft_tokens} draft tokens)` : ""}`
     : "Load an existing GGUF to begin.";
+  if (status.model) el("run-status").textContent += ` · Attention KV ${status.kv_cache_type || "f16"}`
+    + (status.kv_cache_verified ? " (backend confirmed)" : " (backend confirmation unavailable)");
   el("logs").textContent = status.logs.join("\n") || "No output yet.";
   const resources = status.resources;
   if (status.resource_error) {
@@ -158,6 +173,7 @@ function renderStatus() {
     el("cpu-poll").value = status.cpu_poll;
     el("host-op-offload").value = String(status.host_op_offload);
     el("op-offload-min-batch").value = status.op_offload_min_batch;
+    el("kv-cache-type").value = status.kv_cache_type || "f16";
     el("load-mode").value = status.load_mode;
     el("expert-cache").value = status.expert_cache_mib;
     el("fit-target").value = status.fit_target_mib;
@@ -170,7 +186,68 @@ function renderStatus() {
   if (status.error) notice(status.error);
   else if (status.context_warning) notice(status.context_warning);
   contextNote();
+  renderTuning();
   controls();
+}
+
+function renderTuning() {
+  const tuning = status.tuning;
+  const working = status.state === "loading" || tuning?.active;
+  el("model-work").hidden = !working;
+  if (working) {
+    el("work-title").textContent = tuning?.active ? "Auto tuning your model" : "Loading model";
+    el("work-detail").textContent = tuning?.active
+      ? `${tuning.phase} · ${elapsed(tuning.elapsed_seconds)} total. ${loadingText(status.loading)}`
+      : loadingText(status.loading);
+    el("work-output").textContent = tuning?.active && !status.loading
+      ? tuning.detail || "Local benchmarks can take time. You can read this page or cancel and restore."
+      : status.loading?.latest_output || "Waiting for the first backend message. You can cancel loading.";
+    el("cancel-work").textContent = tuning?.active ? "Cancel Auto Tune" : "Cancel loading";
+    if (!status.loading && typeof tuning?.progress === "number") {
+      el("work-progress").max = 1;
+      el("work-progress").value = tuning.progress;
+    } else {
+      el("work-progress").removeAttribute("value");
+    }
+  }
+  if (!tuning) return;
+  el("tuning-status").textContent = tuning.state === "idle" ? "No tuning run yet."
+    : `${tuning.phase || tuning.state} · ${elapsed(tuning.elapsed_seconds)}. ${tuning.scope || ""}`;
+  el("tuning-error").hidden = !tuning.error;
+  el("tuning-error").textContent = tuning.error || "";
+  const trials = tuning.trials || [];
+  el("tuning-trials").hidden = !trials.length;
+  el("tuning-trial-list").replaceChildren(...trials.map((trial) => {
+    const item = document.createElement("li");
+    const settings = trial.settings;
+    item.textContent = `${settings.execution_mode}, ${settings.context.toLocaleString()} context`
+      + (settings.expert_cache_mib ? `, ${settings.expert_cache_mib} MiB expert bank` : "")
+      + (trial.capacity_passed ? `: passed ${trial.prompt_tokens.toLocaleString()} input tokens in ${elapsed(trial.request_seconds)}.`
+        : `: failed - ${trial.error || "no completed capacity check"}`);
+    return item;
+  }));
+  const recommendation = tuning.recommendation;
+  el("tuning-result").hidden = !recommendation;
+  if (!recommendation) return;
+  const settings = recommendation.settings;
+  const apps = recommendation.apps;
+  const current = !tuning.active && status.state === "ready" && status.model === tuning.model &&
+    Object.entries(settings).every(([key, value]) => status[key] === value) &&
+    (settings.kv_cache_type || "f16") === (status.kv_cache_type || "f16");
+  if (current && appliedTuningAt !== tuning.completed_at) {
+    el("max-output").value = apps.maxOutputTokens;
+    appliedTuningAt = tuning.completed_at;
+    contextNote();
+  }
+  el("tuning-summary").textContent = `${current ? "Applied" : "Previous result; not currently applied"}: `
+    + `${settings.context.toLocaleString()} context, ${settings.execution_mode}. `
+    + `Verified ${recommendation.prompt_tokens_tested.toLocaleString()} input tokens and a short anchor-retrieval response. `
+    + `Context ${apps.context.toLocaleString()}, response allowance ${apps.maxOutputTokens.toLocaleString()}, `
+    + `safety margin ${apps.safetyMarginTokens.toLocaleString()} tokens. Model ID: local-model.`;
+  el("tuning-app-settings").textContent = JSON.stringify({
+    maxInputTokens: apps.maxInputTokens, maxOutputTokens: apps.maxOutputTokens,
+  }, null, 2);
+  el("copy-tuning-settings").disabled = !current;
 }
 
 function contextNote() {
@@ -180,6 +257,52 @@ function contextNote() {
 }
 
 el("max-output").addEventListener("input", contextNote);
+bindReasoningEffort(el("reasoning-effort"), el("quick-reasoning-effort"), notice);
+el("tuning-consent").addEventListener("change", controls);
+el("start-tuning").addEventListener("click", async () => {
+  actionPending = true;
+  notice();
+  controls();
+  try {
+    status = await request("/api/v1/tuning/start", {
+      model: el("model").value, goal: el("tuning-goal").value, placement: el("placement").value,
+      kv_cache_type: el("kv-cache-type").value,
+      include_hybrid: el("tuning-hybrid").checked, confirm: el("tuning-consent").checked,
+    });
+    renderStatus();
+  } catch (error) {
+    notice(error.message);
+  } finally {
+    actionPending = false;
+    controls();
+  }
+});
+async function cancelTuning() {
+  actionPending = true;
+  controls();
+  try {
+    status = await request("/api/v1/tuning/cancel", {});
+    renderStatus();
+  } catch (error) {
+    notice(error.message);
+  } finally {
+    actionPending = false;
+    controls();
+  }
+}
+el("cancel-tuning").addEventListener("click", cancelTuning);
+el("cancel-work").addEventListener("click", () => {
+  if (status.tuning?.active) cancelTuning();
+  else el("unload").click();
+});
+el("copy-tuning-settings").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(el("tuning-app-settings").textContent);
+    notice("VS Code limits copied. Update your app's model configuration before reconnecting.");
+  } catch (error) {
+    notice(`Clipboard unavailable. Copy the displayed limits manually. ${error.message}`);
+  }
+});
 el("open-controls").addEventListener("click", () => el("model-controls").showModal());
 el("close-controls").addEventListener("click", () => el("model-controls").close());
 el("model-controls").addEventListener("keydown", (event) => {
@@ -338,16 +461,18 @@ el("load-form").addEventListener("submit", async (event) => {
       cpu_poll: Number(el("cpu-poll").value),
       host_op_offload: el("host-op-offload").value === "true",
       op_offload_min_batch: Number(el("op-offload-min-batch").value),
+      kv_cache_type: el("kv-cache-type").value,
       load_mode: el("load-mode").value,
       expert_cache_mib: Number(el("expert-cache").value),
       fit_target_mib: Number(el("fit-target").value),
       draft_model: status?.speculation_enabled ? el("draft-model").value.trim() || null : null,
       draft_tokens: Number(el("draft-tokens").value),
     };
-    const payload = settings.execution_mode === "auto" ? { model: settings.model, execution_mode: "auto" }
+    const payload = settings.execution_mode === "auto"
+      ? { model: settings.model, execution_mode: "auto", kv_cache_type: settings.kv_cache_type }
       : settings.execution_mode === "hybrid" ? { model: settings.model, execution_mode: "hybrid",
         cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll,
-        expert_cache_mib: settings.expert_cache_mib }
+        expert_cache_mib: settings.expert_cache_mib, kv_cache_type: settings.kv_cache_type }
       : settings;
     status = await request("/api/v1/model/load", payload);
     clearChat();

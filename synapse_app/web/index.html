@@ -38,6 +38,10 @@
       <span id="state" role="status">Connecting</span>
     </header>
     <div id="notice" role="alert" hidden></div>
+    <section id="model-work" class="work-status" aria-label="Model operation progress" hidden>
+      <div><strong id="work-title" role="status">Loading model</strong><p id="work-detail"></p><p id="work-output" class="hint"></p><progress id="work-progress" aria-label="Model operation progress"></progress></div>
+      <button id="cancel-work" type="button" class="secondary">Cancel loading</button>
+    </section>
     <dialog id="release-details" aria-labelledby="release-title">
       <div class="dialog-header"><h2 id="release-title">Version &amp; updates</h2><button id="close-release" type="button" class="secondary">Close</button></div>
       <div class="dialog-content">
@@ -84,10 +88,13 @@
               <label for="placement">Execution</label>
               <select id="placement"><option value="auto">Automatic CPU / GPU placement</option><option value="cpu">CPU only</option></select>
               <label for="context">Context tokens</label>
-              <input id="context" type="number" value="4096" min="512" max="65536" step="1" required>
-              <p id="placement-note">Automatic uses upstream fitting with a VRAM margin. Larger contexts need more memory.</p>
+              <input id="context" type="number" value="4096" min="512" max="262144" step="1" required>
+              <p id="placement-note">Automatic uses upstream fitting with a VRAM margin. Larger contexts need more memory; 256K requires model and backend support.</p>
               <details>
                 <summary>Advanced performance (experimental)</summary>
+                <label for="kv-cache-type">Attention KV cache preset</label>
+                <select id="kv-cache-type"><option value="f16">Backend default (FP16)</option><option value="q8_0">Q8 K/V + Flash Attention (experimental)</option></select>
+                <p>Q8 reduces attention-cache memory, not model weights or all recurrent state. It changes cache precision and may affect answers. Context length stays unchanged. Official llama.cpp only.</p>
                 <label for="cpu-threads">Generation CPU threads</label>
                 <input id="cpu-threads" type="number" min="1" step="1" value="1" required>
                 <label for="batch-threads">Prompt CPU threads</label>
@@ -118,6 +125,25 @@
           </form>
           <p id="backend-help" class="callout" hidden></p>
         </section>
+        <section aria-labelledby="tuning-title" class="settings-section">
+          <h3 id="tuning-title">Auto Tune for this system</h3>
+          <p>Measure this model on your hardware, then recommend model and app settings. Trials use synthetic local prompts; nothing is uploaded.</p>
+          <label for="tuning-goal">Tuning goal</label>
+          <select id="tuning-goal"><option value="balanced">Balanced daily use (up to 32K)</option><option value="maximum">Maximum context (up to the model limit or 256K)</option></select>
+          <label><input id="tuning-hybrid" type="checkbox"> Include experimental hybrid trials (not quality-qualified)</label>
+          <p class="hint">Balanced tests input capacity, not every thread/cache combination. Maximum Context can take an hour or more. Hybrid fitting is off; trials may fail and use smaller expert banks.</p>
+          <label><input id="tuning-consent" type="checkbox"> Allow unloading/reloading this model and running benchmarks. Other apps must wait. Cancel restores the previous model when possible.</label>
+          <div class="actions"><button id="start-tuning" type="button" disabled>Start Auto Tune</button><button id="cancel-tuning" type="button" class="secondary" disabled>Cancel &amp; restore</button></div>
+          <p id="tuning-status" role="status">No tuning run yet.</p>
+          <p id="tuning-error" class="callout" role="alert" hidden></p>
+          <details id="tuning-trials" hidden><summary>Measured trials and failures</summary><ul id="tuning-trial-list"></ul></details>
+          <div id="tuning-result" hidden>
+            <h4>Recommended app settings</h4>
+            <p id="tuning-summary"></p><pre id="tuning-app-settings"></pre>
+            <button id="copy-tuning-settings" type="button" class="secondary">Copy VS Code limits</button>
+            <p class="hint">Update your app's model limits before reconnecting. These recommendations do not change other apps automatically. Input tests and short replies do not establish general answer quality or sustained speed.</p>
+          </div>
+        </section>
           <section class="settings-section" aria-labelledby="status-title">
             <p class="eyebrow">RUNTIME</p><h2 id="status-title">Know what is running</h2>
             <p id="model-status">No model loaded.</p><p id="run-status"></p><p id="selection-reason"></p><p id="resources" role="status"></p>
@@ -131,6 +157,7 @@
       <div id="messages" role="log" aria-label="Conversation"><p id="empty">Your next idea starts here.<br>Open Model Controls to choose a local model. Chats stay in this page and are not saved.</p></div>
       <form id="chat-form">
         <label for="prompt">Message</label><textarea id="prompt" rows="3" placeholder="What would you like to work on?" aria-describedby="composer-hint" enterkeyhint="send" required></textarea>
+        <div class="composer-options"><label for="quick-reasoning-effort">Reasoning effort</label><select id="quick-reasoning-effort"><option value="default">Model default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
         <div class="actions"><button id="send" type="submit" disabled>Send</button><button id="stop" type="button" class="secondary" disabled>Stop</button><a class="text-link" href="#monitor">Monitor generation &#8594;</a></div>
         <p id="timing" role="status" title="Backend-reported generation speed includes reasoning tokens. Total time includes prompt processing and network time."></p>
         <p id="composer-hint" class="hint">Enter to send. Shift+Enter for a new line.</p>
