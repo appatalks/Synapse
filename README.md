@@ -7,6 +7,11 @@ OpenAI-compatible API into one small app. Its optional experimental MoE engine
 keeps frequently used experts on the GPU and executes cold experts on the CPU,
 instead of forcing every operation through the same placement strategy.
 
+![SYNAPSE Monitor beside VS Code, showing generation speed, CPU/GPU load, memory and I/O](assets/screenshot-testing.png)
+
+Live monitoring while a local model serves VS Code. Screenshot values are
+illustrative, not benchmark results.
+
 For the architecture, methods, benchmark evidence and qualification limits,
 read the [technical white paper (PDF)](docs/whitepaper/synapse-whitepaper.pdf).
 [Editable sources and offline build instructions](docs/whitepaper/README.md) are included.
@@ -33,13 +38,6 @@ observed non-hybrid control; its 8 GiB attempt failed to fit.
 [Qwen3.6 measurements and verification limits](docs/benchmarks/qwen36-q8.md) ·
 [All conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
-Not every MoE is hybrid-compatible: the
-[Mistral Small 4 study](docs/benchmarks/mistral4-compatibility.md) records its
-FP32 operation requirement and unpromoted prototype. Its
-[isolated native integration and research timings](docs/benchmarks/mistral4-native-experimental.md)
-are experimental only: strict native equivalence still fails, so it is not
-included in the headline table above.
-
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
 or standard llama.cpp mode. They are not promises for every model or machine.
 Experimental acceleration is **not yet quality-qualified**: some strict
@@ -47,9 +45,6 @@ CPU-reference logit comparisons and an earlier structured-answer check failed.
 Newer targeted checks pass, but do not establish equivalent answer quality
 across models and workloads. These failures do not by themselves establish that
 acceleration caused an incorrect answer.
-
-Later GPT tuning reached a separate 50.06 tok/s technical median, but that is **not** the matched
-comparison above or a sustained cross-workload 60 tok/s result.
 
 > **Release candidate. Experimental acceleration is not quality-qualified.**
 > Standard execution remains available. Check important model answers independently.
@@ -106,31 +101,9 @@ Without a public release yet, use those source instructions on any platform.
 3. Open **Monitor** for speed, CPU/GPU, VRAM, temperature, power, PCIe, read I/O,
    RAM and context fill—or **Connect an app** to use your local model in another tool.
 
-**Auto Tune** in Model Controls measures near-capacity input on your system and
-applies a passing configuration, then offers copyable VS Code/OpenAI-client limits.
-Balanced daily use tests up to 32K; Maximum Context can test up to the model limit
-or 256K and take an hour or more. Experimental hybrid trials require a separate
-opt-in. Tuning temporarily owns the model; cancellation restores the previous
-configuration when possible. It tests input capacity and short anchor-retrieval
-replies, not general answer quality or an exhaustive speed search.
-[Tuning scope, saved results and client settings](docs/installing.md#auto-tune).
-
-No account, hosted inference or model uploads. Chats stay in the page.
-The app needs only Python and a browser; models and an appropriate
-[llama.cpp backend](https://github.com/ggml-org/llama.cpp) are separate.
-The reference backend revision is b11669. [Platform and sensor limits](docs/monitoring.md).
-
-## Updates without reinstalling
-
-Click the **version in the sidebar**. It lights up when a newer compatible
-public release is found. Managed installs can download a verified update and
-restart after your confirmation. Models, backends and local profiles are not
-replaced. Source/pip installs get release information, not overwritten files.
-
-Update checks contact GitHub for release metadata only, never prompts or
-hardware data. Use `--no-update-check` to disable automatic checks.
-Checksums verify the downloaded artifact's integrity; they are not a separate
-publisher signature. [Installation and update details](docs/installing.md).
+[Auto Tune](docs/application_notes.md#auto-tune) checks context capacity and
+recommends app limits. See [application notes](docs/application_notes.md) for
+runtime requirements, updates and advanced details.
 
 ## Inspired by Strata, aimed at model-agnostic execution
 
@@ -144,22 +117,12 @@ transparent counters and an independently usable local app. It does not bundle
 Strata, its engine or model packs, is not affiliated with Strata, and does not
 claim feature parity or superior performance to it.
 
-The engine also builds on llama.cpp's upstream expert-cache machinery,
-including [ggml-org/llama.cpp#29887](https://github.com/ggml-org/llama.cpp/pull/29887),
-already included in our pinned backend. That cache uploads misses for GPU
-execution; SYNAPSE's experimental hybrid dispatcher extends the tensor/slot
-machinery with CPU cold-expert execution and guarded causal admissions.
-The PR's published speedups are not an additional multiplier on SYNAPSE's results.
-[Local upstream-cache investigation and the pinned-host-loading result](docs/benchmarks/upstream-pr29887.md).
-
 The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
 
 ---
 
-**Local only:** the API has no app authentication. Do not expose it through a
-tunnel or reverse proxy. No universal speedup, fit guarantee or quality
-qualification is implied.
+**Local-only API:** do not expose it to the network. [Details](docs/application_notes.md#local-only-api).
 
 [Installation](docs/installing.md) · [Monitoring](docs/monitoring.md) ·
-[Development](docs/releasing.md) · [MIT license](LICENSE)
+[Application notes](docs/application_notes.md) · [Development](docs/releasing.md) · [MIT license](LICENSE)
