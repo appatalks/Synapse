@@ -19,7 +19,7 @@ from typing import Callable
 LOG = logging.getLogger("synapse.tuning")
 LOAD_FIELDS = ("model", "execution_mode", "context", "placement", "cpu_threads", "batch_threads",
                "load_mode", "expert_cache_mib", "fit_target_mib", "host_op_offload", "cpu_poll",
-               "op_offload_min_batch", "draft_model", "draft_tokens")
+               "op_offload_min_batch", "kv_cache_type", "draft_model", "draft_tokens")
 ANCHORS = {"start": "cedar4821", "middle": "violet7319", "end": "quartz9067"}
 
 
@@ -33,7 +33,8 @@ class Cancelled(RuntimeError):
 
 def _valid_settings(settings: object) -> bool:
     return (isinstance(settings, dict) and type(settings.get("context")) is int and
-            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid"))
+            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid") and
+            settings.get("kv_cache_type", "f16") in ("f16", "q8_0"))
 
 
 def client_settings(context: int) -> dict:
@@ -114,13 +115,14 @@ class AutoTuner:
             self.report.update(fields)
 
     def start(self, data: dict) -> dict:
-        if set(data) - {"model", "goal", "include_hybrid", "placement", "confirm"}:
-            raise ValueError("Auto Tune accepts model, goal, include_hybrid, placement and confirm.")
+        if set(data) - {"model", "goal", "include_hybrid", "placement", "kv_cache_type", "confirm"}:
+            raise ValueError("Auto Tune accepts model, goal, include_hybrid, placement, kv_cache_type and confirm.")
         if data.get("confirm") is not True:
             raise ValueError("Confirm that Auto Tune may unload the model and run local benchmarks.")
         goal = data.get("goal", "balanced")
         hybrid = data.get("include_hybrid", False)
         placement = data.get("placement", "auto")
+        cache = data.get("kv_cache_type", "f16")
         if goal not in ("balanced", "maximum") or type(hybrid) is not bool or placement not in ("auto", "cpu"):
             raise ValueError("Select a supported tuning goal, placement and hybrid option.")
         model = data.get("model")
@@ -128,6 +130,8 @@ class AutoTuner:
             raise ValueError("Choose a local GGUF model before tuning.")
         runtime = self.runtime()
         current = runtime.status()
+        if cache not in ("f16", "q8_0") or (cache != "f16" and current["backend_kind"] != "llama.cpp"):
+            raise ValueError("Select a supported KV cache precision; Q8 requires the official llama.cpp backend.")
         if self.closed or runtime.closed or self.active or current["chat_busy"] or current["state"] in ("loading", "stopping"):
             raise RuntimeError("Wait for the current model operation or chat to finish before tuning.")
         metadata = self.metadata(Path(model))
@@ -152,13 +156,14 @@ class AutoTuner:
             self.report = {
                 "schema_version": 1, "state": "running", "active": True, "model": model, "goal": goal,
                 "include_hybrid": hybrid, "phase": "Preparing local trials", "detail": "",
+                "kv_cache_type": cache,
                 "progress": None, "trials": [], "recommendation": None, "error": None,
                 "hardware": {**hardware, "logical_cpus": self.cpu_count(), "ram_total_bytes": total,
                              "ram_available_at_start_bytes": available},
                 "scope": "Near-capacity input and short-answer checks; not a general quality or sustained-speed qualification.",
             }
             self.worker = threading.Thread(
-                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous), daemon=True)
+                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache), daemon=True)
             self.worker.start()
         return self.snapshot()
 
@@ -393,7 +398,7 @@ class AutoTuner:
                 raise TrialError(f"Applied context {loaded['context']} differs from the selected {settings['context']}.")
 
     def _run(self, runtime, model: str, contexts: list[int], placement: str, hybrid: bool,
-             metadata: dict, previous: dict | None) -> None:
+             metadata: dict, previous: dict | None, cache: str) -> None:
         original_budget = runtime.hybrid_context
         selected = None
         final_state = "completed"
@@ -402,7 +407,8 @@ class AutoTuner:
             for context in contexts:
                 settings = {"model": model, "execution_mode": "standard", "context": context,
                             "placement": placement, "cpu_threads": min(8, self.cpu_threads()),
-                            "batch_threads": min(16, self.cpu_count()), "fit_target_mib": 1024}
+                            "batch_threads": min(16, self.cpu_count()), "fit_target_mib": 1024,
+                            "kv_cache_type": cache}
                 trial = self._trial(runtime, settings)
                 if not trial["capacity_passed"]:
                     break
@@ -421,7 +427,8 @@ class AutoTuner:
                     settings = {"model": model, "execution_mode": "hybrid", "context": context,
                                 "placement": "auto", "cpu_threads": min(8, self.cpu_threads()),
                                 "batch_threads": min(16, self.cpu_count()), "expert_cache_mib": bank,
-                                "load_mode": "auto", "host_op_offload": False, "fit_target_mib": 1024}
+                                "load_mode": "auto", "host_op_offload": False, "fit_target_mib": 1024,
+                                "kv_cache_type": cache}
                     trial = self._trial(runtime, settings)
                     if trial["capacity_passed"]:
                         if trial["request_seconds"] <= selected["request_seconds"] * 0.95:

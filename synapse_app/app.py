@@ -45,6 +45,7 @@ BODY_LIMIT = 8 * 1024 * 1024
 RESPONSE_LIMIT = 8 * 1024 * 1024
 MAX_CONTEXT = 262144
 HYBRID_VERIFICATION_TIMEOUT = 60
+KV_VERIFICATION_TIMEOUT = 60
 HYBRID_CHECK_LABELS = {
     "hybrid": "hybrid dispatcher activation", "coverage": "full routed-layer coverage",
     "context": "actual context size", "direct": "direct transfers", "registered": "host-memory registration",
@@ -442,6 +443,9 @@ class Runtime:
         self.host_op_offload = True
         self.cpu_poll = 50
         self.op_offload_min_batch = 32
+        self.kv_cache_type = "f16"
+        self.kv_cache_verified = False
+        self.flash_attention_verified: bool | None = None
         self.draft_model: str | None = None
         self.draft_tokens = 9
         self.resources: dict | None = None
@@ -568,6 +572,12 @@ class Runtime:
         with self.lock:
             now = time.monotonic()
             pending = self.required_hybrid_markers - self.hybrid_markers if self.hybrid_active else set()
+            waiting = [HYBRID_CHECK_LABELS.get(check, check) for check in sorted(pending)]
+            if self.kv_cache_type == "q8_0":
+                if not self.kv_cache_verified:
+                    waiting.append("Q8 attention K/V cache precision")
+                if self.flash_attention_verified is not True:
+                    waiting.append("Flash Attention activation")
             loading = None
             if self.state == "loading" and self.load_started is not None:
                 loading = {
@@ -575,8 +585,7 @@ class Runtime:
                     "elapsed_seconds": now - self.load_started,
                     "last_output_age_seconds": now - self.last_output_at if self.last_output_at is not None else None,
                     "latest_output": self.logs[-1][:300] if self.logs else None,
-                    "waiting_for": [HYBRID_CHECK_LABELS.get(check, check) for check in sorted(pending)]
-                    if self.backend_ready_at is not None else [],
+                    "waiting_for": waiting if self.backend_ready_at is not None else [],
                     "timeout_seconds": self.load_timeout,
                 }
             return {
@@ -627,6 +636,9 @@ class Runtime:
                 "host_op_offload": self.host_op_offload,
                 "cpu_poll": self.cpu_poll,
                 "op_offload_min_batch": self.op_offload_min_batch,
+                "kv_cache_type": self.kv_cache_type,
+                "kv_cache_verified": self.kv_cache_verified,
+                "flash_attention_verified": self.flash_attention_verified,
                 "draft_model": self.draft_model,
                 "draft_tokens": self.draft_tokens,
                 "logical_cpus": len(available_cpus()),
@@ -694,12 +706,17 @@ class Runtime:
         host_op_offload = data.get("host_op_offload", not hybrid)
         cpu_poll = data.get("cpu_poll", 50)
         op_offload_min_batch = data.get("op_offload_min_batch", 32)
+        kv_cache_type = data.get("kv_cache_type", "f16")
         draft_value = data.get("draft_model")
         draft_tokens = data.get("draft_tokens", 9)
         if type(context) is not int or not 512 <= context <= MAX_CONTEXT:
             raise AppError(400, f"Context must be an integer between 512 and {MAX_CONTEXT}.")
         if placement not in ("auto", "cpu"):
             raise AppError(400, "Placement must be 'auto' or 'cpu'.")
+        if kv_cache_type not in ("f16", "q8_0"):
+            raise AppError(400, "KV cache precision must be f16 or q8_0.")
+        if kv_cache_type != "f16" and self.backend_kind != "llama.cpp":
+            raise AppError(400, "The Q8 KV cache preset requires the official llama.cpp backend.")
         for name, value in (("CPU threads", cpu_threads), ("Batch threads", batch_threads)):
             if type(value) is not int or not 1 <= value <= len(available_cpus()):
                 raise AppError(400, f"{name} must be an integer between 1 and {len(available_cpus())}.")
@@ -799,13 +816,17 @@ class Runtime:
                 if not host_op_offload:
                     command += ["--no-op-offload"]
             if draft is not None:
-                command += ["--model-draft", str(draft), "--flash-attn", "on"]
+                command += ["--model-draft", str(draft)]
                 if self.backend_kind == "llama.cpp":
                     command += ["--spec-type", "draft-dflash", "--spec-draft-n-max", str(draft_tokens),
                                 "--gpu-layers-draft", "all", "--jinja"]
                 else:
                     command += ["--spec-type", f"dflash:n_max={draft_tokens},p_min=0.0",
                                 "--gpu-layers-draft", "999"]
+            if kv_cache_type == "q8_0":
+                command += ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--log-verbosity", "4"]
+            if draft is not None or kv_cache_type == "q8_0":
+                command += ["--flash-attn", "on"]
             # Do not inherit placement overrides or credentials from a developer's shell.
             environment = {
                 key: value for key, value in os.environ.items()
@@ -858,6 +879,9 @@ class Runtime:
             self.host_op_offload = host_op_offload
             self.cpu_poll = cpu_poll
             self.op_offload_min_batch = op_offload_min_batch
+            self.kv_cache_type = kv_cache_type
+            self.kv_cache_verified = False
+            self.flash_attention_verified = None
             self.draft_model = str(draft) if draft is not None else None
             self.draft_tokens = draft_tokens
             self.resources = None
@@ -894,7 +918,8 @@ class Runtime:
                 backend_failed = False
                 with self.lock:
                     if self.process is process:
-                        self.logs.append(line.rstrip().replace(key, "[redacted]")[:2000])
+                        self.logs.append(("Backend authentication configured." if "api_keys:" in line
+                                          else line.rstrip().replace(key, "[redacted]"))[:2000])
                         self.last_output_at = time.monotonic()
                         lower = line.lower()
                         if "warmup" in lower or "warm-up" in lower:
@@ -905,6 +930,18 @@ class Runtime:
                             self.loading_phase = "Allocating model and context memory"
                         elif "load_tensors" in lower or "model_loader" in lower or "loading model" in lower:
                             self.loading_phase = "Reading model weights"
+                        cache = re.search(r"K \(([^)]+)\):.*V \(([^)]+)\):", line)
+                        if cache and "kv_cache" in lower:
+                            self.kv_cache_verified = cache[1] == cache[2] == self.kv_cache_type
+                            if self.kv_cache_type == "q8_0" and not self.kv_cache_verified:
+                                self.state = "error"
+                                self.error = (f"Requested Q8 attention cache, but backend reported K={cache[1]}, "
+                                              f"V={cache[2]}. No precision fallback was accepted.")
+                                LOG.error("%s", self.error)
+                                backend_failed = True
+                        attention = re.search(r"flash_attn\s*=\s*(on|off|enabled|disabled|true|false|1|0)\b", lower)
+                        if attention:
+                            self.flash_attention_verified = attention[1] in ("on", "enabled", "true", "1")
                         if self.hybrid_active:
                             if f"EXPERIMENTAL HYBRID enabled: {self.hybrid_experts} selected experts; adaptive admissions" in line:
                                 self.hybrid_markers.add("hybrid")
@@ -986,9 +1023,14 @@ class Runtime:
                                     self.backend_ready_at = time.monotonic()
                                 if self.hybrid_active and not self.required_hybrid_markers <= self.hybrid_markers:
                                     self.loading_phase = "Verifying experimental hybrid execution"
+                                if self.kv_cache_type == "q8_0" and (
+                                        not self.kv_cache_verified or self.flash_attention_verified is not True):
+                                    self.loading_phase = "Verifying Q8 cache and Flash Attention"
                             if (self.process is process and self.state == "loading" and
                                     (not self.hybrid_active or
-                                     self.required_hybrid_markers <= self.hybrid_markers)):
+                                     self.required_hybrid_markers <= self.hybrid_markers) and
+                                    (self.kv_cache_type != "q8_0" or
+                                     (self.kv_cache_verified and self.flash_attention_verified is True))):
                                 self.state = "ready"
                     else:
                         with self.lock:
@@ -1003,8 +1045,11 @@ class Runtime:
                 with self.lock:
                     verification_expired = (self.hybrid_active and self.backend_ready_at is not None and
                                             time.monotonic() - self.backend_ready_at >= HYBRID_VERIFICATION_TIMEOUT)
+                    cache_expired = (self.kv_cache_type == "q8_0" and self.backend_ready_at is not None and
+                                     time.monotonic() - self.backend_ready_at >= KV_VERIFICATION_TIMEOUT and
+                                     (not self.kv_cache_verified or self.flash_attention_verified is not True))
                     if (self.process is process and self.state == "loading"
-                            and (time.monotonic() >= deadline or verification_expired)):
+                            and (time.monotonic() >= deadline or verification_expired or cache_expired)):
                         self._terminate(process)
                         self.state = "error"
                         missing = ", ".join(sorted(self.required_hybrid_markers - self.hybrid_markers))
@@ -1015,6 +1060,10 @@ class Runtime:
                                       if self.hybrid_active else
                                       "Model loading timed out. See backend output; try a smaller model or CPU mode. "
                                       + (self.readiness_error or ""))
+                        if cache_expired or (self.kv_cache_type == "q8_0" and self.backend_ready_at is not None and
+                                             (not self.kv_cache_verified or self.flash_attention_verified is not True)):
+                            self.error = ("Q8 cache verification timed out: the backend must confirm q8_0 for both "
+                                          "attention K/V caches and enabled Flash Attention. Check backend output.")
                         LOG.error("%s", self.error)
                         return
             time.sleep(0.2)

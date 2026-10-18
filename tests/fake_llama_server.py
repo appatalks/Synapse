@@ -35,6 +35,10 @@ parser.add_argument("--model-draft")
 parser.add_argument("--spec-type")
 parser.add_argument("--spec-draft-n-max")
 parser.add_argument("--gpu-layers-draft")
+parser.add_argument("--cache-type-k")
+parser.add_argument("--cache-type-v")
+parser.add_argument("--flash-attn")
+parser.add_argument("--log-verbosity")
 args, _ = parser.parse_known_args()
 stats = {"tokens": 0, "decoded": 0}
 if Path(args.model).stem == "fail":
@@ -86,7 +90,15 @@ print(json.dumps({
     "cuda_plugin": os.getenv("GGML_BACKEND_PATH"),
     "no_repack": args.no_repack,
     "no_host": args.no_host,
+    "cache_type_k": args.cache_type_k,
+    "cache_type_v": args.cache_type_v,
+    "flash_attn": args.flash_attn,
 }), flush=True)
+cache = "f16" if Path(args.model).stem == "q8-cache-fallback" else args.cache_type_k or "f16"
+if args.log_verbosity == "4":
+    print(f"llama_kv_cache_unified: size = 1 MiB, K ({cache}): 1 MiB, V ({cache}): 1 MiB", flush=True)
+    print(f"llama_context: flash_attn = {'enabled' if args.flash_attn == 'on' else 'disabled'}", flush=True)
+    print(f"api_keys: ****{args.api_key[-4:]}", flush=True)
 if os.getenv("VRAMBRIDGE_HYBRID_PLAN") and Path(args.model).stem != "hybrid-no-markers":
     plan = os.environ["VRAMBRIDGE_HYBRID_PLAN"]
     selected = 0 if plan == "auto" else sum(bool(line) and not line.startswith("#")

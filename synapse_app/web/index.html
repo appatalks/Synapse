@@ -92,6 +92,9 @@
               <p id="placement-note">Automatic uses upstream fitting with a VRAM margin. Larger contexts need more memory; 256K requires model and backend support.</p>
               <details>
                 <summary>Advanced performance (experimental)</summary>
+                <label for="kv-cache-type">Attention KV cache preset</label>
+                <select id="kv-cache-type"><option value="f16">Backend default (FP16)</option><option value="q8_0">Q8 K/V + Flash Attention (experimental)</option></select>
+                <p>Q8 reduces attention-cache memory, not model weights or all recurrent state. It changes cache precision and may affect answers. Context length stays unchanged. Official llama.cpp only.</p>
                 <label for="cpu-threads">Generation CPU threads</label>
                 <input id="cpu-threads" type="number" min="1" step="1" value="1" required>
                 <label for="batch-threads">Prompt CPU threads</label>

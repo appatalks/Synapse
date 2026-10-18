@@ -466,6 +466,58 @@ class LocalAppTests(unittest.TestCase):
         self.assertIn('"gpu_layers": "auto"', "\n".join(status["logs"]))
         self.assertIn('"fit_target": "1024"', "\n".join(status["logs"]))
 
+    def test_q8_cache_requires_explicit_selection_and_is_backend_verified(self):
+        default = self.load()
+        self.assertEqual(default["kv_cache_type"], "f16")
+        arguments = self.runtime.process.args
+        self.assertNotIn("--cache-type-k", arguments)
+        self.assertNotIn("--cache-type-v", arguments)
+        self.assertNotIn("--flash-attn", arguments)
+        self.assertNotIn("--log-verbosity", arguments)
+        self.runtime.stop()
+        selected = self.load(kv_cache_type="q8_0")
+        arguments = self.runtime.process.args
+        self.assertEqual(arguments[arguments.index("--cache-type-k") + 1], "q8_0")
+        self.assertEqual(arguments[arguments.index("--cache-type-v") + 1], "q8_0")
+        self.assertEqual(arguments[arguments.index("--flash-attn") + 1], "on")
+        self.assertEqual(arguments.count("--flash-attn"), 1)
+        self.assertEqual(arguments[arguments.index("--log-verbosity") + 1], "4")
+        self.assertTrue(selected["kv_cache_verified"])
+        self.assertTrue(selected["flash_attention_verified"])
+        self.assertEqual(selected["kv_cache_type"], "q8_0")
+        self.assertNotIn("****" + self.runtime.key[-4:], "\n".join(selected["logs"]))
+        self.assertIn("Backend authentication configured.", selected["logs"])
+
+    def test_q8_cache_rejects_invalid_values_and_unsupported_backends(self):
+        for value in (None, True, 0, "q4_0", "unknown"):
+            self.assertEqual(self.request("POST", "/api/v1/model/load",
+                                         {"model": str(self.model), "kv_cache_type": value})[0], 400)
+        self.runtime.backend_kind = "ik_llama.cpp"
+        code, _, body = self.request("POST", "/api/v1/model/load",
+                                    {"model": str(self.model), "kv_cache_type": "q8_0"})
+        self.assertEqual(code, 400)
+        self.assertIn(b"official llama.cpp", body)
+        self.assertIsNone(self.runtime.process)
+
+    def test_q8_cache_does_not_accept_a_silent_precision_fallback(self):
+        model = self.root / "q8-cache-fallback.gguf"
+        model.write_bytes(b"GGUF")
+        self.assertEqual(self.request("POST", "/api/v1/model/load",
+                                     {"model": str(model), "kv_cache_type": "q8_0"})[0], 202)
+        failed = self.wait_state("error")
+        self.assertIn("No precision fallback was accepted", failed["error"])
+        self.assertFalse(failed["kv_cache_verified"])
+
+    def test_auto_tune_preserves_explicit_q8_precision_in_trials_and_applied_result(self):
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(self.model), "confirm": True, "kv_cache_type": "q8_0"})[0], 202)
+        result = self.wait_tuning("completed")
+        self.assertEqual(result["recommendation"]["settings"]["kv_cache_type"], "q8_0")
+        self.assertTrue(all(trial["settings"]["kv_cache_type"] == "q8_0" for trial in result["trials"]))
+        self.assertEqual(self.runtime.status()["kv_cache_type"], "q8_0")
+        self.assertTrue(self.runtime.status()["kv_cache_verified"])
+
     def hybrid_runtime(self, **extra):
         self.plan = self.root / "hot experts.txt"
         self.plan.write_text("# training-only test plan\n0 7\n35 127\n")

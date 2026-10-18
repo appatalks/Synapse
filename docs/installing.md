@@ -45,6 +45,26 @@ The browser chat's output limit is separate from an editor client's output limit
 JSON request bodies are limited to 8 MiB so long prompts can pass through the API;
 the backend still enforces its token limit.
 
+### Optional Q8 attention cache
+
+Under **Run settings -> Advanced performance**, the official llama.cpp backend
+offers an explicit **Q8 K/V + Flash Attention** preset. FP16 backend defaults
+remain unchanged unless selected. The preset passes `--cache-type-k q8_0`,
+`--cache-type-v q8_0` and `--flash-attn on`; it does not reduce context length
+or change model weights. Auto Tune retains the selected preset through trials,
+application and restoration.
+
+Q8 can roughly halve attention K/V storage compared with FP16, but does not
+halve total model memory or quantize every recurrent-state buffer. It changes
+cache precision and can affect answer quality. Extra memory headroom may improve
+placement or enable a larger hybrid expert bank; speedups are not guaranteed.
+SYNAPSE requires backend confirmation of both Q8 attention-cache types and enabled
+Flash Attention before marking this preset ready. A reported precision fallback
+fails explicitly. Other backend adapters retain their existing defaults.
+The Q8 preset also enables the pinned backend's library-info diagnostics
+(`--log-verbosity 4`) so these confirmations are visible. Debug and verbose-prompt
+logging are not enabled, and backend authentication diagnostic lines are redacted.
+
 ## Auto Tune
 
 Open **Model Controls -> Auto Tune for this system**, choose a goal and explicitly
