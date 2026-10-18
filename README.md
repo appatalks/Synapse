@@ -7,11 +7,6 @@ OpenAI-compatible API into one small app. Its optional experimental MoE engine
 keeps frequently used experts on the GPU and executes cold experts on the CPU,
 instead of forcing every operation through the same placement strategy.
 
-![SYNAPSE Monitor beside VS Code, showing generation speed, CPU/GPU load, memory and I/O](assets/screenshot-testing.png)
-
-Live monitoring while a local model serves VS Code. Screenshot values are
-illustrative, not benchmark results.
-
 For the architecture, methods, benchmark evidence and qualification limits,
 read the [technical white paper (PDF)](docs/whitepaper/synapse-whitepaper.pdf).
 [Editable sources and offline build instructions](docs/whitepaper/README.md) are included.
@@ -48,6 +43,11 @@ acceleration caused an incorrect answer.
 
 > **Release candidate. Experimental acceleration is not quality-qualified.**
 > Standard execution remains available. Check important model answers independently.
+
+![SYNAPSE Monitor beside VS Code, showing generation speed, CPU/GPU load, memory and I/O](assets/screenshot-testing.png)
+
+Live monitoring while a local model serves VS Code. Screenshot values are
+illustrative, not benchmark results.
 
 ## Tested compatibility
 
