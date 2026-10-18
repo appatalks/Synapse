@@ -7,7 +7,7 @@
     <img src="assets/blackhole-synapse.webp" width="960" alt="Looping black hole animation made with SYNAPSE">
   </a>
   <br>
-  <em>A black hole made with SYNAPSE. Select the animation to watch the full MP4.</em>
+  <em>A black hole made with Synapse using Qwen3.8-Flash-Next.</em>
 </p>
 
 SYNAPSE brings local chat, model controls, hardware monitoring and an
