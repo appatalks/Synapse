@@ -10,6 +10,9 @@ are not added into a misleading utilization total. System RAM and context
 fill use live doughnut pie charts, not historical line charts.
 Missing capacity or usage leaves an explicitly unavailable ring.
 Experimental-engine details and warnings live on this tab.
+The System RAM value, filled arc, center caption and percentage footer all
+describe **used** memory. Free/OS-available memory remains separate supporting
+information; the footer does not substitute the free percentage for used RAM.
 
 | Counter | Scope and source |
 | --- | --- |

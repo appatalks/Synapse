@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 const web = existsSync(new URL("../synapse_app/web/", import.meta.url))
   ? "../synapse_app/web/" : "../tools/vrambridge/web/";
-const { readings, segments, metrics, fraction } = await import(new URL(`${web}monitor.mjs`, import.meta.url));
+const { readings, segments, metrics, fraction, MonitorView } = await import(new URL(`${web}monitor.mjs`, import.meta.url));
 const { viewForHash } = await import(new URL(`${web}navigation.mjs`, import.meta.url));
 
 test("navigation accepts only existing views", () => {
@@ -103,4 +103,74 @@ test("RAM pie separates occupied cache from pressure and never adds overlapping 
 
 test("Windows RAM remainder is labeled OS available, not cache-free physical RAM", () => {
   assert.equal(readings({system: {ram_basis: "os_unavailable"}}).ram.freeLabel, "OS available");
+});
+
+function renderRam(system) {
+  class Node {
+    constructor() {
+      this.children = [];
+      this.attributes = {};
+      this.text = "";
+      this.classList = { toggle() {} };
+    }
+    set textContent(value) { this.text = String(value); this.children = []; }
+    get textContent() { return this.text + this.children.map((child) => child.textContent).join(""); }
+    setAttribute(key, value) { this.attributes[key] = String(value); }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.text = ""; this.children = children; }
+    get firstChild() { return this.children[0]; }
+    get lastChild() { return this.children.at(-1); }
+  }
+  const previous = globalThis.document;
+  globalThis.document = {
+    createElement: () => new Node(),
+    createElementNS: () => new Node(),
+    createTextNode: (text) => { const node = new Node(); node.textContent = text; return node; },
+  };
+  try {
+    const ram = { card: new Node(), value: new Node(), description: new Node(), chart: new Node(),
+      scale: new Node(), title: "System RAM", unit: "GiB", pie: true };
+    ram.scale.append(new Node(), new Node());
+    const monitor = Object.create(MonitorView.prototype);
+    Object.assign(monitor, {
+      history: [{ time_ms: Date.now(), system, backend: {}, gpus: [], errors: {} }],
+      paused: false, gpu: { value: "all" }, status: new Node(), error: new Node(), cards: { ram },
+    });
+    monitor.render();
+    return ram;
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+}
+
+test("RAM ring, caption and footer consistently show used rather than the free complement", () => {
+  for (const [used, percent] of [[0, 0], [32, 25], [128, 100]]) {
+    const ram = renderRam({ ram_used_bytes: used * 1024 ** 3, ram_total_bytes: 128 * 1024 ** 3,
+      ram_free_bytes: (128 - used) * 1024 ** 3, ram_basis: "physical_occupied" });
+    assert.equal(ram.value.textContent, `${used.toFixed(1)}GiB`);
+    assert.equal(ram.chart.children.find((node) => node.attributes.class === "pie-used")
+      .attributes["stroke-dasharray"], `${percent} 100`);
+    assert.equal(ram.chart.children.find((node) => node.attributes.class === "pie-caption").textContent, "used");
+    assert.equal(ram.scale.firstChild.textContent, "Used incl. cache");
+    assert.equal(ram.scale.lastChild.textContent, `${percent.toFixed(1)}% used`);
+    assert.match(ram.chart.attributes["aria-label"], new RegExp(`${percent.toFixed(1)}% Used incl. cache`));
+  }
+});
+
+test("RAM usage remains unavailable when its capacity or used counter is missing", () => {
+  for (const values of [{ ram_used_bytes: 32 * 1024 ** 3 }, { ram_total_bytes: 128 * 1024 ** 3 }]) {
+    const ram = renderRam(values);
+    assert.equal(ram.scale.lastChild.textContent, "Used: unknown");
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-used"), false);
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-caption"), false);
+  }
+});
+
+test("Windows RAM shows used percentage while preserving the OS-unavailable definition", () => {
+  const ram = renderRam({ ram_used_bytes: 32 * 1024 ** 3, ram_total_bytes: 128 * 1024 ** 3,
+    ram_available_bytes: 96 * 1024 ** 3, ram_basis: "os_unavailable" });
+  assert.equal(ram.scale.firstChild.textContent, "Used (OS-unavailable)");
+  assert.equal(ram.scale.lastChild.textContent, "25.0% used");
+  assert.match(ram.description.textContent, /OS available 96.0 GiB/);
 });

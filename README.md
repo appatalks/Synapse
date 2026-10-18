@@ -2,6 +2,14 @@
 
 **Run larger local models. Get more from the hardware you already own.**
 
+<p align="center">
+  <a href="https://github.com/appatalks/Synapse/releases/download/v0.1.0rc2/blackhole-synapse.mp4">
+    <img src="assets/blackhole-synapse.webp" width="960" alt="Looping black hole animation made with SYNAPSE">
+  </a>
+  <br>
+  <em>A black hole made with SYNAPSE. Select the animation to watch the full MP4.</em>
+</p>
+
 SYNAPSE brings local chat, model controls, hardware monitoring and an
 OpenAI-compatible API into one small app. Its optional experimental MoE engine
 keeps frequently used experts on the GPU and executes cold experts on the CPU,
@@ -53,13 +61,17 @@ illustrative, not benchmark results.
 
 These are tested text-generation paths, not universal model, fit or quality guarantees.
 
-| Target | Tested accelerated path | Status |
+| Target (GGUF downloads) | Tested accelerated path | Status |
 | --- | --- | --- |
-| GPT-OSS-120B MXFP4 | Trained/direct-DMA hybrid | Runs; strict reference/quality limits remain. |
-| Qwen3.8-Flash-Next IQ3_S | Generic/hybrid expert dispatch | Runs; limited numerical/quality qualification. |
-| GLM-4.5-Air IQ4_XS | Manual 6 GiB causal bank at 16K | Runs; 8 GiB attempt and original answer failures retained. |
-| Qwen3.6-35B-A3B Q8_0 | 8 GiB causal bank | Targeted answer and same-placement checks pass; not broadly quality-qualified. |
-| Mistral Small 4 UD-IQ4_XS | Isolated prototype only; not default installation | Experimental generation/API proof; **native equivalence fails**. |
+| [GPT-OSS-120B MXFP4](https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/blob/238abdd290bb874b90a5da1b4549881b7d05c091/gpt-oss-120b-MXFP4.gguf) | Trained/direct-DMA hybrid | Runs; strict reference/quality limits remain. |
+| [Qwen3.8-Flash-Next IQ3_S](https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/tree/ed59f92082b1e93c0e96d60a8b11aab089b52f09/IQ3_S) | Generic/hybrid expert dispatch | Runs; limited numerical/quality qualification. |
+| [GLM-4.5-Air IQ4_XS](https://huggingface.co/unsloth/GLM-4.5-Air-GGUF/tree/506d64aa8c5cfe9dbbf00bc7a15739438f83204d/IQ4_XS) | Manual 6 GiB causal bank at 16K | Runs; 8 GiB attempt and original answer failures retained. |
+| [Qwen3.6-35B-A3B Q8_0](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/blob/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-Q8_0.gguf) | 8 GiB causal bank | Targeted answer and same-placement checks pass; not broadly quality-qualified. |
+| [Mistral Small 4 UD-IQ4_XS](https://huggingface.co/unsloth/Mistral-Small-4-119B-2603-GGUF/tree/bd93c721735aa32c035c0f19e738cb3371fd56ff/UD-IQ4_XS) | Isolated prototype only; not default installation | Experimental generation/API proof; **native equivalence fails**. |
+
+Choose the listed quantization and review its model license. Download **all shards**
+of a split GGUF and select the first shard in Model Controls. Different repacks
+are not automatically equivalent to the benchmarked files.
 
 [Detailed compatibility status and evidence](docs/compatibility.md).
 
@@ -77,8 +89,8 @@ be reused. Building that backend requires Git, CMake, a C++ compiler and the
 CUDA toolkit. **Drivers, toolkits and model weights are never installed automatically.**
 macOS uses a separately installed llama.cpp CPU/Metal backend.
 
-The installer prefers a checksummed public release. Until the first release is
-published, it explicitly installs a **main-branch preview**. Prefer to inspect
+The installer prefers a checksummed public release and explicitly labels any
+source fallback as a **main-branch preview**. Prefer to inspect
 scripts before running them? [Download and review `install.sh`](install.sh) first.
 
 Already have a backend? Add `--llama-server /path/to/llama-server` to the
@@ -88,7 +100,7 @@ request it non-interactively with `--accelerated`.
 **Windows:** download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases)
 and run `py SYNAPSE.pyz --llama-server C:\path\to\llama-server.exe`.
 For a managed Windows install, [follow the short source-install instructions](docs/installing.md).
-Without a public release yet, use those source instructions on any platform.
+Those source instructions also work on Linux and macOS.
 
 ## Open it. Pick a model. Go.
 

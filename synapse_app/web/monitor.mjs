@@ -37,7 +37,7 @@ export function readings(sample, selection = "all") {
     cpu: { value: s.cpu_percent, max: 100, note: valid(b.cpu_logical_cores) ? `System · backend ${b.cpu_logical_cores.toFixed(1)} logical cores` : "Whole-machine CPU usage" },
     ram: { value: valid(s.ram_used_bytes) ? s.ram_used_bytes / gib : null,
       max: valid(s.ram_total_bytes) ? s.ram_total_bytes / gib : null,
-      usedLabel: s.ram_basis === "physical_occupied" ? "Occupied incl. cache" : "OS-unavailable",
+      usedLabel: s.ram_basis === "physical_occupied" ? "Used incl. cache" : "Used (OS-unavailable)",
       freeLabel: s.ram_basis === "physical_occupied" ? "free" : "OS available",
       note: [
         valid(s.ram_total_bytes) ? `${(s.ram_total_bytes / gib).toFixed(1)} GiB total` : "System memory",
@@ -202,10 +202,15 @@ export class MonitorView {
         const text = svg("text", { x: 60, y: 64, "text-anchor": "middle", class: "pie-label" });
         text.textContent = label;
         view.chart.append(text);
+        if (key === "ram" && part !== null) {
+          const caption = svg("text", { x: 60, y: 80, "text-anchor": "middle", class: "pie-caption" });
+          caption.textContent = "used";
+          view.chart.append(caption);
+        }
         view.chart.setAttribute("aria-label", `${view.title}: ${label} ${reading.usedLabel || "used"}; ${reading.note}`);
         view.scale.firstChild.textContent = reading.usedLabel || "Used";
-        view.scale.lastChild.textContent = part === null ? "Remaining: unknown"
-          : `${((1 - part) * 100).toFixed(1)}% ${reading.freeLabel || "available"}`;
+        view.scale.lastChild.textContent = key === "ram" ? part === null ? "Used: unknown" : `${label} used`
+          : part === null ? "Remaining: unknown" : `${((1 - part) * 100).toFixed(1)}% ${reading.freeLabel || "available"}`;
         continue;
       }
       const all = this.history.map((sample) => readings(sample, this.gpu.value)[key]);
