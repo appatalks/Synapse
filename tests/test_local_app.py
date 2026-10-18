@@ -485,7 +485,9 @@ class LocalAppTests(unittest.TestCase):
         self.assertTrue(selected["kv_cache_verified"])
         self.assertTrue(selected["flash_attention_verified"])
         self.assertEqual(selected["kv_cache_type"], "q8_0")
-        self.assertNotIn("****" + self.runtime.key[-4:], "\n".join(selected["logs"]))
+        retained_logs = "\n".join(selected["logs"])
+        self.assertNotIn("api_keys:", retained_logs)
+        self.assertNotIn("[fixture marker]", retained_logs)
         self.assertIn("Backend authentication configured.", selected["logs"])
 
     def test_q8_cache_rejects_invalid_values_and_unsupported_backends(self):

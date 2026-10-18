@@ -98,7 +98,7 @@ cache = "f16" if Path(args.model).stem == "q8-cache-fallback" else args.cache_ty
 if args.log_verbosity == "4":
     print(f"llama_kv_cache_unified: size = 1 MiB, K ({cache}): 1 MiB, V ({cache}): 1 MiB", flush=True)
     print(f"llama_context: flash_attn = {'enabled' if args.flash_attn == 'on' else 'disabled'}", flush=True)
-    print(f"api_keys: ****{args.api_key[-4:]}", flush=True)
+    print("api_keys: [fixture marker]", flush=True)
 if os.getenv("VRAMBRIDGE_HYBRID_PLAN") and Path(args.model).stem != "hybrid-no-markers":
     plan = os.environ["VRAMBRIDGE_HYBRID_PLAN"]
     selected = 0 if plan == "auto" else sum(bool(line) and not line.startswith("#")
