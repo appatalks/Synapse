@@ -22,6 +22,8 @@ class ReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
+        self.assertIn("synapse_app/tuning.py", names)
+        self.assertIn("synapse_app/web/model-controls.mjs", names)
         self.assertFalse(any(name.endswith((".gguf", ".bin", ".log")) or
                              "/results/" in name or "__pycache__" in name for name in names))
 
@@ -37,6 +39,7 @@ class ReleaseTests(unittest.TestCase):
             port = urlsplit(line.split(" ", 1)[1].strip()).port
             for path, content in (("/", b"SYNAPSE"), ("/monitor.mjs", b"MonitorView"),
                                   ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
+                                  ("/model-controls.mjs", b"bindReasoningEffort"),
                                   ("/navigation.mjs", b"navigate"), ("/style.css", b"sidebar"),
                                   ("/icon.svg", b"<svg"), ("/api/v1/status", b'"app_name": "SYNAPSE"'),
                                   ("/api/v1/monitor", b'"samples"')):

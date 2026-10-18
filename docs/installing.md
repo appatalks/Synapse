@@ -21,6 +21,90 @@ Review the script first if you do not want to pipe a network script into bash.
 The app opens `http://127.0.0.1:8080`. Ctrl+C stops it and its owned backend.
 `--port 0` chooses a free port; `--no-browser` suppresses browser opening.
 
+## Context size and editor clients
+
+In **Chat -> Model Controls -> Run settings**, standard execution accepts
+512 through 262,144 context tokens (256K). Unload and reload the model to change
+its allocation. This is an application limit, not a fit, speed or model-support
+guarantee. Try larger contexts progressively and check the reported loaded
+context, memory use and a real long-prompt response, not just successful loading.
+Automatic fitting may reduce GPU weight placement as context memory grows.
+
+Experimental hybrid execution still uses the context budget in its installation
+profile, capped by model metadata. Profiles may explicitly configure up to
+262,144 tokens, but existing defaults and exact-context checks are unchanged.
+Hybrid fitting is disabled: larger contexts compete with the fixed GPU expert
+bank and may fail to allocate. Preserve the original profile before experimenting;
+successful allocation or generation does not establish answer quality.
+
+For VS Code or another OpenAI-compatible client, advertise limits that fit the
+backend's **actual loaded context**, allowing room for output and token-count
+differences. Editor settings do not increase the server allocation. For example,
+a 32,768-token server can start with 24,576 input and 4,096 output tokens.
+The browser chat's output limit is separate from an editor client's output limit.
+JSON request bodies are limited to 8 MiB so long prompts can pass through the API;
+the backend still enforces its token limit.
+
+## Auto Tune
+
+Open **Model Controls -> Auto Tune for this system**, choose a goal and explicitly
+confirm that SYNAPSE may unload/reload the selected GGUF and run local benchmarks.
+Balanced tests progressively through 8K, 16K and 32K, capped by model metadata.
+Maximum Context continues through 64K, 128K and 256K where previous trials pass.
+A near-capacity synthetic prompt must produce a complete streamed response,
+backend-reported input usage and the correct start/middle/end anchors.
+Successful loading alone never qualifies a context as verified.
+
+Tuning uses automatic backend fitting (or explicitly selected CPU placement),
+up to 8 generation / 16 prompt threads within CPU topology/affinity, and a
+1024 MiB VRAM reserve. Thread counts are derived defaults, not individually
+benchmarked optima. This is a context-capacity tuner, not an exhaustive search
+of threads, quantization, loading modes or cache policies. Long prompts can take
+minutes each; Maximum Context can take an hour or more. RAM availability is
+checked, but OS availability includes reclaimable cache and is not a fit guarantee.
+Allocation failures are retained in the results rather than hidden.
+
+Standard execution is the default. The optional **Include experimental hybrid
+trials** checkbox tests the largest passing standard context using the installed
+compatible profile. Unbound causal layouts may try progressively smaller expert
+banks; bound training plans retain their budget. Profiles and training plans are
+not rewritten. A passing hybrid trial is selected only if its prompt-plus-short-
+answer time is at least 5% lower; this does not establish broad answer quality.
+
+Other chat/load/unload/update operations are blocked during a run. **Cancel &
+restore** cancels a probe and attempts to reload the previous configuration.
+Application shutdown cancels tuning without starting another model. Failed
+restoration is reported explicitly, including when RAM headroom prevents it.
+
+After completion, recommended model settings and the browser's output allowance
+are applied, and the UI shows
+copyable VS Code `maxInputTokens` / `maxOutputTokens`, the backend context,
+model ID and safety margin. Other apps are never edited automatically.
+Recommendations are marked stale and cannot be copied as current limits when
+the active model/context no longer matches the measured settings. The output
+allowance is a conservative allocation, not a sustained long-generation test.
+
+The latest report is saved privately in `tuning.json` under
+`$XDG_CONFIG_HOME/synapse` (normally `~/.config/synapse`) on Linux,
+`~/Library/Application Support/SYNAPSE` on macOS, or `%LOCALAPPDATA%/SYNAPSE`
+on Windows. It contains the local model path, hardware summary, settings and
+measurements, not prompt text or chat history. Page refresh/app restart retains
+the report but does not automatically load its model.
+
+## Loading feedback
+
+The loading banner remains visible outside Model Controls and shows the actual
+phase, elapsed time, latest backend output and pending experimental checks.
+Its progress bar is indeterminate unless actual prompt-processing progress is
+reported; there is no invented percentage or completion-time estimate.
+**Cancel loading** unloads the in-progress backend without closing the app.
+
+Backend API readiness and experimental activation are separate checks. If the API
+is ready but required hybrid activation markers remain missing for 60 seconds,
+loading fails with the unconfirmed checks instead of appearing to load indefinitely.
+The safety checks are not bypassed. Normal weight loading retains its existing
+overall timeout.
+
 ## Optional accelerated engine
 
 On Linux the installer offers acceleration through the terminal. Use

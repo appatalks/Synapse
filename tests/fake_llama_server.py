@@ -40,6 +40,10 @@ stats = {"tokens": 0, "decoded": 0}
 if Path(args.model).stem == "fail":
     print("Unsupported model architecture (test fixture).", flush=True)
     sys.exit(7)
+if (Path(args.model).stem == "tuning-cache-limit" and os.getenv("VRAMBRIDGE_HYBRID_PLAN") and
+        int(args.moe_cache_mib) > 4096):
+    print("CUDA cache allocation failed: out of memory (test fixture).", flush=True)
+    sys.exit(7)
 if Path(args.model).stem == "slow":
     time.sleep(5)
 else:
@@ -138,7 +142,31 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             return
         data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/tokenize":
+            self.send_json(200, {"tokens": list(data["content"].encode())})
+            return
+        if self.path == "/detokenize":
+            self.send_json(200, {"content": bytes(data["tokens"]).decode()})
+            return
         prompt = data["messages"][-1]["content"]
+        if prompt.startswith("SYNAPSE_TUNING_CHECK"):
+            content = json.dumps({"start": "cedar4821", "middle": "violet7319", "end": "quartz9067"})
+            if Path(args.model).stem == "tuning-wrong-answer":
+                content = '{"start":"wrong"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            events = [
+                {"choices": [{"delta": {"content": content}}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": len(prompt.encode()), "completion_tokens": 43},
+                 "timings": {"prompt_ms": 10, "predicted_ms": 10}},
+            ]
+            for event in events:
+                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
         stats.update(tokens=18, decoded=0)
         if prompt == "backend-error":
             self.send_json(400, {"error": {"message": "Context limit exceeded."}})

@@ -37,11 +37,19 @@ _telemetry = import_module(f"{APP_PACKAGE}.telemetry")
 HardwareMonitor, number, rate, system_probe = (
     _telemetry.HardwareMonitor, _telemetry.number, _telemetry.rate, _telemetry.system_probe)
 _updates = import_module(f"{APP_PACKAGE}.updates")
+_tuning = import_module(f"{APP_PACKAGE}.tuning")
 
 LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
-BODY_LIMIT = 1024 * 1024
+BODY_LIMIT = 8 * 1024 * 1024
 RESPONSE_LIMIT = 8 * 1024 * 1024
+MAX_CONTEXT = 262144
+HYBRID_VERIFICATION_TIMEOUT = 60
+HYBRID_CHECK_LABELS = {
+    "hybrid": "hybrid dispatcher activation", "coverage": "full routed-layer coverage",
+    "context": "actual context size", "direct": "direct transfers", "registered": "host-memory registration",
+    "staged": "bounded staging", "pipeline": "decode pipeline configuration", "async-ids": "protected GPU IDs",
+}
 PINNED_LLAMA_COMMIT = "620d2225cc436ab0b001e3200e590e3b286ef9ab"
 HYBRID_WARNING = (
     "Experimental tensor-derived MoE dispatch. Measured speedups cover limited tested MoE configurations, not every model. "
@@ -56,6 +64,14 @@ def available_cpus() -> set[int]:
     if hasattr(os, "sched_getaffinity"):
         return set(os.sched_getaffinity(0))
     return set(range(os.cpu_count() or 1))
+
+
+def user_config_dir() -> Path:
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "SYNAPSE"
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/SYNAPSE"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "synapse"
 
 
 def default_cpu_threads() -> int:
@@ -359,7 +375,7 @@ class Runtime:
                                  "Automatic mode selects a profile from GGUF metadata when a model is loaded."
                                  if self.execution_mode == "auto" and hybrid_plan is not None else
                                  "Standard execution; no compatible hybrid installation selected.")
-        if (type(hybrid_context) is not int or not 512 <= hybrid_context <= 65536 or
+        if (type(hybrid_context) is not int or not 512 <= hybrid_context <= MAX_CONTEXT or
                 type(hybrid_cache_mib) is not int or not 1 <= hybrid_cache_mib <= 65536 or
                 hybrid_transfer not in ("direct", "staged") or type(hybrid_generic) is not bool or
                 (hybrid_generic_cache_mib is not None and (type(hybrid_generic_cache_mib) is not int or
@@ -440,6 +456,10 @@ class Runtime:
             self.host_op_offload = False
         self.requested_context = self.context
         self.context_warning: str | None = None
+        self.load_started: float | None = None
+        self.last_output_at: float | None = None
+        self.backend_ready_at: float | None = None
+        self.loading_phase = "Starting backend"
         self.generation_serial = 0
         self.generation = {}
         self.slot_sample: tuple[int, float, float] | None = None
@@ -546,6 +566,19 @@ class Runtime:
 
     def status(self) -> dict:
         with self.lock:
+            now = time.monotonic()
+            pending = self.required_hybrid_markers - self.hybrid_markers if self.hybrid_active else set()
+            loading = None
+            if self.state == "loading" and self.load_started is not None:
+                loading = {
+                    "phase": self.loading_phase,
+                    "elapsed_seconds": now - self.load_started,
+                    "last_output_age_seconds": now - self.last_output_at if self.last_output_at is not None else None,
+                    "latest_output": self.logs[-1][:300] if self.logs else None,
+                    "waiting_for": [HYBRID_CHECK_LABELS.get(check, check) for check in sorted(pending)]
+                    if self.backend_ready_at is not None else [],
+                    "timeout_seconds": self.load_timeout,
+                }
             return {
                 "api_version": 1,
                 "app_name": "SYNAPSE",
@@ -554,6 +587,7 @@ class Runtime:
                 "model": self.model,
                 "error": self.error,
                 "readiness_error": self.readiness_error,
+                "loading": loading,
                 "logs": list(self.logs),
                 "backend_available": self.executable is not None or self.hybrid_executable is not None,
                 "backend": self.executable or self.requested_executable,
@@ -662,8 +696,8 @@ class Runtime:
         op_offload_min_batch = data.get("op_offload_min_batch", 32)
         draft_value = data.get("draft_model")
         draft_tokens = data.get("draft_tokens", 9)
-        if type(context) is not int or not 512 <= context <= 65536:
-            raise AppError(400, "Context must be an integer between 512 and 65536.")
+        if type(context) is not int or not 512 <= context <= MAX_CONTEXT:
+            raise AppError(400, f"Context must be an integer between 512 and {MAX_CONTEXT}.")
         if placement not in ("auto", "cpu"):
             raise AppError(400, "Placement must be 'auto' or 'cpu'.")
         for name, value in (("CPU threads", cpu_threads), ("Batch threads", batch_threads)):
@@ -846,6 +880,10 @@ class Runtime:
                 raise AppError(503, self.error) from exc
             self.process = process
             self.state = "loading"
+            self.load_started = time.monotonic()
+            self.last_output_at = None
+            self.backend_ready_at = None
+            self.loading_phase = "Starting backend"
             threading.Thread(target=self._read_logs, args=(process, self.key), daemon=True).start()
             threading.Thread(target=self._watch, args=(process,), daemon=True).start()
 
@@ -857,6 +895,16 @@ class Runtime:
                 with self.lock:
                     if self.process is process:
                         self.logs.append(line.rstrip().replace(key, "[redacted]")[:2000])
+                        self.last_output_at = time.monotonic()
+                        lower = line.lower()
+                        if "warmup" in lower or "warm-up" in lower:
+                            self.loading_phase = "Warming up the backend"
+                        elif "listening on" in lower or "model loaded" in lower:
+                            self.loading_phase = "Checking the local API"
+                        elif "allocat" in lower or "buffer size" in lower or "kv cache" in lower:
+                            self.loading_phase = "Allocating model and context memory"
+                        elif "load_tensors" in lower or "model_loader" in lower or "loading model" in lower:
+                            self.loading_phase = "Reading model weights"
                         if self.hybrid_active:
                             if f"EXPERIMENTAL HYBRID enabled: {self.hybrid_experts} selected experts; adaptive admissions" in line:
                                 self.hybrid_markers.add("hybrid")
@@ -933,6 +981,11 @@ class Runtime:
                     if response.status == 200:
                         with self.lock:
                             self.readiness_error = None
+                            if self.process is process and self.state == "loading":
+                                if self.backend_ready_at is None:
+                                    self.backend_ready_at = time.monotonic()
+                                if self.hybrid_active and not self.required_hybrid_markers <= self.hybrid_markers:
+                                    self.loading_phase = "Verifying experimental hybrid execution"
                             if (self.process is process and self.state == "loading" and
                                     (not self.hybrid_active or
                                      self.required_hybrid_markers <= self.hybrid_markers)):
@@ -948,8 +1001,10 @@ class Runtime:
                 finally:
                     connection.close()
                 with self.lock:
+                    verification_expired = (self.hybrid_active and self.backend_ready_at is not None and
+                                            time.monotonic() - self.backend_ready_at >= HYBRID_VERIFICATION_TIMEOUT)
                     if (self.process is process and self.state == "loading"
-                            and time.monotonic() >= deadline):
+                            and (time.monotonic() >= deadline or verification_expired)):
                         self._terminate(process)
                         self.state = "error"
                         missing = ", ".join(sorted(self.required_hybrid_markers - self.hybrid_markers))
@@ -1040,21 +1095,31 @@ class AppServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
 
-    def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True):
+    def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True,
+                 tuning_store: Path | None = None):
         self.runtime = runtime
+        self.operation_lock = threading.RLock()
+        self.tuner = _tuning.AutoTuner(
+            lambda: self.runtime, metadata=model_metadata, compatible=supports_hybrid, layout=moe_layout,
+            memory=lambda: system_probe().memory(), hardware=self._tuning_hardware,
+            cpu_threads=default_cpu_threads, cpu_count=lambda: len(available_cpus()),
+            runtime_error=AppError, maximum=MAX_CONTEXT, store=tuning_store)
         archive = Path(sys.argv[0]).resolve() if sys.argv[0].endswith(".pyz") else None
         self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
         self.restart_requested = False
         super().__init__(address, Handler)
 
     def install_update(self, staged: Path, receipt: dict) -> None:
-        if not self.runtime.chat_lock.acquire(blocking=False):
-            raise RuntimeError("A chat started while downloading. Wait for it to finish and retry the update.")
+        with self.operation_lock:
+            if self.tuner.active:
+                raise RuntimeError("Auto Tune is running. Cancel it or wait before updating.")
+            if not self.runtime.chat_lock.acquire(blocking=False):
+                raise RuntimeError("A chat started while downloading. Wait for it to finish and retry the update.")
+            if self.runtime.closed or self.runtime.state in ("loading", "stopping"):
+                self.runtime.chat_lock.release()
+                raise RuntimeError("The model is changing. Wait until it is idle before updating.")
+            self.runtime.closed = True
         try:
-            with self.runtime.lock:
-                if self.runtime.closed or self.runtime.state in ("loading", "stopping"):
-                    raise RuntimeError("The model is changing. Wait until it is idle before updating.")
-                self.runtime.closed = True
             self.runtime.stop()
             _updates.install_archive(staged, self.updates.archive, receipt)
             self.restart_requested = True
@@ -1068,6 +1133,17 @@ class AppServer(ThreadingHTTPServer):
         finally:
             self.runtime.chat_lock.release()
 
+    def _tuning_hardware(self) -> dict:
+        snapshot = self.runtime.monitor.snapshot()
+        samples = snapshot["samples"]
+        devices = samples[-1]["gpus"] if samples else []
+        return {"platform": snapshot["platform"],
+                "gpus": [{"name": device.get("name"), "vram_total_bytes": device.get("vram_total_bytes")}
+                         for device in devices]}
+
+    def status(self) -> dict:
+        return {**self.runtime.status(), "tuning": self.tuner.snapshot()}
+
     def server_bind(self) -> None:
         TCPServer.server_bind(self)
         # The loopback listener needs no potentially blocking reverse-DNS lookup.
@@ -1075,6 +1151,7 @@ class AppServer(ThreadingHTTPServer):
         self.server_port = self.server_address[1]
 
     def server_close(self) -> None:
+        self.tuner.close()
         self.runtime.monitor.close()
         super().server_close()
 
@@ -1130,7 +1207,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             raise AppError(400, "Invalid Content-Length.") from exc
         if not 0 < length <= BODY_LIMIT:
-            raise AppError(413, "Request body must be between 1 byte and 1 MiB.")
+            raise AppError(413, "Request body must be between 1 byte and 8 MiB.")
         self.connection.settimeout(15)
         raw = self.rfile.read(length)
         if len(raw) != length:
@@ -1154,7 +1231,23 @@ class Handler(BaseHTTPRequestHandler):
             self._guard()
             path = urlsplit(self.path).path
             if method == "GET" and path == "/api/v1/status":
-                self._json(200, self.server.runtime.status())
+                self._json(200, self.server.status())
+            elif method == "POST" and path == "/api/v1/tuning/start":
+                data = self._body()
+                data["model"] = str(readable_gguf(data.get("model"), "Model"))
+                try:
+                    with self.server.operation_lock:
+                        self.server.tuner.start(data)
+                except ValueError as exc:
+                    raise AppError(400, str(exc)) from exc
+                except RuntimeError as exc:
+                    raise AppError(409, str(exc)) from exc
+                self._json(202, self.server.status())
+            elif method == "POST" and path == "/api/v1/tuning/cancel":
+                if self._body():
+                    raise AppError(400, "Cancel tuning accepts an empty JSON object.")
+                self.server.tuner.cancel()
+                self._json(202, self.server.status())
             elif method == "GET" and path == "/api/v1/update":
                 self.server.updates.check()
                 self._json(200, self.server.updates.snapshot())
@@ -1180,8 +1273,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise AppError(400, "Monitor cursor is too large.")
                 self._json(200, self.server.runtime.monitor.snapshot(int(values[0])))
             elif method == "POST" and path == "/api/v1/model/load":
-                self.server.runtime.load(self._body())
-                self._json(202, self.server.runtime.status())
+                data = self._body()
+                with self.server.operation_lock:
+                    if self.server.tuner.active:
+                        raise AppError(409, "Auto Tune owns the model. Cancel it or wait before loading another model.")
+                    self.server.runtime.load(data)
+                self._json(202, self.server.status())
             elif method == "POST" and path == "/api/v1/models/browse":
                 data = self._body()
                 if set(data) - {"path"}:
@@ -1189,8 +1286,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, browse_models(data.get("path")))
             elif method == "POST" and path == "/api/v1/model/unload":
                 self._body()
-                self.server.runtime.stop()
-                self._json(200, self.server.runtime.status())
+                with self.server.operation_lock:
+                    if self.server.tuner.active:
+                        raise AppError(409, "Cancel Auto Tune to stop its trial and restore the previous model.")
+                    self.server.runtime.stop()
+                self._json(200, self.server.status())
             elif path == "/v1/models" and method == "GET":
                 self._proxy(method, path, None)
             elif path == "/v1/chat/completions" and method == "POST":
@@ -1201,13 +1301,14 @@ class Handler(BaseHTTPRequestHandler):
                 if "stream" in data and not isinstance(data["stream"], bool):
                     raise AppError(400, "stream must be a boolean.")
                 self._proxy(method, path, data)
-            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/chat-input.mjs", "/theme.js", "/monitor.mjs", "/navigation.mjs", "/updates.mjs",
+            elif method == "GET" and path in ("/", "/app.js", "/chat-stream.mjs", "/chat-input.mjs", "/model-controls.mjs", "/theme.js", "/monitor.mjs", "/navigation.mjs", "/updates.mjs",
                                              "/style.css", "/icon.svg"):
                 name, mime = {
                     "/": ("index.html", "text/html; charset=utf-8"),
                     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                     "/chat-stream.mjs": ("chat-stream.mjs", "text/javascript; charset=utf-8"),
                     "/chat-input.mjs": ("chat-input.mjs", "text/javascript; charset=utf-8"),
+                    "/model-controls.mjs": ("model-controls.mjs", "text/javascript; charset=utf-8"),
                     "/theme.js": ("theme.js", "text/javascript; charset=utf-8"),
                     "/monitor.mjs": ("monitor.mjs", "text/javascript; charset=utf-8"),
                     "/navigation.mjs": ("navigation.mjs", "text/javascript; charset=utf-8"),
@@ -1232,8 +1333,11 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy(self, method: str, path: str, data: dict | None) -> None:
         runtime = self.server.runtime
         chat = path == "/v1/chat/completions"
-        if chat and not runtime.chat_lock.acquire(blocking=False):
-            raise AppError(409, "Another chat is running. Stop it or wait before sending.")
+        with self.server.operation_lock:
+            if chat and self.server.tuner.active:
+                raise AppError(409, "Auto Tune owns the model. Cancel it or wait before sending chat requests.")
+            if chat and not runtime.chat_lock.acquire(blocking=False):
+                raise AppError(409, "Another chat is running. Stop it or wait before sending.")
         connection: http.client.HTTPConnection | None = None
         streaming_started = False
         finished = threading.Event()
@@ -1358,10 +1462,7 @@ def main() -> None:
         if explicit:
             profile = {"hybrid_plan": args.experimental_hybrid_plan, "hybrid_cuda_plugin": args.hybrid_cuda_plugin}
         elif args.execution_mode != "standard":
-            config = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "SYNAPSE"
-                      if sys.platform == "win32" else Path.home() / "Library/Application Support/SYNAPSE"
-                      if sys.platform == "darwin" else
-                      Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "synapse")
+            config = user_config_dir()
             legacy = Path.home() / ".local/share/vrambridge/hybrid-profile.json"
             path = args.hybrid_profile or config / "hybrid-profile.json"
             if not path.exists() and args.hybrid_profile is None and sys.platform == "linux" and legacy.exists():
@@ -1379,7 +1480,8 @@ def main() -> None:
     if runtime.hybrid_plan is not None:
         LOG.warning("%s", HYBRID_WARNING)
     try:
-        server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check)
+        server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check,
+                           tuning_store=user_config_dir() / "tuning.json")
     except OSError as exc:
         parser.exit(1, f"Cannot start local app: {exc}\n")
     url = f"http://127.0.0.1:{server.server_address[1]}"

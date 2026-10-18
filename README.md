@@ -98,11 +98,22 @@ Without a public release yet, use those source instructions on any platform.
 ## Open it. Pick a model. Go.
 
 1. Open **Chat → Model Controls**. Browse for a local GGUF or paste its path.
-2. Load the model and chat. Output limits and reasoning effort are in the same pop-up.
+2. Load the model and chat. Output limits and reasoning effort are in the same pop-up;
+   reasoning effort also has a synchronized quick selector below the message box.
+   Loading shows its phase, elapsed time, recent backend output and a cancel button.
    **Enter** sends a message; **Shift+Enter** inserts a new line. Choose **Dark**
    or **Light** in the sidebar; only that theme preference is saved in this browser.
 3. Open **Monitor** for speed, CPU/GPU, VRAM, temperature, power, PCIe, read I/O,
    RAM and context fill—or **Connect an app** to use your local model in another tool.
+
+**Auto Tune** in Model Controls measures near-capacity input on your system and
+applies a passing configuration, then offers copyable VS Code/OpenAI-client limits.
+Balanced daily use tests up to 32K; Maximum Context can test up to the model limit
+or 256K and take an hour or more. Experimental hybrid trials require a separate
+opt-in. Tuning temporarily owns the model; cancellation restores the previous
+configuration when possible. It tests input capacity and short anchor-retrieval
+replies, not general answer quality or an exhaustive speed search.
+[Tuning scope, saved results and client settings](docs/installing.md#auto-tune).
 
 No account, hosted inference or model uploads. Chats stay in the page.
 The app needs only Python and a browser; models and an appropriate

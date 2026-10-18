@@ -49,6 +49,15 @@ body:has(dialog[open]) { overflow: hidden; }
 .dialog-header h2 { margin: 0; font-size: 1.2rem; }
 .dialog-content { padding: 0 26px 24px; }
 #controls-notice { margin-top: 18px; }
+.work-status { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding: 18px; margin-bottom: 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.work-status > div { min-width: 0; flex: 1; }
+.work-status p { margin: 6px 0; overflow-wrap: anywhere; }
+.work-status progress { width: 100%; height: 7px; accent-color: var(--accent); }
+.composer-options { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.composer-options label { margin: 0; }
+.composer-options select { width: auto; max-width: 100%; padding: 7px 10px; }
+#tuning-hybrid, #tuning-consent { width: auto; margin-right: 7px; }
+#tuning-trial-list { padding-left: 20px; color: var(--muted); font-size: .77rem; line-height: 1.7; overflow-wrap: anywhere; }
 .settings-section { padding: 22px 0; border-bottom: 1px solid var(--border); }
 .settings-section:last-child { padding-bottom: 0; border: 0; }
 .settings-section h3 { font-size: .9rem; font-weight: 550; margin: 0 0 8px; }
