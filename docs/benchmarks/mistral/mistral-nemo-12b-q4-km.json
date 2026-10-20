@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "benchmark": "llama-bench",
+  "recorded_at": "2026-10-20T00:08:20Z",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti"
+  },
+  "backend": {
+    "commit": "620d2225c",
+    "build_number": 11669,
+    "backends": ["CUDA"]
+  },
+  "model": {
+    "name": "Mistral Nemo 12B Instruct",
+    "model_type": "llama 13B Q4_K - Medium",
+    "quantization": "Q4_K_M",
+    "filename": "Mistral-Nemo-Instruct-2407-Q4_K_M.gguf",
+    "parameters": 12247782400,
+    "size_bytes": 7469322240
+  },
+  "settings": {
+    "fit_target_mib": 1024,
+    "minimum_context": 16384,
+    "prompt_tokens": 512,
+    "generation_tokens": 512,
+    "repetitions": 3,
+    "threads": 8,
+    "gpu_layers": -1,
+    "batch_size": 2048,
+    "ubatch_size": 512,
+    "kv_cache_type": "f16"
+  },
+  "prompt_processing": {
+    "samples_tok_s": [4128.06, 4263.83, 4247.36],
+    "median_tok_s": 4247.36,
+    "mean_tok_s": 4213.082937,
+    "mean_sample_stddev_tok_s": 74.092462
+  },
+  "generation": {
+    "samples_tok_s": [88.8334, 89.7126, 90.9278],
+    "median_tok_s": 89.7126,
+    "mean_tok_s": 89.824624,
+    "mean_sample_stddev_tok_s": 1.051689
+  }
+}

@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindReasoningEffort, elapsed, loadingText } from "./model-controls.mjs";
+import { bindReasoningEffort, elapsed, loadingText, ModelPrecheck } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -16,6 +16,9 @@ let settingsInitialized = false;
 let browserLocation = null;
 let browserBusy = false;
 let appliedTuningAt = null;
+const modelPrecheck = new ModelPrecheck({
+  input: el("model"), button: el("precheck-model"), output: el("model-precheck"), request, changed: controls,
+});
 
 function notice(message = "") {
   el("notice").textContent = message;
@@ -54,6 +57,7 @@ function controls() {
   el("tuning-hybrid").disabled = tuning || actionPending || !status?.hybrid_available;
   el("tuning-consent").disabled = tuning || actionPending;
   el("browse-models").disabled = active || actionPending || browserBusy;
+  el("precheck-model").disabled = !status || actionPending || modelPrecheck.busy || !el("model").value.trim();
   for (const button of el("model-browser").querySelectorAll("button")) {
     button.disabled = active || actionPending || browserBusy;
   }
@@ -158,6 +162,7 @@ function renderStatus() {
     el("resources").textContent = status.model ? "Collecting process resource usage..." : "";
   }
   if (status.model && ["loading", "ready", "stopping"].includes(status.state)) {
+    if (el("model").value !== status.model) modelPrecheck.invalidate();
     el("model").value = status.model;
     el("context").value = status.context;
     el("placement").value = status.placement;
@@ -339,6 +344,8 @@ async function browseModels(path) {
         if (entry.directory) browseModels(entry.path);
         else {
           el("model").value = entry.path;
+          modelPrecheck.invalidate();
+          modelPrecheck.check();
           el("model-browser").hidden = true;
           el("model").focus();
         }

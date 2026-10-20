@@ -755,7 +755,7 @@ endobj
 127 0 obj
 <<
 /Author (SYNAPSE contributors) /CreationDate (D:20261017120000+00'00') /Creator (SYNAPSE reproducible white-paper builder) /Keywords (SYNAPSE, MoE, CPU, GPU, llama.cpp, experimental, technical white paper) /ModDate (D:20261017120000+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
-  /Subject (Research edition; not quality-qualified. Source SHA256: c2f7480d827f9ffd0e5b2ba415b879556a5854a11f98177288277e57c0448082) /Title (SYNAPSE: Model-Agnostic Hybrid MoE Inference) /Trapped /False
+  /Subject (Research edition; not quality-qualified. Source SHA256: a8c68e0d223b7ebbaec9c719d1ed2c5fa5bd7f3e8a6bf4342ba9ddda02b3c890) /Title (SYNAPSE: Model-Agnostic Hybrid MoE Inference) /Trapped /False
 >>
 endobj
 128 0 obj
@@ -1130,7 +1130,7 @@ xref
 trailer
 <<
 /ID 
-[<dbd6c2953808301a9d5f3e033465d643><dbd6c2953808301a9d5f3e033465d643>]
+[<564f34ce850ca16d8185c88ce82d344a><564f34ce850ca16d8185c88ce82d344a>]
 % ReportLab generated PDF document -- digest (opensource)
 
 /Info 127 0 R

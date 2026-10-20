@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "kind": "synapse-explicit-hybrid-rejection",
+  "started_at_utc": "2026-10-20T02:02:24.515141+00:00",
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "backend_version": "version: 0.7.0-dev (build 11669, commit 620d2225c)\nbuilt with GNU 13.3.0 for Linux x86_64",
+  "backend_sha256": "3ac6495070ae9627825dbe706de3b580fdbedd2fbe079197b2c6c81982dbd0f9",
+  "hybrid_backend_sha256": "895377f1aadaa82c7f456cfae1357db7a1195d0962d37b7cf074a8103e70fba4",
+  "cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+  "profile_sha256": "e2c4891c749e4731548657c3549ffb03fdb4c7ac221e70a8cd9ff6e0e4b1f387",
+  "app_source_sha256": "785590b8bc72664c5fe18ec63739ddbbe517b3b20d0253b21df7032c4f7d068e",
+  "collector_source_sha256": "59c334d812e58ec2db7ab07312721a0e372f144f5e8f1d8fc6234c9b60dfe94f",
+  "measurement_helpers": {
+    "repository": "appatalks/unified-memory-scheduler",
+    "revision": "cc52e4b5588e31233793bbfec743b488182613a2",
+    "throughput_path": "tools/benchmark/vrambridge-execution-sweep.py",
+    "throughput_sha256": "2ffb113d8d5526d8d5e33cfb3d4325afe6023a1a189503e2b8cef51f215974eb",
+    "answer_checks_path": "tools/benchmark/vrambridge-model-matrix.py",
+    "answer_checks_sha256": "2f7b21b3e6f053bc095355f769685ac851cd934157c0a0de8a604082911ceac0"
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "system_ram_bytes": 132581761024,
+    "gpu_before": "NVIDIA GeForce RTX 5070 Ti, 16303 MiB, 916 MiB, 595.58.03"
+  },
+  "installation_policy": {
+    "context": 16384,
+    "bound_layout": {
+      "architecture": "gpt-oss",
+      "file_type": 38,
+      "block_count": 36,
+      "embedding_length": 2880,
+      "expert_feed_forward_length": 2880,
+      "expert_count": 128,
+      "expert_used_count": 4
+    },
+    "bound_cache_mib": 12000,
+    "generic_cache_mib": 8192,
+    "generic_transfer": "direct",
+    "decode_pipeline": true,
+    "async_ids": true
+  },
+  "protocol": {
+    "context": 16384,
+    "cpu_threads": 8,
+    "batch_threads": 16,
+    "repetitions": 3,
+    "output_tokens": 512,
+    "temperature": 0,
+    "seed": 42,
+    "reasoning_effort": "low",
+    "ignore_eos": true,
+    "cache_prompt": false,
+    "speculation": false,
+    "throughput_prompt": "Explain how a CPU and GPU can cooperate to execute a mixture-of-experts model. Discuss memory bandwidth, expert placement, synchronization, and correctness in detail.",
+    "decode_rate_definition": "511 / (request wall seconds - reported prompt_ms / 1000)"
+  },
+  "answer_check_prompts": {
+    "arithmetic": "Compute 17 times 19. Return only the integer.",
+    "coding": "Return only Python source code, without Markdown fences, implementing clamp(value, low, high). It must return min(high, max(low, value)). No imports, tests, comments, annotations, or explanation."
+  },
+  "limitations": [
+    "Sequential three-repeat technical screens with controls before and after hybrid, not randomized significance.",
+    "Only explicit hybrid mode is measured; no installed defaults or trained plan are modified.",
+    "GPT-OSS-20B uses an untrained causal cache, not GPT-OSS-120B's bound trained seed.",
+    "Causal residency starts empty on each load and persists across its three samples and subsequent answer checks.",
+    "No speculative decoding, weight changes or intentional removal of selected expert contributions.",
+    "Original throughput samples, numerical limits and failed answer checks are not replaced.",
+    "Generated-text hashes and two small answer checks are not independent native-reference numerical qualification.",
+    "GPU/RAM snapshots are not peak or minimum resource requirements."
+  ],
+  "cleanup": {
+    "status": "stopped",
+    "owned_backend_exited": true,
+    "installation_profile_unchanged": true
+  },
+  "completed_at_utc": "2026-10-20T02:03:32.741844+00:00",
+  "hybrid_backend_version": "version: 0.7.0-dev (build 1, commit 620d222)\nbuilt with GNU 14.2.0 for Linux x86_64",
+  "model": {
+    "source": {
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "filename": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+      "size_bytes": 16464440224,
+      "sha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482",
+      "base_repository": "Qwen/Qwen3.8-27B",
+      "base_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "architecture_hint": "qwen35",
+      "license": "apache-2.0",
+      "license_name": null,
+      "popularity": {
+        "gguf_repository_downloads": 6656041,
+        "gguf_repository_likes": 5204,
+        "base_repository_downloads": 7458401,
+        "base_repository_likes": 18010
+      },
+      "verified_sha256": true
+    },
+    "sha256_reverified": true,
+    "precheck": {
+      "api_version": 1,
+      "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+      "architecture": "qwen35",
+      "file_type": 15,
+      "file_size_bytes": 16464440224,
+      "layout": null,
+      "hybrid_candidate": false,
+      "automatic": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "qwen35 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "required_hybrid": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "qwen35 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
+      "limitations": [
+        "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
+        "GPU availability, VRAM/RAM fit, all split shards and runtime activation/coverage are unverified.",
+        "Speed and answer quality are unverified; a candidate is not a tested or quality-qualified model.",
+        "Manual settings and file/profile changes require checks again at load time."
+      ]
+    },
+    "forced_hybrid_attempt": {
+      "status": "rejected",
+      "http_status": 400,
+      "error": "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor. qwen35 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+      "backend_present_after": false,
+      "state_after": "stopped",
+      "requested_settings": {
+        "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+        "execution_mode": "hybrid"
+      },
+      "samples": [],
+      "decode_median_tok_s": null
+    }
+  },
+  "runs": []
+}

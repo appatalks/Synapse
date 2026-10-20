@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "kind": "synapse-popular-model-baseline",
+  "started_at_utc": "2026-10-20T01:15:14.400761+00:00",
+  "completed_at_utc": "2026-10-20T01:18:23.369152+00:00",
+  "discovery_observed_at_utc": "2026-10-20T01:08:58.120697+00:00",
+  "source": {
+    "repository": "Qwen/Qwen3-4B-GGUF",
+    "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+    "filename": "Qwen3-4B-Q4_K_M.gguf",
+    "size_bytes": 2497280256,
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "base_repository": "Qwen/Qwen3-4B",
+    "base_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+    "architecture_hint": "qwen3",
+    "license": "apache-2.0",
+    "license_name": null,
+    "popularity": {
+      "gguf_repository_downloads": 563901,
+      "gguf_repository_likes": 194,
+      "base_repository_downloads": 11821887,
+      "base_repository_likes": 765
+    },
+    "verified_sha256": true
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "system_ram_bytes": 132581761024,
+    "gpu_before": "NVIDIA GeForce RTX 5070 Ti, 16303 MiB, 939 MiB, 595.58.03"
+  },
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "backend_version": "version: 0.7.0-dev (build 11669, commit 620d2225c)\nbuilt with GNU 13.3.0 for Linux x86_64",
+  "app_source_sha256": "785590b8bc72664c5fe18ec63739ddbbe517b3b20d0253b21df7032c4f7d068e",
+  "collector_source_sha256": "b2aa9a0b15c0f1884cfd1dfec1f92360896c8fc280652c2f6c6bda1b1edf7c96",
+  "measurement_helpers": {
+    "repository": "appatalks/unified-memory-scheduler",
+    "revision": "cc52e4b5588e31233793bbfec743b488182613a2",
+    "throughput_path": "tools/benchmark/vrambridge-execution-sweep.py",
+    "throughput_sha256": "2ffb113d8d5526d8d5e33cfb3d4325afe6023a1a189503e2b8cef51f215974eb",
+    "answer_checks_path": "tools/benchmark/vrambridge-model-matrix.py",
+    "answer_checks_sha256": "2f7b21b3e6f053bc095355f769685ac851cd934157c0a0de8a604082911ceac0"
+  },
+  "protocol": {
+    "context": 16384,
+    "cpu_threads": 8,
+    "batch_threads": 16,
+    "repetitions": 3,
+    "output_tokens": 512,
+    "temperature": 0,
+    "seed": 42,
+    "reasoning_effort": "low",
+    "ignore_eos": true,
+    "cache_prompt": false,
+    "speculation": false,
+    "throughput_prompt": "Explain how a CPU and GPU can cooperate to execute a mixture-of-experts model. Discuss memory bandwidth, expert placement, synchronization, and correctness in detail.",
+    "decode_rate_definition": "511 / (request wall seconds - reported prompt_ms / 1000)",
+    "mode": "standard"
+  },
+  "answer_check_prompts": {
+    "arithmetic": "Compute 17 times 19. Return only the integer.",
+    "coding": "Return only Python source code, without Markdown fences, implementing clamp(value, low, high). It must return min(high, max(low, value)). No imports, tests, comments, annotations, or explanation."
+  },
+  "limitations": [
+    "Sequential three-repeat single-prompt technical screens, not randomized or sustained workload qualification.",
+    "Forced length includes reasoning tokens and may continue past EOS; not 512 natural-answer tokens.",
+    "Tokenizers, model architectures and quantizations differ; tok/s is not a quality ranking.",
+    "Two exact answer predicates do not establish broad quality or native-reference numerical equivalence.",
+    "Read-only Automatic selection is a prediction from current defaults, not a measured Automatic or hybrid run.",
+    "Text-only generation; vision, audio, tools, long-context capacity and concurrency are not tested.",
+    "Source registration and loading are outside decode timing; request and first-token times are retained separately."
+  ],
+  "run": {
+    "model": "Qwen3-4B-Q4_K_M.gguf",
+    "repository": "Qwen/Qwen3-4B-GGUF",
+    "status": "ok",
+    "samples": [
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 40,
+          "prompt_ms": 17.351,
+          "prompt_per_token_ms": 0.43377499999999997,
+          "prompt_per_second": 2305.342631548614,
+          "predicted_n": 512,
+          "predicted_ms": 2670.755,
+          "predicted_per_token_ms": 5.226526418786693,
+          "predicted_per_second": 191.33166464164626
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 40,
+          "total_tokens": 552,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 2.6903777689949493,
+        "wall_decode_tok_s": 191.16905446934024,
+        "end_to_end_tok_s": 190.3078466899721,
+        "first_token_seconds": 0.0336054610015708,
+        "generated_text_sha256": "40c48d801f11ce5deac720e929f0d6034e2dddca8e000388f6bc829a661f4bec"
+      },
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 40,
+          "prompt_ms": 9.326,
+          "prompt_per_token_ms": 0.23315000000000002,
+          "prompt_per_second": 4289.084280506112,
+          "predicted_n": 512,
+          "predicted_ms": 2669.575,
+          "predicted_per_token_ms": 5.224217221135029,
+          "predicted_per_second": 191.4162366668852
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 40,
+          "total_tokens": 552,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 2.6937579320001532,
+        "wall_decode_tok_s": 190.35684753580514,
+        "end_to_end_tok_s": 190.06904589226872,
+        "first_token_seconds": 0.03597619900392601,
+        "generated_text_sha256": "40c48d801f11ce5deac720e929f0d6034e2dddca8e000388f6bc829a661f4bec"
+      },
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 40,
+          "prompt_ms": 9.739,
+          "prompt_per_token_ms": 0.24347500000000002,
+          "prompt_per_second": 4107.19786425711,
+          "predicted_n": 512,
+          "predicted_ms": 2679.167,
+          "predicted_per_token_ms": 5.242988258317025,
+          "predicted_per_second": 190.7309249479409
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 40,
+          "total_tokens": 552,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 2.6913667269982398,
+        "wall_decode_tok_s": 190.5559055999183,
+        "end_to_end_tok_s": 190.237916989874,
+        "first_token_seconds": 0.0241022129994235,
+        "generated_text_sha256": "40c48d801f11ce5deac720e929f0d6034e2dddca8e000388f6bc829a661f4bec"
+      }
+    ],
+    "answer_checks": [
+      {
+        "workload": "arithmetic",
+        "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+        "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+        "finish_reason": "stop",
+        "usage": {
+          "completion_tokens": 672,
+          "prompt_tokens": 22,
+          "total_tokens": 694,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 3.532959165997454,
+        "check_passed": true,
+        "check": "exact integer"
+      },
+      {
+        "workload": "coding",
+        "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+        "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+        "finish_reason": "stop",
+        "usage": {
+          "completion_tokens": 474,
+          "prompt_tokens": 49,
+          "total_tokens": 523,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 2.5077696130028926,
+        "check_passed": true,
+        "check": "AST-only; model code is never executed"
+      }
+    ],
+    "precheck": {
+      "api_version": 1,
+      "model": "Qwen3-4B-Q4_K_M.gguf",
+      "architecture": "qwen3",
+      "file_type": 15,
+      "file_size_bytes": 2497280256,
+      "layout": null,
+      "hybrid_candidate": false,
+      "automatic": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "qwen3 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "required_hybrid": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "qwen3 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
+      "limitations": [
+        "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
+        "GPU availability, VRAM/RAM fit, all split shards and runtime activation/coverage are unverified.",
+        "Speed and answer quality are unverified; a candidate is not a tested or quality-qualified model.",
+        "Manual settings and file/profile changes require checks again at load time."
+      ]
+    },
+    "metadata": {
+      "general.architecture": "qwen3",
+      "general.name": "Qwen3 4B Instruct Awq",
+      "qwen3.block_count": 36,
+      "qwen3.context_length": 40960,
+      "qwen3.embedding_length": 2560,
+      "qwen3.feed_forward_length": 9728,
+      "general.file_type": 15
+    },
+    "load_seconds": 1.0095636200057925,
+    "actual_context": 16384,
+    "execution_profile": "standard",
+    "settings": {
+      "execution_mode": "standard",
+      "context": 16384,
+      "cpu_threads": 8,
+      "batch_threads": 16,
+      "placement": "auto",
+      "load_mode": "auto",
+      "fit_target_mib": 1024,
+      "expert_cache_mib": 0,
+      "host_op_offload": true,
+      "cpu_poll": 50,
+      "op_offload_min_batch": 32,
+      "kv_cache_type": "f16"
+    },
+    "placement_evidence": [
+      "0.00.701.095 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'"
+    ],
+    "summary": {
+      "median_wall_decode_tok_s": 190.5559055999183,
+      "median_request_seconds": 2.6913667269982398,
+      "median_first_token_seconds": 0.0336054610015708,
+      "median_prompt_tok_s": 4107.19786425711,
+      "repeated_text_hashes_match": true
+    },
+    "resources_after_requests": {
+      "rss_bytes": 993718272,
+      "anonymous_bytes": 457555968,
+      "file_backed_bytes": 485810176,
+      "shared_bytes": 50352128,
+      "read_bytes": 573440,
+      "cpu_logical_cores": 0.9982693752377378,
+      "system_available_ram_bytes": 121489637376
+    },
+    "gpu_memory_after_requests_mib": 5915
+  },
+  "cleanup": {
+    "status": "stopped",
+    "owned_backend_exited": true
+  }
+}

@@ -37,8 +37,9 @@ Ryzen 9 9950X, RTX 5070 Ti 16GB and 123.48 GiB usable RAM, with 8 generation /
 Qwen3.8 uses native CPU experts with a GPU backbone. They are different controls, not a
 Strata comparison. GLM uses a **6 GiB manual causal cache** and the fastest
 observed non-hybrid control; its 8 GiB attempt failed to fit.
-[GLM measurements, RAM comparison and reproducible settings](docs/benchmarks/glm45-air-iq4-xs.md) ·
-[Qwen3.6 measurements and verification limits](docs/benchmarks/qwen36-q8.md) ·
+[GLM measurements, RAM comparison and reproducible settings](docs/benchmarks/glm/glm45-air-iq4-xs.md) ·
+[Qwen3.6 measurements and verification limits](docs/benchmarks/qwen/qwen36-q8.md) ·
+[quick benchmark reference](docs/benchmarks/README.md) ·
 [All conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI
@@ -60,6 +61,10 @@ illustrative, not benchmark results.
 ## Tested compatibility
 
 These are tested text-generation paths, not universal model, fit or quality guarantees.
+
+For smaller and mid-sized options, see the [model-choice guide and measured
+Standard baselines](docs/benchmarks/model-guide.md), from LFM2.5 1.2B through
+Qwen3.8 27B. It includes pinned downloads, licenses and retained answer-check failures.
 
 | Target (GGUF downloads) | Tested accelerated path | Status |
 | --- | --- | --- |
@@ -105,6 +110,8 @@ Those source instructions also work on Linux and macOS.
 ## Open it. Pick a model. Go.
 
 1. Open **Chat → Model Controls**. Browse for a local GGUF or paste its path.
+   **Check hybrid eligibility** explains the installed profile's selection
+   without loading weights; [scope and limits](docs/application_notes.md#hybrid-eligibility-pre-check).
 2. Load the model and chat. Output limits and reasoning effort are in the same pop-up;
    reasoning effort also has a synchronized quick selector below the message box.
    Loading shows its phase, elapsed time, recent backend output and a cancel button.

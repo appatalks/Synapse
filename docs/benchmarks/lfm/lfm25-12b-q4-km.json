@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "kind": "synapse-popular-model-baseline",
+  "started_at_utc": "2026-10-20T01:15:14.400761+00:00",
+  "completed_at_utc": "2026-10-20T01:18:23.369152+00:00",
+  "discovery_observed_at_utc": "2026-10-20T01:08:58.120697+00:00",
+  "source": {
+    "repository": "LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
+    "revision": "8ed288026e23958ad9dfa92d53ed773a8eee7125",
+    "filename": "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
+    "size_bytes": 730895168,
+    "sha256": "b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5",
+    "base_repository": "LiquidAI/LFM2.5-1.2B-Instruct",
+    "base_revision": "0f604ada3f766f9f257460c4c9f0b5d6f69d431b",
+    "architecture_hint": "lfm2",
+    "license": "other",
+    "license_name": "lfm1.0",
+    "popularity": {
+      "gguf_repository_downloads": 346255,
+      "gguf_repository_likes": 231,
+      "base_repository_downloads": 113941,
+      "base_repository_likes": 683
+    },
+    "verified_sha256": true
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "system_ram_bytes": 132581761024,
+    "gpu_before": "NVIDIA GeForce RTX 5070 Ti, 16303 MiB, 939 MiB, 595.58.03"
+  },
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "backend_version": "version: 0.7.0-dev (build 11669, commit 620d2225c)\nbuilt with GNU 13.3.0 for Linux x86_64",
+  "app_source_sha256": "785590b8bc72664c5fe18ec63739ddbbe517b3b20d0253b21df7032c4f7d068e",
+  "collector_source_sha256": "b2aa9a0b15c0f1884cfd1dfec1f92360896c8fc280652c2f6c6bda1b1edf7c96",
+  "measurement_helpers": {
+    "repository": "appatalks/unified-memory-scheduler",
+    "revision": "cc52e4b5588e31233793bbfec743b488182613a2",
+    "throughput_path": "tools/benchmark/vrambridge-execution-sweep.py",
+    "throughput_sha256": "2ffb113d8d5526d8d5e33cfb3d4325afe6023a1a189503e2b8cef51f215974eb",
+    "answer_checks_path": "tools/benchmark/vrambridge-model-matrix.py",
+    "answer_checks_sha256": "2f7b21b3e6f053bc095355f769685ac851cd934157c0a0de8a604082911ceac0"
+  },
+  "protocol": {
+    "context": 16384,
+    "cpu_threads": 8,
+    "batch_threads": 16,
+    "repetitions": 3,
+    "output_tokens": 512,
+    "temperature": 0,
+    "seed": 42,
+    "reasoning_effort": "low",
+    "ignore_eos": true,
+    "cache_prompt": false,
+    "speculation": false,
+    "throughput_prompt": "Explain how a CPU and GPU can cooperate to execute a mixture-of-experts model. Discuss memory bandwidth, expert placement, synchronization, and correctness in detail.",
+    "decode_rate_definition": "511 / (request wall seconds - reported prompt_ms / 1000)",
+    "mode": "standard"
+  },
+  "answer_check_prompts": {
+    "arithmetic": "Compute 17 times 19. Return only the integer.",
+    "coding": "Return only Python source code, without Markdown fences, implementing clamp(value, low, high). It must return min(high, max(low, value)). No imports, tests, comments, annotations, or explanation."
+  },
+  "limitations": [
+    "Sequential three-repeat single-prompt technical screens, not randomized or sustained workload qualification.",
+    "Forced length includes reasoning tokens and may continue past EOS; not 512 natural-answer tokens.",
+    "Tokenizers, model architectures and quantizations differ; tok/s is not a quality ranking.",
+    "Two exact answer predicates do not establish broad quality or native-reference numerical equivalence.",
+    "Read-only Automatic selection is a prediction from current defaults, not a measured Automatic or hybrid run.",
+    "Text-only generation; vision, audio, tools, long-context capacity and concurrency are not tested.",
+    "Source registration and loading are outside decode timing; request and first-token times are retained separately."
+  ],
+  "run": {
+    "model": "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
+    "repository": "LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
+    "status": "answer_check_failed",
+    "samples": [
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 44,
+          "prompt_ms": 14.483,
+          "prompt_per_token_ms": 0.3291590909090909,
+          "prompt_per_second": 3038.0446040185043,
+          "predicted_n": 512,
+          "predicted_ms": 775.279,
+          "predicted_per_token_ms": 1.5171800391389432,
+          "predicted_per_second": 659.1175563893773
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 44,
+          "total_tokens": 556,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 0.7932681680031237,
+        "wall_decode_tok_s": 656.1501438326704,
+        "end_to_end_tok_s": 645.4311677334113,
+        "first_token_seconds": 0.01824663700244855,
+        "generated_text_sha256": "861429cc3e89d08ed57db352d47541b0551500f04bee3d7f84fff43290105d79"
+      },
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 44,
+          "prompt_ms": 7.366,
+          "prompt_per_token_ms": 0.1674090909090909,
+          "prompt_per_second": 5973.391257127342,
+          "predicted_n": 512,
+          "predicted_ms": 770.544,
+          "predicted_per_token_ms": 1.5079138943248531,
+          "predicted_per_second": 663.1678398637846
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 44,
+          "total_tokens": 556,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 0.7812597430020105,
+        "wall_decode_tok_s": 660.2973659119924,
+        "end_to_end_tok_s": 655.3518270794639,
+        "first_token_seconds": 0.010662353000952862,
+        "generated_text_sha256": "861429cc3e89d08ed57db352d47541b0551500f04bee3d7f84fff43290105d79"
+      },
+      {
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 44,
+          "prompt_ms": 6.31,
+          "prompt_per_token_ms": 0.1434090909090909,
+          "prompt_per_second": 6973.058637083995,
+          "predicted_n": 512,
+          "predicted_ms": 770.839,
+          "predicted_per_token_ms": 1.5084911937377692,
+          "predicted_per_second": 662.9140456048539
+        },
+        "usage": {
+          "completion_tokens": 512,
+          "prompt_tokens": 44,
+          "total_tokens": 556,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 0.7791809199989075,
+        "wall_decode_tok_s": 661.1712082539246,
+        "end_to_end_tok_s": 657.1002790991313,
+        "first_token_seconds": 0.00826880300155608,
+        "generated_text_sha256": "861429cc3e89d08ed57db352d47541b0551500f04bee3d7f84fff43290105d79"
+      }
+    ],
+    "answer_checks": [
+      {
+        "workload": "arithmetic",
+        "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+        "answer_sha256": "2ed6a4469612abe5a101ff59168c8afb0fcc0c2cff72047bc282a7c31eba7f6f",
+        "finish_reason": "stop",
+        "usage": {
+          "completion_tokens": 13,
+          "prompt_tokens": 22,
+          "total_tokens": 35,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 0.026351773994974792,
+        "check_passed": false,
+        "check": "exact integer"
+      },
+      {
+        "workload": "coding",
+        "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+        "answer_sha256": "fccaff010aef19720ba7f214204359b114908ca04514af5c31a1492ddfd2194a",
+        "finish_reason": "stop",
+        "usage": {
+          "completion_tokens": 26,
+          "prompt_tokens": 55,
+          "total_tokens": 81,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "elapsed_seconds": 0.046429711997916456,
+        "check_passed": false,
+        "check": "AST-only; model code is never executed"
+      }
+    ],
+    "precheck": {
+      "api_version": 1,
+      "model": "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
+      "architecture": "lfm2",
+      "file_type": 15,
+      "file_size_bytes": 730895168,
+      "layout": null,
+      "hybrid_candidate": false,
+      "automatic": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "lfm2 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "required_hybrid": {
+        "execution_profile": "standard",
+        "reason_code": "no_descriptor",
+        "reason": "lfm2 is not supported by hybrid dispatch: no complete routed-MoE descriptor was found. Expert count, active count, layer count and dimensions must be present and valid. The model may be dense or have missing/unsupported metadata; standard execution selected.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
+      "limitations": [
+        "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
+        "GPU availability, VRAM/RAM fit, all split shards and runtime activation/coverage are unverified.",
+        "Speed and answer quality are unverified; a candidate is not a tested or quality-qualified model.",
+        "Manual settings and file/profile changes require checks again at load time."
+      ]
+    },
+    "metadata": {
+      "general.architecture": "lfm2",
+      "general.name": "4cd563d5a96af9e7c738b76cd89a0a200db7608f",
+      "lfm2.block_count": 16,
+      "lfm2.context_length": 128000,
+      "lfm2.embedding_length": 2048,
+      "lfm2.feed_forward_length": 8192,
+      "general.file_type": 15
+    },
+    "load_seconds": 0.7629029989984701,
+    "actual_context": 16384,
+    "execution_profile": "standard",
+    "settings": {
+      "execution_mode": "standard",
+      "context": 16384,
+      "cpu_threads": 8,
+      "batch_threads": 16,
+      "placement": "auto",
+      "load_mode": "auto",
+      "fit_target_mib": 1024,
+      "expert_cache_mib": 0,
+      "host_op_offload": true,
+      "cpu_poll": 50,
+      "op_offload_min_batch": 32,
+      "kv_cache_type": "f16"
+    },
+    "placement_evidence": [
+      "0.00.413.748 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'"
+    ],
+    "summary": {
+      "median_wall_decode_tok_s": 660.2973659119924,
+      "median_request_seconds": 0.7812597430020105,
+      "median_first_token_seconds": 0.010662353000952862,
+      "median_prompt_tok_s": 5973.391257127342,
+      "repeated_text_hashes_match": true
+    },
+    "resources_after_requests": {
+      "rss_bytes": 578437120,
+      "anonymous_bytes": 254042112,
+      "file_backed_bytes": 278237184,
+      "shared_bytes": 46157824,
+      "read_bytes": 1527808,
+      "cpu_logical_cores": 1.0475185751581242,
+      "system_available_ram_bytes": 121606291456
+    },
+    "gpu_memory_after_requests_mib": 2146
+  },
+  "cleanup": {
+    "status": "stopped",
+    "owned_backend_exited": true
+  }
+}

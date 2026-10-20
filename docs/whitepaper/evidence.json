@@ -76,10 +76,10 @@
       "source": {
         "repository": "appatalks/Synapse",
         "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
-        "path": "docs/benchmarks/glm45-air-iq4-xs.json",
+        "path": "docs/benchmarks/glm/glm45-air-iq4-xs.json",
         "sha256": "eb15af2451e298d985bb171808ac2bcab66f585908947c1ec839ca7034215cb5",
         "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/glm45-air-iq4-xs.json",
-        "local_record": "docs/benchmarks/glm45-air-iq4-xs.json"
+        "local_record": "docs/benchmarks/glm/glm45-air-iq4-xs.json"
       },
       "relative_gain_percent": 36.4036048180187,
       "display_gain_percent": 36
@@ -95,10 +95,10 @@
       "source": {
         "repository": "appatalks/Synapse",
         "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
-        "path": "docs/benchmarks/qwen36-q8.json",
+        "path": "docs/benchmarks/qwen/qwen36-q8.json",
         "sha256": "bc2944a71175a89357e48300303542e368390213ea3a27d260cefff15e50c397",
         "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/qwen36-q8.json",
-        "local_record": "docs/benchmarks/qwen36-q8.json"
+        "local_record": "docs/benchmarks/qwen/qwen36-q8.json"
       },
       "relative_gain_percent": 71.42129378186308,
       "display_gain_percent": 71
@@ -115,10 +115,10 @@
     "source": {
       "repository": "appatalks/Synapse",
       "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
-      "path": "docs/benchmarks/mistral4-native-experimental.json",
+      "path": "docs/benchmarks/mistral/mistral4-native-experimental.json",
       "sha256": "2e17d10c2ececc2ffa6deb20fc7fcd6c619219e77bc9c37963a702e657e95f42",
       "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/mistral4-native-experimental.json",
-      "local_record": "docs/benchmarks/mistral4-native-experimental.json"
+      "local_record": "docs/benchmarks/mistral/mistral4-native-experimental.json"
     }
   },
   "memory_path_control": {
@@ -127,10 +127,10 @@
     "source": {
       "repository": "appatalks/Synapse",
       "commit": "e601f9316745fe92a50b9790dde67ff8041f4516",
-      "path": "docs/benchmarks/upstream-pr29887-gpt120b.json",
+      "path": "docs/benchmarks/gpt-oss/upstream-pr29887-gpt120b.json",
       "sha256": "5141b97376f4aa03bd99abab0eea787dfeb71f692b1415203495464441fd72a7",
       "url": "https://github.com/appatalks/Synapse/blob/e601f9316745fe92a50b9790dde67ff8041f4516/docs/benchmarks/upstream-pr29887-gpt120b.json",
-      "local_record": "docs/benchmarks/upstream-pr29887-gpt120b.json"
+      "local_record": "docs/benchmarks/gpt-oss/upstream-pr29887-gpt120b.json"
     }
   },
   "strict_native_gates": {

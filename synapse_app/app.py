@@ -294,8 +294,10 @@ def select_hybrid_policy(metadata: dict, model_bytes: int, *, mode: str, bound_l
         return {"hybrid": False, "automatic_plan": False, "reason": "standard"}
     layout = moe_layout(metadata)
     matched = bound_layout is None or layout == bound_layout
-    if layout is None or (not matched and not generic):
-        return {"hybrid": False, "automatic_plan": False, "reason": "descriptor_or_plan_mismatch"}
+    if layout is None:
+        return {"hybrid": False, "automatic_plan": False, "reason": "no_descriptor"}
+    if not matched and not generic:
+        return {"hybrid": False, "automatic_plan": False, "reason": "plan_mismatch"}
     cold_start = automatic_plan or not matched
     if (mode == "auto" and generic and cold_start and metadata.get("split.count", 1) == 1 and
             model_bytes <= cache_mib*1024*1024):
@@ -647,33 +649,24 @@ class Runtime:
                 "chat_busy": self.chat_lock.locked(),
             }
 
-    def load(self, data: dict) -> None:
-        model_value = data.get("model")
-        model = readable_gguf(model_value, "Model")
-        mode = data.get("execution_mode", self.default_execution_mode)
-        if mode not in ("auto", "standard", "hybrid"):
-            raise AppError(400, "Execution mode must be auto, standard, or hybrid.")
-        hybrid = mode == "hybrid"
+    def _select_execution(self, metadata: dict, model_bytes: int, mode: str) -> dict:
+        hybrid = False
         selected_plan = self.hybrid_plan
         transfer = self.hybrid_transfer
         selected_cache_mib = self.hybrid_cache_mib
-        selected_experts = 0
-        selected_plan_sha256 = None
+        layout = moe_layout(metadata)
         context_limit = None
         reason = "Standard execution explicitly selected."
+        reason_code = "standard"
         if mode != "standard" and self.hybrid_plan is not None:
-            try:
-                metadata = model_metadata(model)
-            except (OSError, ValueError) as exc:
-                raise AppError(400, f"Cannot select an execution profile: {exc}") from exc
-            layout = moe_layout(metadata)
             context_limit = metadata.get(metadata["general.architecture"] + ".context_length")
             if context_limit is not None and (type(context_limit) is not int or context_limit < 512):
                 raise AppError(400, "The model context limit is invalid or below the application's 512-token minimum.")
-            policy = select_hybrid_policy(metadata, model.stat().st_size, mode=mode,
+            policy = select_hybrid_policy(metadata, model_bytes, mode=mode,
                                           bound_layout=self.hybrid_layout, generic=self.hybrid_generic,
                                           automatic_plan=self.hybrid_plan == "auto", cache_mib=self.hybrid_cache_mib)
             hybrid = policy["hybrid"]
+            reason_code = policy["reason"]
             if hybrid and policy["automatic_plan"]:
                 selected_plan = "auto"
                 transfer = self.hybrid_generic_transfer
@@ -685,17 +678,82 @@ class Runtime:
                 reason = (f"Tensor-derived {metadata['general.architecture']} MoE descriptor selected; "
                           f"{'bound training plan' if selected_plan != 'auto' else 'causal cold-start plan'}, "
                           f"{transfer} transfers. Runtime operation/coverage validation is required.")
+            elif reason_code == "plan_mismatch":
+                reason = (f"{metadata['general.architecture']} does not match the installed trained-plan layout, "
+                          "and generic causal dispatch is not enabled; standard execution selected.")
             else:
-                reason = (f"{metadata['general.architecture']} is not supported by this installed residency plan "
-                          "or has no complete routed-MoE descriptor; standard execution selected, not a hybrid speedup.")
-        if mode == "hybrid" and (not hybrid or self.hybrid_plan is None):
-            raise AppError(400, "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor.")
-        if mode == "auto" and self.hybrid_plan is None:
+                reason = (f"{metadata['general.architecture']} is not supported by hybrid dispatch: no complete "
+                          "routed-MoE descriptor was found. Expert count, active count, layer count and dimensions "
+                          "must be present and valid. The model may be dense or have missing/unsupported metadata; "
+                          "standard execution selected.")
+        if mode != "standard" and self.hybrid_plan is None:
+            reason_code = "no_profile"
             reason = "No hybrid installation profile found; standard execution selected."
-        selected_executable = (self.hybrid_executable if hybrid else
-                               self.standard_executable if self.hybrid_plan is not None else self.executable)
         planned_context = min(self.hybrid_context if hybrid else 4096, context_limit) if context_limit else (
             self.hybrid_context if hybrid else 4096)
+        return {"hybrid": hybrid, "plan": selected_plan, "transfer": transfer,
+                "cache_mib": selected_cache_mib if hybrid else 0, "layout": layout,
+                "context": planned_context, "reason": reason, "reason_code": reason_code,
+                "execution_profile": f"experimental-hybrid-{transfer}" if hybrid else "standard"}
+
+    def precheck(self, data: dict) -> dict:
+        if set(data) - {"model"}:
+            raise AppError(400, "Model pre-check accepts only a local GGUF model path.")
+        model = readable_gguf(data.get("model"), "Model")
+        try:
+            metadata = model_metadata(model)
+            model_bytes = model.stat().st_size
+        except (OSError, ValueError) as exc:
+            raise AppError(400, f"Cannot inspect model: {exc}") from exc
+        automatic = self._select_execution(metadata, model_bytes, "auto")
+        required = self._select_execution(metadata, model_bytes, "hybrid")
+
+        def summary(selection):
+            hybrid = selection["hybrid"]
+            return {"execution_profile": selection["execution_profile"],
+                    "reason_code": selection["reason_code"], "reason": selection["reason"],
+                    "context": selection["context"], "cache_mib": selection["cache_mib"],
+                    "initialization": ("causal" if selection["plan"] == "auto" else "trained") if hybrid else None,
+                    "transfer": selection["transfer"] if hybrid else None}
+
+        return {
+            "api_version": 1, "model": str(model), "architecture": metadata["general.architecture"],
+            "file_type": metadata.get("general.file_type"), "file_size_bytes": model_bytes,
+            "layout": required["layout"], "hybrid_candidate": required["hybrid"],
+            "automatic": summary(automatic), "required_hybrid": summary(required),
+            "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
+            "limitations": [
+                "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
+                "GPU availability, VRAM/RAM fit, all split shards and runtime activation/coverage are unverified.",
+                "Speed and answer quality are unverified; a candidate is not a tested or quality-qualified model.",
+                "Manual settings and file/profile changes require checks again at load time.",
+            ],
+        }
+
+    def load(self, data: dict) -> None:
+        model_value = data.get("model")
+        model = readable_gguf(model_value, "Model")
+        mode = data.get("execution_mode", self.default_execution_mode)
+        if mode not in ("auto", "standard", "hybrid"):
+            raise AppError(400, "Execution mode must be auto, standard, or hybrid.")
+        metadata = {}
+        if mode != "standard" and self.hybrid_plan is not None:
+            try:
+                metadata = model_metadata(model)
+            except (OSError, ValueError) as exc:
+                raise AppError(400, f"Cannot select an execution profile: {exc}") from exc
+        selection = self._select_execution(metadata, model.stat().st_size, mode)
+        hybrid, selected_plan = selection["hybrid"], selection["plan"]
+        transfer, selected_cache_mib = selection["transfer"], selection["cache_mib"]
+        layout, planned_context = selection["layout"], selection["context"]
+        reason = selection["reason"]
+        selected_experts = 0
+        selected_plan_sha256 = None
+        if mode == "hybrid" and not hybrid:
+            raise AppError(400, "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor. "
+                           + reason)
+        selected_executable = (self.hybrid_executable if hybrid else
+                               self.standard_executable if self.hybrid_plan is not None else self.executable)
         context = data.get("context", planned_context)
         placement = data.get("placement", "auto")
         cpu_threads = data.get("cpu_threads", min(8, len(available_cpus())) if hybrid else default_cpu_threads())
@@ -1333,6 +1391,8 @@ class Handler(BaseHTTPRequestHandler):
                 if set(data) - {"path"}:
                     raise AppError(400, "Model browsing accepts only a local folder path.")
                 self._json(200, browse_models(data.get("path")))
+            elif method == "POST" and path == "/api/v1/model/precheck":
+                self._json(200, self.server.runtime.precheck(self._body()))
             elif method == "POST" and path == "/api/v1/model/unload":
                 self._body()
                 with self.server.operation_lock:

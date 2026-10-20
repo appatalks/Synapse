@@ -40,7 +40,10 @@ def write_metadata(path, metadata):
         return struct.pack("<Q", len(raw)) + raw
     entries = []
     for key, value in metadata.items():
-        kind, raw = (8, string(value)) if isinstance(value, str) else (4, struct.pack("<I", value))
+        if isinstance(value, list):
+            kind, raw = 9, struct.pack("<IQ", 4, len(value)) + b"".join(struct.pack("<I", item) for item in value)
+        else:
+            kind, raw = (8, string(value)) if isinstance(value, str) else (4, struct.pack("<I", value))
         entries.append(string(key) + struct.pack("<I", kind) + raw)
     path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, len(entries)) + b"".join(entries))
 
@@ -572,6 +575,116 @@ class LocalAppTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(self.runtime.status()["hybrid_verified"])
         self.assertTrue(self.load()["hybrid_verified"])
+
+    def precheck(self, model=None):
+        code, _, body = self.request("POST", "/api/v1/model/precheck",
+                                    {"model": str(model or self.model)})
+        self.assertEqual(code, 200, body)
+        return json.loads(body)
+
+    def test_precheck_inspects_without_a_profile_and_rejects_invalid_requests(self):
+        write_metadata(self.model, HYBRID_METADATA)
+        with mock.patch.object(app.subprocess, "Popen") as launch:
+            result = self.precheck()
+            launch.assert_not_called()
+        self.assertFalse(result["hybrid_candidate"])
+        self.assertEqual(result["required_hybrid"]["reason_code"], "no_profile")
+        self.assertEqual(result["automatic"]["execution_profile"], "standard")
+        self.assertEqual(result["layout"]["expert_count"], 128)
+        self.assertIn("unverified", " ".join(result["limitations"]))
+        self.assertIsNone(self.runtime.process)
+        self.assertEqual(self.runtime.state, "stopped")
+        for payload in ({}, {"model": False}, {"model": str(self.root / "absent.gguf")},
+                        {"model": str(self.model), "execution_mode": "hybrid"}):
+            code, _, body = self.request("POST", "/api/v1/model/precheck", payload)
+            self.assertEqual(code, 400, body)
+        self.assertEqual(self.request("POST", "/api/v1/model/precheck", {"model": str(self.model)},
+                                     {"Origin": "https://untrusted.invalid"})[0], 403)
+        for raw in (b"not GGUF", b"GGUF", b"GGUF" + struct.pack("<IQQ", 3, 0, 100001)):
+            self.model.write_bytes(raw)
+            code, _, body = self.request("POST", "/api/v1/model/precheck", {"model": str(self.model)})
+            self.assertEqual(code, 400, body)
+            self.assertIn(b"error", body)
+
+    def test_precheck_trained_selection_matches_loading_and_does_not_disturb_a_live_model(self):
+        self.hybrid_runtime(execution_mode="auto")
+        result = self.precheck()
+        self.assertTrue(result["hybrid_candidate"])
+        self.assertEqual(result["required_hybrid"]["initialization"], "trained")
+        status = self.load()
+        for key in ("execution_profile", "context"):
+            self.assertEqual(status[key], result["automatic"][key])
+        self.assertEqual(status["expert_cache_mib"], result["automatic"]["cache_mib"])
+        before = {key: status[key] for key in ("model", "state", "selection_reason", "hybrid_verified",
+                                               "hybrid_plan_sha256", "logs", "execution_profile")}
+        process = self.runtime.process
+        dense = self.root / "dense.gguf"
+        write_metadata(dense, {"general.architecture": "gemma3"})
+        with mock.patch.object(app.subprocess, "Popen") as launch:
+            result = self.precheck(dense)
+            launch.assert_not_called()
+        self.assertFalse(result["hybrid_candidate"])
+        self.assertIs(self.runtime.process, process)
+        after = self.runtime.status()
+        self.assertEqual(before, {key: after[key] for key in before})
+
+    def test_precheck_explains_missing_descriptors_and_bound_plan_mismatches(self):
+        self.hybrid_runtime(execution_mode="auto")
+        for architecture in ("gemma3", "qwen3", "qwen35", "lfm2", "unknown"):
+            with self.subTest(architecture=architecture):
+                write_metadata(self.model, {"general.architecture": architecture})
+                result = self.precheck()
+                self.assertFalse(result["hybrid_candidate"])
+                self.assertIsNone(result["layout"])
+                self.assertEqual(result["required_hybrid"]["reason_code"], "no_descriptor")
+                self.assertIn("may be dense or", result["required_hybrid"]["reason"])
+        write_metadata(self.model, {**HYBRID_METADATA, "gpt-oss.expert_used_count": 129})
+        self.assertEqual(self.precheck()["required_hybrid"]["reason_code"], "no_descriptor")
+        write_metadata(self.model, {**HYBRID_METADATA, "general.file_type": 7})
+        result = self.precheck()
+        self.assertIsNotNone(result["layout"])
+        self.assertEqual(result["required_hybrid"]["reason_code"], "plan_mismatch")
+        self.assertIn("trained-plan layout", result["required_hybrid"]["reason"])
+        code, _, body = self.request("POST", "/api/v1/model/load",
+                                    {"model": str(self.model), "execution_mode": "hybrid"})
+        self.assertEqual(code, 400, body)
+        self.assertIn(b"trained-plan layout", body)
+
+    def test_precheck_generic_candidate_has_no_architecture_allowlist_and_preserves_native_preference(self):
+        self.hybrid_runtime(execution_mode="auto", hybrid_generic=True, hybrid_cache_mib=64,
+                            hybrid_context=2048, hybrid_generic_cache_mib=32, hybrid_generic_transfer="staged")
+        metadata = {"general.architecture": "future-moe", "future-moe.block_count": 3,
+                    "future-moe.embedding_length": 96, "future-moe.feed_forward_length": [64, 96, 128],
+                    "future-moe.expert_count": 7, "future-moe.expert_used_count": [1, 2, 3],
+                    "future-moe.context_length": 1024}
+        write_metadata(self.model, metadata)
+        result = self.precheck()
+        self.assertTrue(result["hybrid_candidate"])
+        self.assertEqual(result["automatic"]["reason_code"], "native_budget")
+        self.assertEqual(result["automatic"]["execution_profile"], "standard")
+        self.assertEqual(result["required_hybrid"]["context"], 1024)
+        self.assertEqual(result["required_hybrid"]["cache_mib"], 32)
+        self.assertEqual(result["required_hybrid"]["initialization"], "causal")
+        self.assertEqual(result["required_hybrid"]["transfer"], "staged")
+        status = self.load()
+        self.assertEqual(status["selection_reason"], result["automatic"]["reason"])
+        self.runtime.stop()
+        for size in (64 * 1024 * 1024, 64 * 1024 * 1024 + 1):
+            with self.model.open("r+b") as source:
+                source.truncate(size)
+            result = self.precheck()
+            self.assertEqual(result["automatic"]["reason_code"], "native_budget" if size == 64*1024*1024 else "hybrid")
+        status = self.load()
+        self.assertEqual(status["selection_reason"], result["automatic"]["reason"])
+        self.assertEqual(status["expert_cache_mib"], result["automatic"]["cache_mib"])
+        self.runtime.stop()
+        write_metadata(self.model, {**metadata, "split.count": 2})
+        self.assertEqual(self.precheck()["automatic"]["reason_code"], "hybrid")
+        self.assertIn("all split shards", " ".join(self.precheck()["limitations"]))
+        write_metadata(self.model, {**metadata, "future-moe.context_length": 1})
+        code, _, body = self.request("POST", "/api/v1/model/precheck", {"model": str(self.model)})
+        self.assertEqual(code, 400, body)
+        self.assertIn(b"context limit", body)
 
     def test_hybrid_cannot_report_ready_without_verified_execution(self):
         self.hybrid_runtime(load_timeout=0.4)

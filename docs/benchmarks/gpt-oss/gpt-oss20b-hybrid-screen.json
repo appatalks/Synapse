@@ -1,0 +1,1600 @@
+{
+  "schema_version": 1,
+  "kind": "synapse-new-model-hybrid-screen",
+  "started_at_utc": "2026-10-20T02:02:24.515141+00:00",
+  "backend_commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+  "backend_version": "version: 0.7.0-dev (build 11669, commit 620d2225c)\nbuilt with GNU 13.3.0 for Linux x86_64",
+  "backend_sha256": "3ac6495070ae9627825dbe706de3b580fdbedd2fbe079197b2c6c81982dbd0f9",
+  "hybrid_backend_sha256": "895377f1aadaa82c7f456cfae1357db7a1195d0962d37b7cf074a8103e70fba4",
+  "cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+  "profile_sha256": "e2c4891c749e4731548657c3549ffb03fdb4c7ac221e70a8cd9ff6e0e4b1f387",
+  "app_source_sha256": "785590b8bc72664c5fe18ec63739ddbbe517b3b20d0253b21df7032c4f7d068e",
+  "collector_source_sha256": "59c334d812e58ec2db7ab07312721a0e372f144f5e8f1d8fc6234c9b60dfe94f",
+  "measurement_helpers": {
+    "repository": "appatalks/unified-memory-scheduler",
+    "revision": "cc52e4b5588e31233793bbfec743b488182613a2",
+    "throughput_path": "tools/benchmark/vrambridge-execution-sweep.py",
+    "throughput_sha256": "2ffb113d8d5526d8d5e33cfb3d4325afe6023a1a189503e2b8cef51f215974eb",
+    "answer_checks_path": "tools/benchmark/vrambridge-model-matrix.py",
+    "answer_checks_sha256": "2f7b21b3e6f053bc095355f769685ac851cd934157c0a0de8a604082911ceac0"
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 9 9950X",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "system_ram_bytes": 132581761024,
+    "gpu_before": "NVIDIA GeForce RTX 5070 Ti, 16303 MiB, 916 MiB, 595.58.03"
+  },
+  "installation_policy": {
+    "context": 16384,
+    "bound_layout": {
+      "architecture": "gpt-oss",
+      "file_type": 38,
+      "block_count": 36,
+      "embedding_length": 2880,
+      "expert_feed_forward_length": 2880,
+      "expert_count": 128,
+      "expert_used_count": 4
+    },
+    "bound_cache_mib": 12000,
+    "generic_cache_mib": 8192,
+    "generic_transfer": "direct",
+    "decode_pipeline": true,
+    "async_ids": true
+  },
+  "protocol": {
+    "context": 16384,
+    "cpu_threads": 8,
+    "batch_threads": 16,
+    "repetitions": 3,
+    "output_tokens": 512,
+    "temperature": 0,
+    "seed": 42,
+    "reasoning_effort": "low",
+    "ignore_eos": true,
+    "cache_prompt": false,
+    "speculation": false,
+    "throughput_prompt": "Explain how a CPU and GPU can cooperate to execute a mixture-of-experts model. Discuss memory bandwidth, expert placement, synchronization, and correctness in detail.",
+    "decode_rate_definition": "511 / (request wall seconds - reported prompt_ms / 1000)"
+  },
+  "answer_check_prompts": {
+    "arithmetic": "Compute 17 times 19. Return only the integer.",
+    "coding": "Return only Python source code, without Markdown fences, implementing clamp(value, low, high). It must return min(high, max(low, value)). No imports, tests, comments, annotations, or explanation."
+  },
+  "limitations": [
+    "Sequential three-repeat technical screens with controls before and after hybrid, not randomized significance.",
+    "Only explicit hybrid mode is measured; no installed defaults or trained plan are modified.",
+    "GPT-OSS-20B uses an untrained causal cache, not GPT-OSS-120B's bound trained seed.",
+    "Causal residency starts empty on each load and persists across its three samples and subsequent answer checks.",
+    "No speculative decoding, weight changes or intentional removal of selected expert contributions.",
+    "Original throughput samples, numerical limits and failed answer checks are not replaced.",
+    "Generated-text hashes and two small answer checks are not independent native-reference numerical qualification.",
+    "GPU/RAM snapshots are not peak or minimum resource requirements.",
+    "Initial bracketing controls use the installed Standard binary; a separate final Standard control uses the hybrid executable and explicitly selected matching CUDA plugin."
+  ],
+  "cleanup": {
+    "status": "stopped",
+    "owned_backend_exited": true,
+    "installation_profile_unchanged": true
+  },
+  "completed_at_utc": "2026-10-20T02:08:13.027096+00:00",
+  "hybrid_backend_version": "version: 0.7.0-dev (build 1, commit 620d222)\nbuilt with GNU 14.2.0 for Linux x86_64",
+  "model": {
+    "source": {
+      "repository": "ggml-org/gpt-oss-20b-GGUF",
+      "revision": "15dcfc7e7c608c6161507211ed43c5b590801b4b",
+      "filename": "gpt-oss-20b-MXFP4.gguf",
+      "size_bytes": 12109566624,
+      "sha256": "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
+      "base_repository": "openai/gpt-oss-20b",
+      "base_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+      "architecture_hint": "gpt-oss",
+      "license": "apache-2.0",
+      "license_name": null,
+      "popularity": {
+        "gguf_repository_downloads": 210786,
+        "gguf_repository_likes": 182,
+        "base_repository_downloads": 5897765,
+        "base_repository_likes": 5191
+      },
+      "verified_sha256": true
+    },
+    "sha256_reverified": true,
+    "precheck": {
+      "api_version": 1,
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "architecture": "gpt-oss",
+      "file_type": 38,
+      "file_size_bytes": 12109566624,
+      "layout": {
+        "architecture": "gpt-oss",
+        "file_type": 38,
+        "block_count": 24,
+        "embedding_length": 2880,
+        "expert_count": 32,
+        "expert_used_count": 4,
+        "expert_feed_forward_length": 2880
+      },
+      "hybrid_candidate": true,
+      "automatic": {
+        "execution_profile": "standard",
+        "reason_code": "native_budget",
+        "reason": "MoE weight file fits the configured residency budget; native fitting is preferred to avoid hybrid scheduling overhead. This is not a fit or speed guarantee.",
+        "context": 4096,
+        "cache_mib": 0,
+        "initialization": null,
+        "transfer": null
+      },
+      "required_hybrid": {
+        "execution_profile": "experimental-hybrid-direct",
+        "reason_code": "hybrid",
+        "reason": "Tensor-derived gpt-oss MoE descriptor selected; causal cold-start plan, direct transfers. Runtime operation/coverage validation is required.",
+        "context": 16384,
+        "cache_mib": 8192,
+        "initialization": "causal",
+        "transfer": "direct"
+      },
+      "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
+      "limitations": [
+        "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
+        "GPU availability, VRAM/RAM fit, all split shards and runtime activation/coverage are unverified.",
+        "Speed and answer quality are unverified; a candidate is not a tested or quality-qualified model.",
+        "Manual settings and file/profile changes require checks again at load time."
+      ]
+    }
+  },
+  "runs": [
+    {
+      "name": "standard-before",
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "settings": {
+        "execution_mode": "standard",
+        "context": 16384,
+        "cpu_threads": 8,
+        "batch_threads": 16,
+        "placement": "auto",
+        "load_mode": "auto",
+        "fit_target_mib": 1024,
+        "expert_cache_mib": 0,
+        "host_op_offload": true,
+        "cpu_poll": 50,
+        "op_offload_min_batch": 32,
+        "kv_cache_type": "f16"
+      },
+      "status": "ok",
+      "samples": [
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 95.937,
+            "prompt_per_token_ms": 0.9789489795918367,
+            "prompt_per_second": 1021.5036951332645,
+            "predicted_n": 512,
+            "predicted_ms": 2460.38,
+            "predicted_per_token_ms": 4.814833659491194,
+            "predicted_per_second": 207.69149480974482
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5626225450032507,
+          "wall_decode_tok_s": 207.1605766836107,
+          "end_to_end_tok_s": 199.79532334885883,
+          "first_token_seconds": 0.11981711199769052,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 46.912,
+            "prompt_per_token_ms": 0.4786938775510204,
+            "prompt_per_second": 2089.017735334243,
+            "predicted_n": 512,
+            "predicted_ms": 2458.254,
+            "predicted_per_token_ms": 4.810673189823874,
+            "predicted_per_second": 207.87111502716968
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5145214820004185,
+          "wall_decode_tok_s": 207.08301039018025,
+          "end_to_end_tok_s": 203.6172701903824,
+          "first_token_seconds": 0.07159104600577848,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 47.582,
+            "prompt_per_token_ms": 0.48553061224489796,
+            "prompt_per_second": 2059.602370644361,
+            "predicted_n": 512,
+            "predicted_ms": 2476.182,
+            "predicted_per_token_ms": 4.845757338551858,
+            "predicted_per_second": 206.36609102238853
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5296533860018826,
+          "wall_decode_tok_s": 205.87643162959873,
+          "end_to_end_tok_s": 202.39927052188602,
+          "first_token_seconds": 0.06941274800192332,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        }
+      ],
+      "answer_checks": [
+        {
+          "workload": "arithmetic",
+          "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+          "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 21,
+            "prompt_tokens": 79,
+            "total_tokens": 100,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.1481122509940178,
+          "check_passed": true,
+          "check": "exact integer"
+        },
+        {
+          "workload": "coding",
+          "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+          "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 108,
+            "total_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.2025609490010538,
+          "check_passed": true,
+          "check": "AST-only; model code is never executed"
+        }
+      ],
+      "load_seconds": 2.0149586879997514,
+      "activation": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1138642944,
+          "anonymous_bytes": 306753536,
+          "file_backed_bytes": 778121216,
+          "shared_bytes": 53768192,
+          "read_bytes": 0,
+          "cpu_logical_cores": 0.4231339034305187,
+          "system_available_ram_bytes": 121612578816
+        }
+      },
+      "activation_logs": [
+        "0.00.119.300 I srv  llama_server: initializing ...",
+        "0.00.119.312 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.121.320 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.734.646 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.734.649 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.734.649 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.735.166 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.737.489 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.795.688 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.834.008 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.835.851 I srv  llama_server: model loaded",
+        "0.01.835.856 I srv  llama_server: listening on http://127.0.0.1:45227"
+      ],
+      "summary": {
+        "median_wall_decode_tok_s": 207.08301039018025,
+        "median_first_token_seconds": 0.07159104600577848,
+        "median_request_seconds": 2.5296533860018826,
+        "repeated_text_hashes_match": true,
+        "change_vs_fastest_control_percent": 0.0,
+        "all_text_hashes_match_control": true,
+        "change_vs_same_build_control_percent": 0.039575143841608096
+      },
+      "after_requests": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1404121088,
+          "anonymous_bytes": 554549248,
+          "file_backed_bytes": 795803648,
+          "shared_bytes": 53768192,
+          "read_bytes": 0,
+          "cpu_logical_cores": 0.9988184028363515,
+          "system_available_ram_bytes": 121361653760
+        }
+      },
+      "after_request_logs": [
+        "0.00.119.300 I srv  llama_server: initializing ...",
+        "0.00.119.312 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.121.320 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.734.646 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.734.649 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.734.649 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.735.166 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.737.489 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.795.688 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.834.008 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.835.851 I srv  llama_server: model loaded",
+        "0.01.835.856 I srv  llama_server: listening on http://127.0.0.1:45227",
+        "0.02.007.988 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1",
+        "0.02.008.603 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0",
+        "0.04.564.948 I slot print_timing: id  0 | task 0 | prompt eval time =      95.94 ms /    98 tokens (    0.98 ms per token,  1021.50 tokens per second)",
+        "0.04.564.951 I slot print_timing: id  0 | task 0 |        eval time =    2460.38 ms /   512 tokens (    4.81 ms per token,   207.69 tokens per second)",
+        "0.04.564.951 I slot print_timing: id  0 | task 0 |       total time =    2556.32 ms /   610 tokens",
+        "0.04.564.956 I slot print_timing: id  0 | task 0 |    graphs reused =        509",
+        "0.04.564.956 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.04.564.983 I slot      release: id  0 | task 0 | stop processing: n_tokens = 609, truncated = 0",
+        "0.04.571.152 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.04.575.274 I slot launch_slot_: id  0 | task 515 | processing task, is_child = 0",
+        "0.07.080.455 I slot print_timing: id  0 | task 515 | prompt eval time =      46.91 ms /    98 tokens (    0.48 ms per token,  2089.02 tokens per second)",
+        "0.07.080.457 I slot print_timing: id  0 | task 515 |        eval time =    2458.25 ms /   512 tokens (    4.81 ms per token,   207.87 tokens per second)",
+        "0.07.080.458 I slot print_timing: id  0 | task 515 |       total time =    2505.17 ms /   610 tokens",
+        "0.07.080.459 I slot print_timing: id  0 | task 515 |    graphs reused =       1017",
+        "0.07.080.459 I slot print_timing: id  0 | task 515 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.07.080.475 I slot      release: id  0 | task 515 | stop processing: n_tokens = 609, truncated = 0",
+        "0.07.087.115 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.07.087.612 I slot launch_slot_: id  0 | task 1030 | processing task, is_child = 0",
+        "0.09.611.388 I slot print_timing: id  0 | task 1030 | prompt eval time =      47.58 ms /    98 tokens (    0.49 ms per token,  2059.60 tokens per second)",
+        "0.09.611.391 I slot print_timing: id  0 | task 1030 |        eval time =    2476.18 ms /   512 tokens (    4.85 ms per token,   206.37 tokens per second)",
+        "0.09.611.391 I slot print_timing: id  0 | task 1030 |       total time =    2523.76 ms /   610 tokens",
+        "0.09.611.393 I slot print_timing: id  0 | task 1030 |    graphs reused =       1525",
+        "0.09.611.393 I slot print_timing: id  0 | task 1030 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.611.408 I slot      release: id  0 | task 1030 | stop processing: n_tokens = 609, truncated = 0",
+        "0.09.617.351 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.810 (> 0.100 thold), f_keep = 0.105",
+        "0.09.617.858 I slot launch_slot_: id  0 | task 1545 | processing task, is_child = 0",
+        "0.09.760.472 I slot print_timing: id  0 | task 1545 | prompt eval time =      44.91 ms /    79 tokens (    0.57 ms per token,  1759.19 tokens per second)",
+        "0.09.760.475 I slot print_timing: id  0 | task 1545 |        eval time =      97.70 ms /    21 tokens (    4.88 ms per token,   204.71 tokens per second)",
+        "0.09.760.475 I slot print_timing: id  0 | task 1545 |       total time =     142.61 ms /   100 tokens",
+        "0.09.760.476 I slot print_timing: id  0 | task 1545 |    graphs reused =       1544",
+        "0.09.760.477 I slot print_timing: id  0 | task 1545 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.760.491 I slot      release: id  0 | task 1545 | stop processing: n_tokens = 99, truncated = 0",
+        "0.09.765.276 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.593 (> 0.100 thold), f_keep = 0.646",
+        "0.09.765.801 I slot launch_slot_: id  0 | task 1569 | processing task, is_child = 0",
+        "0.09.962.944 I slot print_timing: id  0 | task 1569 | prompt eval time =      47.77 ms /   108 tokens (    0.44 ms per token,  2260.64 tokens per second)",
+        "0.09.962.946 I slot print_timing: id  0 | task 1569 |        eval time =     149.36 ms /    32 tokens (    4.82 ms per token,   207.56 tokens per second)",
+        "0.09.962.947 I slot print_timing: id  0 | task 1569 |       total time =     197.13 ms /   140 tokens",
+        "0.09.962.947 I slot print_timing: id  0 | task 1569 |    graphs reused =       1574",
+        "0.09.962.948 I slot print_timing: id  0 | task 1569 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.962.964 I slot      release: id  0 | task 1569 | stop processing: n_tokens = 139, truncated = 0"
+      ],
+      "gpu_memory_after_requests_mib": 12658
+    },
+    {
+      "name": "hybrid-8192",
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "settings": {
+        "execution_mode": "hybrid",
+        "context": 16384,
+        "cpu_threads": 8,
+        "batch_threads": 16,
+        "placement": "auto",
+        "load_mode": "auto",
+        "fit_target_mib": 1024,
+        "expert_cache_mib": 8192,
+        "host_op_offload": false,
+        "cpu_poll": 50,
+        "op_offload_min_batch": 32,
+        "kv_cache_type": "f16"
+      },
+      "status": "ok",
+      "samples": [
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 727.714,
+            "prompt_per_token_ms": 7.42565306122449,
+            "prompt_per_second": 134.66829001503336,
+            "predicted_n": 512,
+            "predicted_ms": 4162.753,
+            "predicted_per_token_ms": 8.146287671232876,
+            "predicted_per_second": 122.75530159968656
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.895944834999682,
+          "wall_decode_tok_s": 122.59397817156615,
+          "end_to_end_tok_s": 104.5763416981052,
+          "first_token_seconds": 0.8603726189976442,
+          "generated_text_sha256": "0c49ab5b249cc6a82c2fef16b454c0de4659222ab59dbe7b6317e60d074047d6"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 663.068,
+            "prompt_per_token_ms": 6.766,
+            "prompt_per_second": 147.79781259237362,
+            "predicted_n": 512,
+            "predicted_ms": 3558.73,
+            "predicted_per_token_ms": 6.964246575342465,
+            "predicted_per_second": 143.59055056157675
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.231727750993741,
+          "wall_decode_tok_s": 143.19101165576382,
+          "end_to_end_tok_s": 120.9907702308511,
+          "first_token_seconds": 0.7291891770000802,
+          "generated_text_sha256": "6f452acb0844a81ad3bfc8f647bcb52374feca8128262d63c40b60c07182b177"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 651.239,
+            "prompt_per_token_ms": 6.6452959183673475,
+            "prompt_per_second": 150.4823881862112,
+            "predicted_n": 512,
+            "predicted_ms": 3387.46,
+            "predicted_per_token_ms": 6.629080234833659,
+            "predicted_per_second": 150.85048974748042
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.048140037994017,
+          "wall_decode_tok_s": 150.43122960737253,
+          "end_to_end_tok_s": 126.47783801810186,
+          "first_token_seconds": 0.7099149569985457,
+          "generated_text_sha256": "aaede92b68ebe15f0131956c94ffbc0f6c50b705936dc94aba8e8aa7247622cd"
+        }
+      ],
+      "answer_checks": [
+        {
+          "workload": "arithmetic",
+          "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+          "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 20,
+            "prompt_tokens": 79,
+            "total_tokens": 99,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.765299013000913,
+          "check_passed": true,
+          "check": "exact integer"
+        },
+        {
+          "workload": "coding",
+          "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+          "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 108,
+            "total_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.9711167360001127,
+          "check_passed": true,
+          "check": "AST-only; model code is never executed"
+        }
+      ],
+      "load_seconds": 1.5886661549957353,
+      "activation": {
+        "state": "ready",
+        "execution_profile": "experimental-hybrid-direct",
+        "selection_reason": "Tensor-derived gpt-oss MoE descriptor selected; causal cold-start plan, direct transfers. Runtime operation/coverage validation is required.",
+        "context": 16384,
+        "hybrid_verified": true,
+        "hybrid_transfer": "direct",
+        "hybrid_decode_pipeline": true,
+        "hybrid_async_ids": true,
+        "hybrid_overlap_verified": true,
+        "hybrid_gate_up_verified": true,
+        "hybrid_async_ids_verified": true,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 8192,
+        "fit_enabled": false,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 12068614144,
+          "anonymous_bytes": 311222272,
+          "file_backed_bytes": 11644641280,
+          "shared_bytes": 112750592,
+          "read_bytes": 0,
+          "cpu_logical_cores": 7.311209274963041,
+          "system_available_ram_bytes": 121330302976
+        }
+      },
+      "activation_logs": [
+        "0.00.074.267 I srv  llama_server: initializing ...",
+        "0.00.074.283 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.076.305 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.076.319 W cmn  common_init_: VRAMBridge decode pipeline configured: staged input, guarded overlap, GPU boundary, gate/up fusion",
+        "0.00.345.568 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.571 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.572 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.993 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.348.059 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.00.386.809 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance",
+        "0.00.666.215 W impl: asynchronous GPU ID handoff: 12288-byte per-layer pinned staging; protected reuse",
+        "0.00.666.224 W impl: EXPERIMENTAL HYBRID enabled: 0 selected experts; adaptive admissions",
+        "0.00.666.225 W impl: hybrid batch limit=1; multi-position dispatch freezes residency",
+        "0.00.666.225 W impl: admission policy=classic; recent token window=64",
+        "0.00.666.226 W impl: fused resident gate/up groups=1/1; original projection bytes preserved",
+        "0.00.666.226 W impl: tensor-derived hybrid coverage=24/24 routed layers; other layers remain native",
+        "0.00.666.233 W impl: CPU-repacked expert tensors=0; lossless native-layout GPU uploads",
+        "0.00.802.005 W pin: registered 10179084288 immutable source bytes in 48 ranges; cap 64 GiB, headroom 24 GiB",
+        "0.00.802.008 W impl: direct asynchronous admissions; immutable registered sources, no staging copies",
+        "0.00.804.169 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.820.276 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.836.346 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.852.982 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.882.672 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.899.066 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.00.977.533 W VRAMBridge guarded expert overlap active",
+        "0.01.037.958 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.039.770 I srv  llama_server: model loaded",
+        "0.01.039.780 I srv  llama_server: listening on http://127.0.0.1:56589"
+      ],
+      "summary": {
+        "median_wall_decode_tok_s": 143.19101165576382,
+        "median_first_token_seconds": 0.7291891770000802,
+        "median_request_seconds": 4.231727750993741,
+        "repeated_text_hashes_match": false,
+        "change_vs_fastest_control_percent": -30.853327182192714,
+        "all_text_hashes_match_control": false,
+        "change_vs_same_build_control_percent": -30.82596228696337
+      },
+      "after_requests": {
+        "state": "ready",
+        "execution_profile": "experimental-hybrid-direct",
+        "selection_reason": "Tensor-derived gpt-oss MoE descriptor selected; causal cold-start plan, direct transfers. Runtime operation/coverage validation is required.",
+        "context": 16384,
+        "hybrid_verified": true,
+        "hybrid_transfer": "direct",
+        "hybrid_decode_pipeline": true,
+        "hybrid_async_ids": true,
+        "hybrid_overlap_verified": true,
+        "hybrid_gate_up_verified": true,
+        "hybrid_async_ids_verified": true,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 8192,
+        "fit_enabled": false,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 12366409728,
+          "anonymous_bytes": 593690624,
+          "file_backed_bytes": 11659968512,
+          "shared_bytes": 112750592,
+          "read_bytes": 0,
+          "cpu_logical_cores": 11.72068703031522,
+          "system_available_ram_bytes": 121079468032
+        }
+      },
+      "after_request_logs": [
+        "0.00.076.319 W cmn  common_init_: VRAMBridge decode pipeline configured: staged input, guarded overlap, GPU boundary, gate/up fusion",
+        "0.00.345.568 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.571 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.572 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.345.993 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.348.059 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.00.386.809 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance",
+        "0.00.666.215 W impl: asynchronous GPU ID handoff: 12288-byte per-layer pinned staging; protected reuse",
+        "0.00.666.224 W impl: EXPERIMENTAL HYBRID enabled: 0 selected experts; adaptive admissions",
+        "0.00.666.225 W impl: hybrid batch limit=1; multi-position dispatch freezes residency",
+        "0.00.666.225 W impl: admission policy=classic; recent token window=64",
+        "0.00.666.226 W impl: fused resident gate/up groups=1/1; original projection bytes preserved",
+        "0.00.666.226 W impl: tensor-derived hybrid coverage=24/24 routed layers; other layers remain native",
+        "0.00.666.233 W impl: CPU-repacked expert tensors=0; lossless native-layout GPU uploads",
+        "0.00.802.005 W pin: registered 10179084288 immutable source bytes in 48 ranges; cap 64 GiB, headroom 24 GiB",
+        "0.00.802.008 W impl: direct asynchronous admissions; immutable registered sources, no staging copies",
+        "0.00.804.169 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.820.276 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.836.346 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.852.982 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.882.672 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.899.066 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.00.977.533 W VRAMBridge guarded expert overlap active",
+        "0.01.037.958 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.039.770 I srv  llama_server: model loaded",
+        "0.01.039.780 I srv  llama_server: listening on http://127.0.0.1:56589",
+        "0.01.259.860 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1",
+        "0.01.260.374 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0",
+        "0.01.989.147 W VRAMBridge resident gate/up projection fusion active",
+        "0.03.742.019 W VRAMBridge resident gate/up projection fusion active",
+        "0.04.994.148 I slot print_timing: id  0 | task 0 | n_gen =    337, tg = 111.78 t/s, tg_3s = 112.11 t/s",
+        "0.05.508.614 W VRAMBridge resident gate/up projection fusion active",
+        "0.06.150.867 I slot print_timing: id  0 | task 0 | prompt eval time =     727.71 ms /    98 tokens (    7.43 ms per token,   134.67 tokens per second)",
+        "0.06.150.870 I slot print_timing: id  0 | task 0 |        eval time =    4162.75 ms /   512 tokens (    8.15 ms per token,   122.76 tokens per second)",
+        "0.06.150.871 I slot print_timing: id  0 | task 0 |       total time =    4890.47 ms /   610 tokens",
+        "0.06.150.877 I slot print_timing: id  0 | task 0 |    graphs reused =        509",
+        "0.06.150.878 I slot print_timing: id  0 | task 0 |   graph reallocs =          2    /     0        (same size) / (changed size)",
+        "0.06.150.904 I slot      release: id  0 | task 0 | stop processing: n_tokens = 609, truncated = 0",
+        "0.06.157.678 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.06.162.046 I slot launch_slot_: id  0 | task 515 | processing task, is_child = 0",
+        "0.06.826.151 W VRAMBridge resident gate/up projection fusion active",
+        "0.08.000.370 W VRAMBridge resident gate/up projection fusion active",
+        "0.09.702.445 W VRAMBridge resident gate/up projection fusion active",
+        "0.09.831.021 I slot print_timing: id  0 | task 515 | n_gen =    432, tg = 143.39 t/s, tg_3s = 143.72 t/s",
+        "0.10.383.861 I slot print_timing: id  0 | task 515 | prompt eval time =     663.07 ms /    98 tokens (    6.77 ms per token,   147.80 tokens per second)",
+        "0.10.383.863 I slot print_timing: id  0 | task 515 |        eval time =    3558.73 ms /   512 tokens (    6.96 ms per token,   143.59 tokens per second)",
+        "0.10.383.863 I slot print_timing: id  0 | task 515 |       total time =    4221.80 ms /   610 tokens",
+        "0.10.383.864 I slot print_timing: id  0 | task 515 |    graphs reused =       1017",
+        "0.10.383.865 I slot print_timing: id  0 | task 515 |   graph reallocs =          4    /     0        (same size) / (changed size)",
+        "0.10.383.884 I slot      release: id  0 | task 515 | stop processing: n_tokens = 609, truncated = 0",
+        "0.10.390.310 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.10.394.593 I slot launch_slot_: id  0 | task 1030 | processing task, is_child = 0",
+        "0.11.046.860 W VRAMBridge resident gate/up projection fusion active",
+        "0.12.121.655 W VRAMBridge resident gate/up projection fusion active",
+        "0.13.784.977 W VRAMBridge resident gate/up projection fusion active",
+        "0.14.049.128 I slot print_timing: id  0 | task 1030 | n_gen =    454, tg = 150.84 t/s, tg_3s = 151.17 t/s",
+        "0.14.433.308 I slot print_timing: id  0 | task 1030 | prompt eval time =     651.24 ms /    98 tokens (    6.65 ms per token,   150.48 tokens per second)",
+        "0.14.433.311 I slot print_timing: id  0 | task 1030 |        eval time =    3387.46 ms /   512 tokens (    6.63 ms per token,   150.85 tokens per second)",
+        "0.14.433.311 I slot print_timing: id  0 | task 1030 |       total time =    4038.70 ms /   610 tokens",
+        "0.14.433.312 I slot print_timing: id  0 | task 1030 |    graphs reused =       1525",
+        "0.14.433.312 I slot print_timing: id  0 | task 1030 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.14.433.329 I slot      release: id  0 | task 1030 | stop processing: n_tokens = 609, truncated = 0",
+        "0.14.439.847 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.810 (> 0.100 thold), f_keep = 0.105",
+        "0.14.443.755 I slot launch_slot_: id  0 | task 1545 | processing task, is_child = 0",
+        "0.15.024.394 W VRAMBridge resident gate/up projection fusion active",
+        "0.15.199.687 I slot print_timing: id  0 | task 1545 | prompt eval time =     579.63 ms /    79 tokens (    7.34 ms per token,   136.29 tokens per second)",
+        "0.15.199.690 I slot print_timing: id  0 | task 1545 |        eval time =     176.28 ms /    20 tokens (    9.28 ms per token,   107.78 tokens per second)",
+        "0.15.199.691 I slot print_timing: id  0 | task 1545 |       total time =     755.91 ms /    99 tokens",
+        "0.15.199.692 I slot print_timing: id  0 | task 1545 |    graphs reused =       1543",
+        "0.15.199.693 I slot print_timing: id  0 | task 1545 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.15.199.711 I slot      release: id  0 | task 1545 | stop processing: n_tokens = 98, truncated = 0",
+        "0.15.205.564 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.593 (> 0.100 thold), f_keep = 0.653",
+        "0.15.206.047 I slot launch_slot_: id  0 | task 1568 | processing task, is_child = 0",
+        "0.15.891.815 W VRAMBridge resident gate/up projection fusion active",
+        "0.16.170.689 I slot print_timing: id  0 | task 1568 | prompt eval time =     684.77 ms /   108 tokens (    6.34 ms per token,   157.72 tokens per second)",
+        "0.16.170.692 I slot print_timing: id  0 | task 1568 |        eval time =     279.86 ms /    32 tokens (    9.03 ms per token,   110.77 tokens per second)",
+        "0.16.170.693 I slot print_timing: id  0 | task 1568 |       total time =     964.63 ms /   140 tokens",
+        "0.16.170.694 I slot print_timing: id  0 | task 1568 |    graphs reused =       1573",
+        "0.16.170.694 I slot print_timing: id  0 | task 1568 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.16.170.714 I slot      release: id  0 | task 1568 | stop processing: n_tokens = 139, truncated = 0"
+      ],
+      "gpu_memory_after_requests_mib": 11180
+    },
+    {
+      "name": "hybrid-10240",
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "settings": {
+        "execution_mode": "hybrid",
+        "context": 16384,
+        "cpu_threads": 8,
+        "batch_threads": 16,
+        "placement": "auto",
+        "load_mode": "auto",
+        "fit_target_mib": 1024,
+        "expert_cache_mib": 10240,
+        "host_op_offload": false,
+        "cpu_poll": 50,
+        "op_offload_min_batch": 32,
+        "kv_cache_type": "f16"
+      },
+      "status": "ok",
+      "samples": [
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 694.051,
+            "prompt_per_token_ms": 7.08215306122449,
+            "prompt_per_second": 141.19999827102043,
+            "predicted_n": 512,
+            "predicted_ms": 4199.302,
+            "predicted_per_token_ms": 8.217812133072407,
+            "predicted_per_second": 121.68688986884013
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.8992000139987795,
+          "wall_decode_tok_s": 121.5176913585941,
+          "end_to_end_tok_s": 104.50685796395973,
+          "first_token_seconds": 0.8273280799985514,
+          "generated_text_sha256": "0c49ab5b249cc6a82c2fef16b454c0de4659222ab59dbe7b6317e60d074047d6"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 652.906,
+            "prompt_per_token_ms": 6.662306122448979,
+            "prompt_per_second": 150.0981764603174,
+            "predicted_n": 512,
+            "predicted_ms": 3539.865,
+            "predicted_per_token_ms": 6.927328767123287,
+            "predicted_per_second": 144.35578757946985
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.201722085999791,
+          "wall_decode_tok_s": 143.9916827518658,
+          "end_to_end_tok_s": 121.85479894207965,
+          "first_token_seconds": 0.7197844109978178,
+          "generated_text_sha256": "6f452acb0844a81ad3bfc8f647bcb52374feca8128262d63c40b60c07182b177"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 647.51,
+            "prompt_per_token_ms": 6.607244897959184,
+            "prompt_per_second": 151.349013914843,
+            "predicted_n": 512,
+            "predicted_ms": 3355.026,
+            "predicted_per_token_ms": 6.565608610567514,
+            "predicted_per_second": 152.3088047603804
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 4.011450878999312,
+          "wall_decode_tok_s": 151.90516670198127,
+          "end_to_end_tok_s": 127.63461785869416,
+          "first_token_seconds": 0.7064048899992486,
+          "generated_text_sha256": "aaede92b68ebe15f0131956c94ffbc0f6c50b705936dc94aba8e8aa7247622cd"
+        }
+      ],
+      "answer_checks": [
+        {
+          "workload": "arithmetic",
+          "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+          "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 20,
+            "prompt_tokens": 79,
+            "total_tokens": 99,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.7537492499977816,
+          "check_passed": true,
+          "check": "exact integer"
+        },
+        {
+          "workload": "coding",
+          "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+          "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 108,
+            "total_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 1.0029927819996374,
+          "check_passed": true,
+          "check": "AST-only; model code is never executed"
+        }
+      ],
+      "load_seconds": 1.5987863660047879,
+      "activation": {
+        "state": "ready",
+        "execution_profile": "experimental-hybrid-direct",
+        "selection_reason": "Tensor-derived gpt-oss MoE descriptor selected; causal cold-start plan, direct transfers. Runtime operation/coverage validation is required. Explicit causal residency budget: 10240 MiB; fit is still model-dependent.",
+        "context": 16384,
+        "hybrid_verified": true,
+        "hybrid_transfer": "direct",
+        "hybrid_decode_pipeline": true,
+        "hybrid_async_ids": true,
+        "hybrid_overlap_verified": true,
+        "hybrid_gate_up_verified": true,
+        "hybrid_async_ids_verified": true,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 10240,
+        "fit_enabled": false,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 12068577280,
+          "anonymous_bytes": 311230464,
+          "file_backed_bytes": 11644596224,
+          "shared_bytes": 112750592,
+          "read_bytes": 0,
+          "cpu_logical_cores": 8.130519335478668,
+          "system_available_ram_bytes": 121350389760
+        }
+      },
+      "activation_logs": [
+        "0.00.077.105 I srv  llama_server: initializing ...",
+        "0.00.077.121 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.079.116 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.079.127 W cmn  common_init_: VRAMBridge decode pipeline configured: staged input, guarded overlap, GPU boundary, gate/up fusion",
+        "0.00.346.085 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.088 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.088 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.547 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.348.549 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.00.388.876 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance",
+        "0.00.671.952 W impl: asynchronous GPU ID handoff: 12288-byte per-layer pinned staging; protected reuse",
+        "0.00.671.963 W impl: EXPERIMENTAL HYBRID enabled: 0 selected experts; adaptive admissions",
+        "0.00.671.963 W impl: hybrid batch limit=1; multi-position dispatch freezes residency",
+        "0.00.671.964 W impl: admission policy=classic; recent token window=64",
+        "0.00.671.964 W impl: fused resident gate/up groups=1/1; original projection bytes preserved",
+        "0.00.671.964 W impl: tensor-derived hybrid coverage=24/24 routed layers; other layers remain native",
+        "0.00.671.970 W impl: CPU-repacked expert tensors=0; lossless native-layout GPU uploads",
+        "0.00.808.513 W pin: registered 10179084288 immutable source bytes in 48 ranges; cap 64 GiB, headroom 24 GiB",
+        "0.00.808.515 W impl: direct asynchronous admissions; immutable registered sources, no staging copies",
+        "0.00.810.734 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.827.543 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.844.343 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.861.074 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.891.150 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.908.223 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.00.988.904 W VRAMBridge guarded expert overlap active",
+        "0.01.052.321 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.054.153 I srv  llama_server: model loaded",
+        "0.01.054.158 I srv  llama_server: listening on http://127.0.0.1:58695"
+      ],
+      "summary": {
+        "median_wall_decode_tok_s": 143.9916827518658,
+        "median_first_token_seconds": 0.7197844109978178,
+        "median_request_seconds": 4.201722085999791,
+        "repeated_text_hashes_match": false,
+        "change_vs_fastest_control_percent": -30.466684601232842,
+        "all_text_hashes_match_control": false,
+        "change_vs_same_build_control_percent": -30.439166691645937
+      },
+      "after_requests": {
+        "state": "ready",
+        "execution_profile": "experimental-hybrid-direct",
+        "selection_reason": "Tensor-derived gpt-oss MoE descriptor selected; causal cold-start plan, direct transfers. Runtime operation/coverage validation is required. Explicit causal residency budget: 10240 MiB; fit is still model-dependent.",
+        "context": 16384,
+        "hybrid_verified": true,
+        "hybrid_transfer": "direct",
+        "hybrid_decode_pipeline": true,
+        "hybrid_async_ids": true,
+        "hybrid_overlap_verified": true,
+        "hybrid_gate_up_verified": true,
+        "hybrid_async_ids_verified": true,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 10240,
+        "fit_enabled": false,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 12366381056,
+          "anonymous_bytes": 593707008,
+          "file_backed_bytes": 11659923456,
+          "shared_bytes": 112750592,
+          "read_bytes": 0,
+          "cpu_logical_cores": 9.797324440307385,
+          "system_available_ram_bytes": 121087045632
+        }
+      },
+      "after_request_logs": [
+        "0.00.079.127 W cmn  common_init_: VRAMBridge decode pipeline configured: staged input, guarded overlap, GPU boundary, gate/up fusion",
+        "0.00.346.085 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.088 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.088 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.346.547 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.348.549 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.00.388.876 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance",
+        "0.00.671.952 W impl: asynchronous GPU ID handoff: 12288-byte per-layer pinned staging; protected reuse",
+        "0.00.671.963 W impl: EXPERIMENTAL HYBRID enabled: 0 selected experts; adaptive admissions",
+        "0.00.671.963 W impl: hybrid batch limit=1; multi-position dispatch freezes residency",
+        "0.00.671.964 W impl: admission policy=classic; recent token window=64",
+        "0.00.671.964 W impl: fused resident gate/up groups=1/1; original projection bytes preserved",
+        "0.00.671.964 W impl: tensor-derived hybrid coverage=24/24 routed layers; other layers remain native",
+        "0.00.671.970 W impl: CPU-repacked expert tensors=0; lossless native-layout GPU uploads",
+        "0.00.808.513 W pin: registered 10179084288 immutable source bytes in 48 ranges; cap 64 GiB, headroom 24 GiB",
+        "0.00.808.515 W impl: direct asynchronous admissions; immutable registered sources, no staging copies",
+        "0.00.810.734 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.827.543 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.844.343 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.861.074 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.891.150 W VRAMBridge resident gate/up projection fusion active",
+        "0.00.908.223 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.00.988.904 W VRAMBridge guarded expert overlap active",
+        "0.01.052.321 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.054.153 I srv  llama_server: model loaded",
+        "0.01.054.158 I srv  llama_server: listening on http://127.0.0.1:58695",
+        "0.01.260.789 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1",
+        "0.01.261.095 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0",
+        "0.01.956.163 W VRAMBridge resident gate/up projection fusion active",
+        "0.03.748.259 W VRAMBridge resident gate/up projection fusion active",
+        "0.04.961.165 I slot print_timing: id  0 | task 0 | n_gen =    331, tg = 109.78 t/s, tg_3s = 110.11 t/s",
+        "0.05.513.302 W VRAMBridge resident gate/up projection fusion active",
+        "0.06.154.470 I slot print_timing: id  0 | task 0 | prompt eval time =     694.05 ms /    98 tokens (    7.08 ms per token,   141.20 tokens per second)",
+        "0.06.154.473 I slot print_timing: id  0 | task 0 |        eval time =    4199.30 ms /   512 tokens (    8.22 ms per token,   121.69 tokens per second)",
+        "0.06.154.473 I slot print_timing: id  0 | task 0 |       total time =    4893.35 ms /   610 tokens",
+        "0.06.154.479 I slot print_timing: id  0 | task 0 |    graphs reused =        509",
+        "0.06.154.479 I slot print_timing: id  0 | task 0 |   graph reallocs =          2    /     0        (same size) / (changed size)",
+        "0.06.154.511 I slot      release: id  0 | task 0 | stop processing: n_tokens = 609, truncated = 0",
+        "0.06.161.512 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.06.165.663 I slot launch_slot_: id  0 | task 515 | processing task, is_child = 0",
+        "0.06.819.853 W VRAMBridge resident gate/up projection fusion active",
+        "0.07.988.944 W VRAMBridge resident gate/up projection fusion active",
+        "0.09.687.418 W VRAMBridge resident gate/up projection fusion active",
+        "0.09.824.457 I slot print_timing: id  0 | task 515 | n_gen =    434, tg = 144.05 t/s, tg_3s = 144.38 t/s",
+        "0.10.358.451 I slot print_timing: id  0 | task 515 | prompt eval time =     652.91 ms /    98 tokens (    6.66 ms per token,   150.10 tokens per second)",
+        "0.10.358.454 I slot print_timing: id  0 | task 515 |        eval time =    3539.86 ms /   512 tokens (    6.93 ms per token,   144.36 tokens per second)",
+        "0.10.358.455 I slot print_timing: id  0 | task 515 |       total time =    4192.77 ms /   610 tokens",
+        "0.10.358.456 I slot print_timing: id  0 | task 515 |    graphs reused =       1017",
+        "0.10.358.457 I slot print_timing: id  0 | task 515 |   graph reallocs =          4    /     0        (same size) / (changed size)",
+        "0.10.358.471 I slot      release: id  0 | task 515 | stop processing: n_tokens = 609, truncated = 0",
+        "0.10.365.574 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.10.369.593 I slot launch_slot_: id  0 | task 1030 | processing task, is_child = 0",
+        "0.11.018.153 W VRAMBridge resident gate/up projection fusion active",
+        "0.12.090.426 W VRAMBridge resident gate/up projection fusion active",
+        "0.13.731.940 W VRAMBridge resident gate/up projection fusion active",
+        "0.14.017.809 I slot print_timing: id  0 | task 1030 | n_gen =    458, tg = 152.30 t/s, tg_3s = 152.63 t/s",
+        "0.14.372.144 I slot print_timing: id  0 | task 1030 | prompt eval time =     647.51 ms /    98 tokens (    6.61 ms per token,   151.35 tokens per second)",
+        "0.14.372.147 I slot print_timing: id  0 | task 1030 |        eval time =    3355.03 ms /   512 tokens (    6.57 ms per token,   152.31 tokens per second)",
+        "0.14.372.147 I slot print_timing: id  0 | task 1030 |       total time =    4002.54 ms /   610 tokens",
+        "0.14.372.149 I slot print_timing: id  0 | task 1030 |    graphs reused =       1525",
+        "0.14.372.149 I slot print_timing: id  0 | task 1030 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.14.372.166 I slot      release: id  0 | task 1030 | stop processing: n_tokens = 609, truncated = 0",
+        "0.14.379.238 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.810 (> 0.100 thold), f_keep = 0.105",
+        "0.14.383.641 I slot launch_slot_: id  0 | task 1545 | processing task, is_child = 0",
+        "0.14.950.054 W VRAMBridge resident gate/up projection fusion active",
+        "0.15.127.750 I slot print_timing: id  0 | task 1545 | prompt eval time =     565.34 ms /    79 tokens (    7.16 ms per token,   139.74 tokens per second)",
+        "0.15.127.754 I slot print_timing: id  0 | task 1545 |        eval time =     178.75 ms /    20 tokens (    9.41 ms per token,   106.29 tokens per second)",
+        "0.15.127.754 I slot print_timing: id  0 | task 1545 |       total time =     744.09 ms /    99 tokens",
+        "0.15.127.755 I slot print_timing: id  0 | task 1545 |    graphs reused =       1543",
+        "0.15.127.755 I slot print_timing: id  0 | task 1545 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.15.127.772 I slot      release: id  0 | task 1545 | stop processing: n_tokens = 98, truncated = 0",
+        "0.15.134.534 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.593 (> 0.100 thold), f_keep = 0.653",
+        "0.15.134.844 I slot launch_slot_: id  0 | task 1568 | processing task, is_child = 0",
+        "0.15.849.829 W VRAMBridge resident gate/up projection fusion active",
+        "0.16.130.698 I slot print_timing: id  0 | task 1568 | prompt eval time =     713.88 ms /   108 tokens (    6.61 ms per token,   151.29 tokens per second)",
+        "0.16.130.702 I slot print_timing: id  0 | task 1568 |        eval time =     281.96 ms /    32 tokens (    9.10 ms per token,   109.94 tokens per second)",
+        "0.16.130.703 I slot print_timing: id  0 | task 1568 |       total time =     995.84 ms /   140 tokens",
+        "0.16.130.704 I slot print_timing: id  0 | task 1568 |    graphs reused =       1573",
+        "0.16.130.704 I slot print_timing: id  0 | task 1568 |   graph reallocs =          6    /     0        (same size) / (changed size)",
+        "0.16.130.724 I slot      release: id  0 | task 1568 | stop processing: n_tokens = 139, truncated = 0"
+      ],
+      "gpu_memory_after_requests_mib": 12713
+    },
+    {
+      "name": "standard-after",
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "settings": {
+        "execution_mode": "standard",
+        "context": 16384,
+        "cpu_threads": 8,
+        "batch_threads": 16,
+        "placement": "auto",
+        "load_mode": "auto",
+        "fit_target_mib": 1024,
+        "expert_cache_mib": 0,
+        "host_op_offload": true,
+        "cpu_poll": 50,
+        "op_offload_min_batch": 32,
+        "kv_cache_type": "f16"
+      },
+      "status": "ok",
+      "samples": [
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 99.331,
+            "prompt_per_token_ms": 1.0135816326530613,
+            "prompt_per_second": 986.6003563842104,
+            "predicted_n": 512,
+            "predicted_ms": 2512.99,
+            "predicted_per_token_ms": 4.917788649706457,
+            "predicted_per_second": 203.3434275504479
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.6183042630000273,
+          "wall_decode_tok_s": 202.8604302815875,
+          "end_to_end_tok_s": 195.54641041349237,
+          "first_token_seconds": 0.12329457700252533,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 47.913,
+            "prompt_per_token_ms": 0.48890816326530606,
+            "prompt_per_second": 2045.3739068728742,
+            "predicted_n": 512,
+            "predicted_ms": 2497.998,
+            "predicted_per_token_ms": 4.888450097847358,
+            "predicted_per_second": 204.563814702814
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5558658619993366,
+          "wall_decode_tok_s": 203.75183590676878,
+          "end_to_end_tok_s": 200.32350195384896,
+          "first_token_seconds": 0.07384594900213415,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 46.935,
+            "prompt_per_token_ms": 0.4789285714285714,
+            "prompt_per_second": 2087.994034302759,
+            "predicted_n": 512,
+            "predicted_ms": 2485.802,
+            "predicted_per_token_ms": 4.864583170254403,
+            "predicted_per_second": 205.56745871151443
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5386740609974368,
+          "wall_decode_tok_s": 205.07765359485435,
+          "end_to_end_tok_s": 201.68008483879055,
+          "first_token_seconds": 0.06846847399719991,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        }
+      ],
+      "answer_checks": [
+        {
+          "workload": "arithmetic",
+          "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+          "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 21,
+            "prompt_tokens": 79,
+            "total_tokens": 100,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.147600465999858,
+          "check_passed": true,
+          "check": "exact integer"
+        },
+        {
+          "workload": "coding",
+          "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+          "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 108,
+            "total_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.2048519079980906,
+          "check_passed": true,
+          "check": "AST-only; model code is never executed"
+        }
+      ],
+      "load_seconds": 2.010455584000738,
+      "activation": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1138683904,
+          "anonymous_bytes": 306728960,
+          "file_backed_bytes": 778186752,
+          "shared_bytes": 53768192,
+          "read_bytes": 0,
+          "cpu_logical_cores": 0.45151768330665465,
+          "system_available_ram_bytes": 121612111872
+        }
+      },
+      "activation_logs": [
+        "0.00.074.442 I srv  llama_server: initializing ...",
+        "0.00.074.455 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.076.501 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.686.800 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.686.803 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.686.803 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.687.622 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.691.048 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.757.290 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.796.040 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.797.851 I srv  llama_server: model loaded",
+        "0.01.797.856 I srv  llama_server: listening on http://127.0.0.1:39915"
+      ],
+      "summary": {
+        "median_wall_decode_tok_s": 203.75183590676878,
+        "median_first_token_seconds": 0.07384594900213415,
+        "median_request_seconds": 2.5558658619993366,
+        "repeated_text_hashes_match": true,
+        "change_vs_fastest_control_percent": -1.6086179533197686,
+        "all_text_hashes_match_control": true,
+        "change_vs_same_build_control_percent": -1.5696794223470367
+      },
+      "after_requests": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1404166144,
+          "anonymous_bytes": 554528768,
+          "file_backed_bytes": 795869184,
+          "shared_bytes": 53768192,
+          "read_bytes": 0,
+          "cpu_logical_cores": 0.9977548121944226,
+          "system_available_ram_bytes": 121367941120
+        }
+      },
+      "after_request_logs": [
+        "0.00.074.442 I srv  llama_server: initializing ...",
+        "0.00.074.455 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.076.501 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.686.800 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.686.803 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.686.803 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.687.622 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.691.048 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.757.290 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.796.040 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.797.851 I srv  llama_server: model loaded",
+        "0.01.797.856 I srv  llama_server: listening on http://127.0.0.1:39915",
+        "0.02.008.457 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1",
+        "0.02.008.870 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0",
+        "0.04.621.220 I slot print_timing: id  0 | task 0 | prompt eval time =      99.33 ms /    98 tokens (    1.01 ms per token,   986.60 tokens per second)",
+        "0.04.621.223 I slot print_timing: id  0 | task 0 |        eval time =    2512.99 ms /   512 tokens (    4.92 ms per token,   203.34 tokens per second)",
+        "0.04.621.223 I slot print_timing: id  0 | task 0 |       total time =    2612.32 ms /   610 tokens",
+        "0.04.621.228 I slot print_timing: id  0 | task 0 |    graphs reused =        509",
+        "0.04.621.228 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.04.621.257 I slot      release: id  0 | task 0 | stop processing: n_tokens = 609, truncated = 0",
+        "0.04.629.606 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.04.633.585 I slot launch_slot_: id  0 | task 515 | processing task, is_child = 0",
+        "0.07.179.512 I slot print_timing: id  0 | task 515 | prompt eval time =      47.91 ms /    98 tokens (    0.49 ms per token,  2045.37 tokens per second)",
+        "0.07.179.515 I slot print_timing: id  0 | task 515 |        eval time =    2498.00 ms /   512 tokens (    4.89 ms per token,   204.56 tokens per second)",
+        "0.07.179.516 I slot print_timing: id  0 | task 515 |       total time =    2545.91 ms /   610 tokens",
+        "0.07.179.516 I slot print_timing: id  0 | task 515 |    graphs reused =       1017",
+        "0.07.179.517 I slot print_timing: id  0 | task 515 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.07.179.533 I slot      release: id  0 | task 515 | stop processing: n_tokens = 609, truncated = 0",
+        "0.07.186.930 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.07.187.478 I slot launch_slot_: id  0 | task 1030 | processing task, is_child = 0",
+        "0.09.720.227 I slot print_timing: id  0 | task 1030 | prompt eval time =      46.94 ms /    98 tokens (    0.48 ms per token,  2087.99 tokens per second)",
+        "0.09.720.229 I slot print_timing: id  0 | task 1030 |        eval time =    2485.80 ms /   512 tokens (    4.86 ms per token,   205.57 tokens per second)",
+        "0.09.720.229 I slot print_timing: id  0 | task 1030 |       total time =    2532.74 ms /   610 tokens",
+        "0.09.720.230 I slot print_timing: id  0 | task 1030 |    graphs reused =       1525",
+        "0.09.720.230 I slot print_timing: id  0 | task 1030 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.720.247 I slot      release: id  0 | task 1030 | stop processing: n_tokens = 609, truncated = 0",
+        "0.09.727.642 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.810 (> 0.100 thold), f_keep = 0.105",
+        "0.09.727.996 I slot launch_slot_: id  0 | task 1545 | processing task, is_child = 0",
+        "0.09.870.101 I slot print_timing: id  0 | task 1545 | prompt eval time =      45.42 ms /    79 tokens (    0.57 ms per token,  1739.32 tokens per second)",
+        "0.09.870.103 I slot print_timing: id  0 | task 1545 |        eval time =      96.68 ms /    21 tokens (    4.83 ms per token,   206.88 tokens per second)",
+        "0.09.870.104 I slot print_timing: id  0 | task 1545 |       total time =     142.10 ms /   100 tokens",
+        "0.09.870.104 I slot print_timing: id  0 | task 1545 |    graphs reused =       1544",
+        "0.09.870.105 I slot print_timing: id  0 | task 1545 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.870.120 I slot      release: id  0 | task 1545 | stop processing: n_tokens = 99, truncated = 0",
+        "0.09.875.651 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.593 (> 0.100 thold), f_keep = 0.646",
+        "0.09.876.240 I slot launch_slot_: id  0 | task 1569 | processing task, is_child = 0",
+        "0.10.074.952 I slot print_timing: id  0 | task 1569 | prompt eval time =      49.05 ms /   108 tokens (    0.45 ms per token,  2201.70 tokens per second)",
+        "0.10.074.955 I slot print_timing: id  0 | task 1569 |        eval time =     149.65 ms /    32 tokens (    4.83 ms per token,   207.15 tokens per second)",
+        "0.10.074.955 I slot print_timing: id  0 | task 1569 |       total time =     198.70 ms /   140 tokens",
+        "0.10.074.956 I slot print_timing: id  0 | task 1569 |    graphs reused =       1574",
+        "0.10.074.956 I slot print_timing: id  0 | task 1569 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.10.074.972 I slot      release: id  0 | task 1569 | stop processing: n_tokens = 139, truncated = 0"
+      ],
+      "gpu_memory_after_requests_mib": 12648
+    },
+    {
+      "name": "standard-same-build",
+      "model": "gpt-oss-20b-MXFP4.gguf",
+      "settings": {
+        "execution_mode": "standard",
+        "context": 16384,
+        "cpu_threads": 8,
+        "batch_threads": 16,
+        "placement": "auto",
+        "load_mode": "auto",
+        "fit_target_mib": 1024,
+        "expert_cache_mib": 0,
+        "host_op_offload": true,
+        "cpu_poll": 50,
+        "op_offload_min_batch": 32,
+        "kv_cache_type": "f16"
+      },
+      "backend_sha256": "895377f1aadaa82c7f456cfae1357db7a1195d0962d37b7cf074a8103e70fba4",
+      "cuda_plugin_sha256": "a9b36c7c5ae20b5c25f6ec0303016c9dafdd63118bab68aba1c874a56cc4757e",
+      "cuda_plugin_explicitly_selected": true,
+      "status": "ok",
+      "samples": [
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 96.226,
+            "prompt_per_token_ms": 0.9818979591836735,
+            "prompt_per_second": 1018.4357658013427,
+            "predicted_n": 512,
+            "predicted_ms": 2465.432,
+            "predicted_per_token_ms": 4.824720156555773,
+            "predicted_per_second": 207.26590715136334
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.567582431998744,
+          "wall_decode_tok_s": 206.76904123729398,
+          "end_to_end_tok_s": 199.40937187416088,
+          "first_token_seconds": 0.11952956499590073,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 46.69,
+            "prompt_per_token_ms": 0.4764285714285714,
+            "prompt_per_second": 2098.9505247376314,
+            "predicted_n": 512,
+            "predicted_ms": 2458.757,
+            "predicted_per_token_ms": 4.811657534246575,
+            "predicted_per_second": 207.82858981184395
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.5152760420023696,
+          "wall_decode_tok_s": 207.001089411292,
+          "end_to_end_tok_s": 203.55618685589883,
+          "first_token_seconds": 0.07237568099662894,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        },
+        {
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 98,
+            "prompt_ms": 46.135,
+            "prompt_per_token_ms": 0.47076530612244893,
+            "prompt_per_second": 2124.200715292078,
+            "predicted_n": 512,
+            "predicted_ms": 2438.527,
+            "predicted_per_token_ms": 4.772068493150685,
+            "predicted_per_second": 209.55273408906277
+          },
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 98,
+            "total_tokens": 610,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 2.4907133239976247,
+          "wall_decode_tok_s": 209.0340059811872,
+          "end_to_end_tok_s": 205.56360102423744,
+          "first_token_seconds": 0.06770923399744788,
+          "generated_text_sha256": "0ec2d5a1656c51a6265d4b4b9132b70e18e9c80065cf6d888c1950fc3868586f"
+        }
+      ],
+      "answer_checks": [
+        {
+          "workload": "arithmetic",
+          "prompt_sha256": "b5a45a832e84936490353560a0580422e36a74455e16bd8da7f363044520489a",
+          "answer_sha256": "3949ac1596ec77106a709a618bf5adcb19b77537ce8bcbdf54ff830169cdd084",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 21,
+            "prompt_tokens": 79,
+            "total_tokens": 100,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.14760539399867412,
+          "check_passed": true,
+          "check": "exact integer"
+        },
+        {
+          "workload": "coding",
+          "prompt_sha256": "66e9082ea4d42ef69287512ca49d01cb8c6ed7a90c4942fa584678bc7b3e34a0",
+          "answer_sha256": "894de5548b39065a33c36f9286e3c3779fa0f5ef547029257c0c7b481d83a899",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 108,
+            "total_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "elapsed_seconds": 0.201850015000673,
+          "check_passed": true,
+          "check": "AST-only; model code is never executed"
+        }
+      ],
+      "started_at_utc": "2026-10-20T02:08:02.532659+00:00",
+      "load_seconds": 2.2715481129998807,
+      "activation": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1138266112,
+          "anonymous_bytes": 306786304,
+          "file_backed_bytes": 777711616,
+          "shared_bytes": 53768192,
+          "read_bytes": 45056,
+          "cpu_logical_cores": 0.0,
+          "system_available_ram_bytes": 121541521408
+        }
+      },
+      "activation_logs": [
+        "0.00.208.447 I srv  llama_server: initializing ...",
+        "0.00.208.461 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.210.471 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.803.173 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.176 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.177 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.681 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.805.886 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.860.742 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.897.910 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.899.686 I srv  llama_server: model loaded",
+        "0.01.899.692 I srv  llama_server: listening on http://127.0.0.1:58533"
+      ],
+      "summary": {
+        "median_wall_decode_tok_s": 207.001089411292,
+        "median_first_token_seconds": 0.07237568099662894,
+        "median_request_seconds": 2.5152760420023696,
+        "repeated_text_hashes_match": true,
+        "change_vs_fastest_control_percent": -0.03955948811729115,
+        "change_vs_same_build_control_percent": 0.0,
+        "all_text_hashes_match_control": true
+      },
+      "after_requests": {
+        "state": "ready",
+        "execution_profile": "standard",
+        "selection_reason": "Standard execution explicitly selected.",
+        "context": 16384,
+        "hybrid_verified": false,
+        "hybrid_transfer": null,
+        "hybrid_decode_pipeline": false,
+        "hybrid_async_ids": false,
+        "hybrid_overlap_verified": false,
+        "hybrid_gate_up_verified": false,
+        "hybrid_async_ids_verified": false,
+        "hybrid_plan_sha256": null,
+        "expert_cache_mib": 0,
+        "fit_enabled": true,
+        "kv_cache_type": "f16",
+        "kv_cache_verified": false,
+        "resources": {
+          "rss_bytes": 1403666432,
+          "anonymous_bytes": 554565632,
+          "file_backed_bytes": 795332608,
+          "shared_bytes": 53768192,
+          "read_bytes": 45056,
+          "cpu_logical_cores": 0.9986678968530875,
+          "system_available_ram_bytes": 121304674304
+        }
+      },
+      "after_request_logs": [
+        "0.00.208.447 I srv  llama_server: initializing ...",
+        "0.00.208.461 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)",
+        "0.00.210.471 I srv    load_model: loading model '/models/gpt-oss-20b-MXFP4.gguf'",
+        "0.00.803.173 W load: setting token '<|message|>' (200008) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.176 W load: setting token '<|start|>' (200006) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.177 W load: setting token '<|constrain|>' (200003) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.803.681 W load: setting token '<|channel|>' (200005) attribute to USER_DEFINED (16), old attributes: 8",
+        "0.00.805.886 W load: special_eog_ids contains both '<|return|>' and '<|call|>', or '<|calls|>' and '<|flush|>' tokens, removing '<|end|>' token from EOG list",
+        "0.01.860.742 I cmn          init: llama threadpool init, n_threads = 8",
+        "0.01.897.910 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 16384, kv_unified = 'false'",
+        "0.01.899.686 I srv  llama_server: model loaded",
+        "0.01.899.692 I srv  llama_server: listening on http://127.0.0.1:58533",
+        "0.02.263.129 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1",
+        "0.02.263.703 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0",
+        "0.04.825.382 I slot print_timing: id  0 | task 0 | prompt eval time =      96.23 ms /    98 tokens (    0.98 ms per token,  1018.44 tokens per second)",
+        "0.04.825.384 I slot print_timing: id  0 | task 0 |        eval time =    2465.43 ms /   512 tokens (    4.82 ms per token,   207.27 tokens per second)",
+        "0.04.825.385 I slot print_timing: id  0 | task 0 |       total time =    2561.66 ms /   610 tokens",
+        "0.04.825.389 I slot print_timing: id  0 | task 0 |    graphs reused =        509",
+        "0.04.825.389 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.04.825.413 I slot      release: id  0 | task 0 | stop processing: n_tokens = 609, truncated = 0",
+        "0.04.831.101 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.04.835.305 I slot launch_slot_: id  0 | task 515 | processing task, is_child = 0",
+        "0.07.340.766 I slot print_timing: id  0 | task 515 | prompt eval time =      46.69 ms /    98 tokens (    0.48 ms per token,  2098.95 tokens per second)",
+        "0.07.340.768 I slot print_timing: id  0 | task 515 |        eval time =    2458.76 ms /   512 tokens (    4.81 ms per token,   207.83 tokens per second)",
+        "0.07.340.768 I slot print_timing: id  0 | task 515 |       total time =    2505.45 ms /   610 tokens",
+        "0.07.340.769 I slot print_timing: id  0 | task 515 |    graphs reused =       1017",
+        "0.07.340.770 I slot print_timing: id  0 | task 515 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.07.340.783 I slot      release: id  0 | task 515 | stop processing: n_tokens = 609, truncated = 0",
+        "0.07.346.398 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.161",
+        "0.07.347.015 I slot launch_slot_: id  0 | task 1030 | processing task, is_child = 0",
+        "0.09.831.685 I slot print_timing: id  0 | task 1030 | prompt eval time =      46.13 ms /    98 tokens (    0.47 ms per token,  2124.20 tokens per second)",
+        "0.09.831.688 I slot print_timing: id  0 | task 1030 |        eval time =    2438.53 ms /   512 tokens (    4.77 ms per token,   209.55 tokens per second)",
+        "0.09.831.688 I slot print_timing: id  0 | task 1030 |       total time =    2484.66 ms /   610 tokens",
+        "0.09.831.689 I slot print_timing: id  0 | task 1030 |    graphs reused =       1525",
+        "0.09.831.689 I slot print_timing: id  0 | task 1030 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.831.704 I slot      release: id  0 | task 1030 | stop processing: n_tokens = 609, truncated = 0",
+        "0.09.837.215 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.810 (> 0.100 thold), f_keep = 0.105",
+        "0.09.837.848 I slot launch_slot_: id  0 | task 1545 | processing task, is_child = 0",
+        "0.09.978.884 I slot print_timing: id  0 | task 1545 | prompt eval time =      44.27 ms /    79 tokens (    0.56 ms per token,  1784.71 tokens per second)",
+        "0.09.978.886 I slot print_timing: id  0 | task 1545 |        eval time =      96.76 ms /    21 tokens (    4.84 ms per token,   206.69 tokens per second)",
+        "0.09.978.887 I slot print_timing: id  0 | task 1545 |       total time =     141.03 ms /   100 tokens",
+        "0.09.978.887 I slot print_timing: id  0 | task 1545 |    graphs reused =       1544",
+        "0.09.978.888 I slot print_timing: id  0 | task 1545 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.09.978.901 I slot      release: id  0 | task 1545 | stop processing: n_tokens = 99, truncated = 0",
+        "0.09.984.595 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.593 (> 0.100 thold), f_keep = 0.646",
+        "0.09.985.167 I slot launch_slot_: id  0 | task 1569 | processing task, is_child = 0",
+        "0.10.181.003 I slot print_timing: id  0 | task 1569 | prompt eval time =      46.97 ms /   108 tokens (    0.43 ms per token,  2299.44 tokens per second)",
+        "0.10.181.005 I slot print_timing: id  0 | task 1569 |        eval time =     148.86 ms /    32 tokens (    4.80 ms per token,   208.25 tokens per second)",
+        "0.10.181.006 I slot print_timing: id  0 | task 1569 |       total time =     195.83 ms /   140 tokens",
+        "0.10.181.007 I slot print_timing: id  0 | task 1569 |    graphs reused =       1574",
+        "0.10.181.007 I slot print_timing: id  0 | task 1569 |   graph reallocs =          0    /     0        (same size) / (changed size)",
+        "0.10.181.021 I slot      release: id  0 | task 1569 | stop processing: n_tokens = 139, truncated = 0"
+      ],
+      "completed_at_utc": "2026-10-20T02:08:13.027096+00:00",
+      "cleanup": {
+        "owned_backend_exited": true,
+        "installation_profile_unchanged": true
+      }
+    }
+  ],
+  "comparison": {
+    "fastest_standard_block_median_tok_s": 207.08301039018025,
+    "control_block_medians_tok_s": [
+      207.08301039018025,
+      203.75183590676878,
+      207.001089411292
+    ],
+    "control_text_hashes_match_across_both_blocks": true,
+    "native_reference_logits_tested": false,
+    "quality_qualified": false,
+    "conclusion": "Both tested hybrid budgets were slower than all three fresh Standard controls, including the same-build control.",
+    "same_build_standard_median_tok_s": 207.001089411292,
+    "control_text_hashes_match_across_all_three_blocks": true
+  },
+  "same_build_collector_sha256": "16033a86f64c848fb0445d0e71d97468dcd731c67ebb8efa7bf25920125f7c21"
+}

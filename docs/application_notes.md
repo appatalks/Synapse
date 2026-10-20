@@ -10,6 +10,45 @@ The app needs only Python and a browser; models and an appropriate
 The reference backend revision is b11669.
 [Platform and sensor limits](monitoring.md).
 
+## Hybrid eligibility pre-check
+
+In **Chat → Model Controls**, select a local GGUF in the browser or enter its
+path and choose **Check hybrid eligibility**. Selecting a file or finishing a
+path edit also runs the check. It reads bounded GGUF metadata and the installed
+profile policy without mapping weights, starting a backend, allocating a GPU
+cache, or unloading the active model. Select the first shard of a split GGUF.
+
+The result separates two questions:
+
+- **Hybrid candidate:** the file has a complete routed-MoE descriptor accepted
+  by the installed plan policy. Generic version-2 profiles use dimensions, not
+  a model-name allowlist; an unfamiliar architecture can still be a candidate.
+  A candidate is **not** a tested or quality-qualified configuration.
+- **Automatic defaults:** what Automatic would select now. It may prefer native
+  fitting for a small single-file MoE even when Require hybrid is a candidate.
+  The cache-budget heuristic does not establish actual VRAM fit or speed.
+
+When there is no candidate, the result explains whether the installation lacks
+a hybrid profile, the descriptor is missing/incomplete, or the model does not
+match a bound training plan and generic causal dispatch is disabled. Missing
+expert metadata does not prove a model is dense.
+
+Kernel/operation support, tensor layouts, precision requirements, all split
+shards, available RAM/VRAM, runtime activation and layer coverage remain
+**unverified until loading**. An unsupported operation can still reject a
+candidate; the Mistral study is one example. If a selected hybrid load fails,
+the error is reported rather than silently retrying as standard execution.
+No pre-check establishes a speedup or equivalent answer quality.
+
+The read-only API is `POST /api/v1/model/precheck` with
+`{"model": "/absolute/path/to/model.gguf"}`. It returns `hybrid_candidate`,
+the detected `architecture`/`layout`, separate `automatic` and `required_hybrid`
+decisions with `reason_code`, default context/cache/plan/transfer information,
+and explicit `scope`/`limitations`. It evaluates profile defaults, not manual
+run settings. Invalid or unreadable GGUF metadata returns an error, not a
+standard-mode success result. Changing the path invalidates the displayed
+result; checks run again at load time.
+
 ## Auto Tune
 
 **Auto Tune** in Model Controls measures near-capacity input on your system and
@@ -47,9 +86,9 @@ Later GPT tuning reached a separate 50.06 tok/s technical median, but that is
 60 tok/s result.
 
 Not every MoE is hybrid-compatible: the
-[Mistral Small 4 study](benchmarks/mistral4-compatibility.md) records its FP32
+[Mistral Small 4 study](benchmarks/mistral/mistral4-compatibility.md) records its FP32
 operation requirement and unpromoted prototype. Its
-[isolated native integration and research timings](benchmarks/mistral4-native-experimental.md)
+[isolated native integration and research timings](benchmarks/mistral/mistral4-native-experimental.md)
 are experimental only: strict native equivalence still fails, so it is not
 included in the README's headline performance table.
 
@@ -63,7 +102,7 @@ already included in our pinned backend. That cache uploads misses for GPU
 execution; SYNAPSE's experimental hybrid dispatcher extends the tensor/slot
 machinery with CPU cold-expert execution and guarded causal admissions.
 The PR's published speedups are not an additional multiplier on SYNAPSE's results.
-[Local upstream-cache investigation and the pinned-host-loading result](benchmarks/upstream-pr29887.md).
+[Local upstream-cache investigation and the pinned-host-loading result](benchmarks/gpt-oss/upstream-pr29887.md).
 
 The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
