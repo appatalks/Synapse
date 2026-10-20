@@ -53,13 +53,14 @@ ignored. Standard used Auto-to-Standard placement with an unmodified
 llama.cpp `620d2225` backend and a 1,024 MiB VRAM reserve. Hybrid used required
 experimental dispatch on the same upstream revision with the pinned hybrid
 patch, staged transfers and an 8,192 MiB expert cache. CUDA Toolkit 12.8.93,
-NVIDIA driver 580.178.04. These are observed rates from different backend
-builds, **not a matched speedup comparison**.
+NVIDIA driver 580.178.04. Notes show the relative change from unrounded medians
+as `(Hybrid / Control - 1) * 100`. These are observed rates from different
+backend builds, **not a matched speedup comparison**.
 
 | Model / quantization | Control tok/s | Hybrid tok/s | Notes |
 | --- | ---: | ---: | --- |
-| GPT-OSS-120B MXFP4 | 12.41 | 17.82 | |
-| Qwen3.8-Flash-Next IQ3_S | 10.11 | 19.61 | |
-| GLM-4.5-Air IQ4_XS | 6.47 | 8.35 | |
-| Qwen3.6-35B-A3B Q8_0 | 28.04 | 37.37 | |
-| Mistral Small 4 UD-IQ4_XS | 1.26 | — | Required-hybrid load failed; no generation |
+| GPT-OSS-120B MXFP4 | 12.41 | 17.82 | Observed change: +43.7% |
+| Qwen3.8-Flash-Next IQ3_S | 10.11 | 19.61 | Observed change: +93.9% |
+| GLM-4.5-Air IQ4_XS | 6.47 | 8.35 | Observed change: +29.0% |
+| Qwen3.6-35B-A3B Q8_0 | 28.04 | 37.37 | Observed change: +33.3% |
+| Mistral Small 4 UD-IQ4_XS | 1.26 | — | Required-hybrid load failed; no generation; change N/A |
