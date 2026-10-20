@@ -1,7 +1,7 @@
 # SYNAPSE benchmark results
 
 One table per hardware setup. Model links open the measurements and limitations.
-[Model-choice guide](model-guide.md) · [Contribute results by PR](CONTRIBUTING.md) · [Report template](TEMPLATE.md)
+[Model-choice guide](model-guide.md) · [Contribute results by PR](CONTRIBUTING.md) · [Simple table template](TEMPLATE.md)
 
 ## Ryzen 9 9950X + RTX 5070 Ti 16GB
 
@@ -38,7 +38,7 @@ rankings or fit guarantees; native Automatic selection is not hybrid execution.
 
 ## Community results welcome
 
-Help expand model and hardware coverage: copy the [report template](TEMPLATE.md),
-add sanitized measurements under the model-family folder, and submit a PR.
-Add rows to an existing setup or a new setup heading/table for different hardware.
-[Contribution instructions](CONTRIBUTING.md) explain the protocol and evidence needed.
+Just add a table with your setup, model and reported tok/s, then submit a PR.
+**Controls, logs and separate reports are optional.** Community entries are
+self-reported, not verified comparisons. Copy the [simple template](TEMPLATE.md)
+and follow the [quick contribution steps](CONTRIBUTING.md).
