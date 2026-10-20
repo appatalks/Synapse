@@ -37,8 +37,9 @@ Ryzen 9 9950X, RTX 5070 Ti 16GB and 123.48 GiB usable RAM, with 8 generation /
 Qwen3.8 uses native CPU experts with a GPU backbone. They are different controls, not a
 Strata comparison. GLM uses a **6 GiB manual causal cache** and the fastest
 observed non-hybrid control; its 8 GiB attempt failed to fit.
-[GLM measurements, RAM comparison and reproducible settings](docs/benchmarks/glm45-air-iq4-xs.md) ·
-[Qwen3.6 measurements and verification limits](docs/benchmarks/qwen36-q8.md) ·
+[GLM measurements, RAM comparison and reproducible settings](docs/benchmarks/glm/glm45-air-iq4-xs.md) ·
+[Qwen3.6 measurements and verification limits](docs/benchmarks/qwen/qwen36-q8.md) ·
+[quick benchmark reference](docs/benchmarks/README.md) ·
 [All conditions and retained failures](https://github.com/appatalks/unified-memory-scheduler/blob/main/benchmarks/RESULTS.md).
 
 The gains belong to the **optional Linux/NVIDIA research backend**, not the UI

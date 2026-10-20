@@ -33,10 +33,10 @@ that every required operation is supported.
 ## Evidence
 
 - [Headline technical screens and shared caveats](../README.md#why-use-it).
-- [GLM protocol and RAM controls](benchmarks/glm45-air-iq4-xs.md).
-- [Qwen3.6 protocol and verification limits](benchmarks/qwen36-q8.md).
-- [Mistral compatibility boundary and primitive work](benchmarks/mistral4-compatibility.md).
-- [Mistral isolated native integration and research timings](benchmarks/mistral4-native-experimental.md).
+- [GLM protocol and RAM controls](benchmarks/glm/glm45-air-iq4-xs.md).
+- [Qwen3.6 protocol and verification limits](benchmarks/qwen/qwen36-q8.md).
+- [Mistral compatibility boundary and primitive work](benchmarks/mistral/mistral4-compatibility.md).
+- [Mistral isolated native integration and research timings](benchmarks/mistral/mistral4-native-experimental.md).
 
 These rows do not qualify image/video input, audio, MTP, speculation, concurrent
 requests or arbitrary contexts. A full-GPU native model can already be faster

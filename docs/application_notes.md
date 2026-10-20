@@ -47,9 +47,9 @@ Later GPT tuning reached a separate 50.06 tok/s technical median, but that is
 60 tok/s result.
 
 Not every MoE is hybrid-compatible: the
-[Mistral Small 4 study](benchmarks/mistral4-compatibility.md) records its FP32
+[Mistral Small 4 study](benchmarks/mistral/mistral4-compatibility.md) records its FP32
 operation requirement and unpromoted prototype. Its
-[isolated native integration and research timings](benchmarks/mistral4-native-experimental.md)
+[isolated native integration and research timings](benchmarks/mistral/mistral4-native-experimental.md)
 are experimental only: strict native equivalence still fails, so it is not
 included in the README's headline performance table.
 
@@ -63,7 +63,7 @@ already included in our pinned backend. That cache uploads misses for GPU
 execution; SYNAPSE's experimental hybrid dispatcher extends the tensor/slot
 machinery with CPU cold-expert execution and guarded causal admissions.
 The PR's published speedups are not an additional multiplier on SYNAPSE's results.
-[Local upstream-cache investigation and the pinned-host-loading result](benchmarks/upstream-pr29887.md).
+[Local upstream-cache investigation and the pinned-host-loading result](benchmarks/gpt-oss/upstream-pr29887.md).
 
 The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
