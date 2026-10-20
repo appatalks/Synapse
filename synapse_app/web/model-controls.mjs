@@ -24,3 +24,60 @@ export function bindReasoningEffort(primary, quick, invalid) {
     });
   }
 }
+
+export function precheckText(data) {
+  const automatic = data.automatic, hybrid = data.required_hybrid;
+  const lines = [
+    `Hybrid eligibility: ${data.hybrid_candidate ? "Candidate - runtime unverified" : "Not eligible with this installation"}.`,
+    `Architecture: ${data.architecture}${data.layout ? `; ${data.layout.expert_count} experts, ${data.layout.block_count} blocks` : ""}.`,
+    `Automatic defaults: ${automatic.execution_profile === "standard" ? "Standard backend" : "Hybrid candidate"}. ${automatic.reason}`,
+    `Require hybrid: ${data.hybrid_candidate ? `${hybrid.initialization} plan, ${hybrid.transfer} transfers, ${hybrid.context.toLocaleString()} context, ${hybrid.cache_mib.toLocaleString()} MiB cache.` : hybrid.reason}`,
+    data.scope,
+    ...data.limitations,
+  ];
+  return lines.join("\n\n");
+}
+
+export class ModelPrecheck {
+  constructor({ input, button, output, request, changed }) {
+    Object.assign(this, { input, button, output, request, changed });
+    this.serial = 0;
+    this.busy = false;
+    button.addEventListener("click", () => this.check());
+    input.addEventListener("input", () => this.invalidate());
+    input.addEventListener("change", () => this.check());
+  }
+
+  invalidate() {
+    this.serial += 1;
+    this.busy = false;
+    this.output.textContent = "Model path changed. Check hybrid eligibility for the selected file.";
+    this.changed();
+  }
+
+  async check() {
+    const model = this.input.value.trim(), serial = ++this.serial;
+    this.busy = false;
+    if (!model) {
+      this.output.textContent = "Enter a local GGUF path to check hybrid eligibility.";
+      this.changed();
+      return;
+    }
+    this.busy = true;
+    this.output.textContent = "Reading GGUF metadata and installation policy; no model is being loaded...";
+    this.changed();
+    try {
+      const data = await this.request("/api/v1/model/precheck", { model });
+      if (serial === this.serial && model === this.input.value.trim()) this.output.textContent = precheckText(data);
+    } catch (error) {
+      if (serial === this.serial && model === this.input.value.trim()) {
+        this.output.textContent = `Pre-check failed: ${error.message}`;
+      }
+    } finally {
+      if (serial === this.serial) {
+        this.busy = false;
+        this.changed();
+      }
+    }
+  }
+}

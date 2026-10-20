@@ -62,6 +62,10 @@ illustrative, not benchmark results.
 
 These are tested text-generation paths, not universal model, fit or quality guarantees.
 
+For smaller and mid-sized options, see the [model-choice guide and measured
+Standard baselines](docs/benchmarks/model-guide.md), from LFM2.5 1.2B through
+Qwen3.8 27B. It includes pinned downloads, licenses and retained answer-check failures.
+
 | Target (GGUF downloads) | Tested accelerated path | Status |
 | --- | --- | --- |
 | [GPT-OSS-120B MXFP4](https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/blob/238abdd290bb874b90a5da1b4549881b7d05c091/gpt-oss-120b-MXFP4.gguf) | Trained/direct-DMA hybrid | Runs; strict reference/quality limits remain. |
@@ -106,6 +110,8 @@ Those source instructions also work on Linux and macOS.
 ## Open it. Pick a model. Go.
 
 1. Open **Chat → Model Controls**. Browse for a local GGUF or paste its path.
+   **Check hybrid eligibility** explains the installed profile's selection
+   without loading weights; [scope and limits](docs/application_notes.md#hybrid-eligibility-pre-check).
 2. Load the model and chat. Output limits and reasoning effort are in the same pop-up;
    reasoning effort also has a synchronized quick selector below the message box.
    Loading shows its phase, elapsed time, recent backend output and a cancel button.

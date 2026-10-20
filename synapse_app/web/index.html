@@ -71,6 +71,8 @@
           <form id="load-form">
             <label for="model">Model path</label>
             <div class="copy-row"><input id="model" name="model" placeholder="/path/to/model.gguf" required autocomplete="off" spellcheck="false"><button id="browse-models" type="button" class="secondary">Browse models</button></div>
+            <button id="precheck-model" type="button" class="secondary" disabled>Check hybrid eligibility</button>
+            <p id="model-precheck" class="precheck-result" role="status" aria-live="polite">Choose a GGUF or enter its path, then check hybrid eligibility without loading weights.</p>
             <section id="model-browser" class="file-browser" aria-label="Local model browser" hidden>
               <div class="card-heading"><h4>Choose a local model</h4><button id="close-browser" type="button" class="secondary">Close browser</button></div>
               <p class="hint">Folders and GGUF files only. No files are uploaded.</p>
@@ -84,7 +86,7 @@
               <summary>Run settings</summary>
               <label for="execution-mode">Model execution profile</label>
               <select id="execution-mode"><option value="auto">Automatic model-specific defaults</option><option value="standard">Standard backend (manual settings)</option><option value="hybrid">Require hybrid expert dispatch</option></select>
-              <p id="profile-note">Automatic uses an installed experimental profile only when compatible. Otherwise it uses standard execution.</p>
+              <p id="profile-note">Automatic uses an installed experimental profile only when eligible. The pre-check explains selection; backend operations and memory fit still require load-time verification.</p>
               <label for="placement">Execution</label>
               <select id="placement"><option value="auto">Automatic CPU / GPU placement</option><option value="cpu">CPU only</option></select>
               <label for="context">Context tokens</label>

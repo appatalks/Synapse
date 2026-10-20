@@ -64,6 +64,8 @@ body:has(dialog[open]) { overflow: hidden; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .chat-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: end; }
 #controls-action-status { font-size: .73rem; color: var(--muted); overflow-wrap: anywhere; }
+#precheck-model { margin-top: 12px; }
+.precheck-result { white-space: pre-line; overflow-wrap: anywhere; }
 .file-browser { padding: 16px; border: 1px solid #345247; border-radius: 9px; background: #0c1716; margin-top: 14px; }
 .file-browser h4 { margin: 0; font-size: .82rem; }
 .file-browser button { font-size: .7rem; padding: 8px 10px; }
