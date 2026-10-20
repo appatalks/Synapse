@@ -42,3 +42,25 @@ Just add a table with your setup, model and reported tok/s, then submit a PR.
 **Controls, logs and separate reports are optional.** Community entries are
 self-reported, not verified comparisons. Copy the [simple template](TEMPLATE.md)
 and follow the [quick contribution steps](CONTRIBUTING.md).
+
+### Intel Core i9-11950H + RTX 3080 Laptop GPU 16GB
+
+**Community-reported · Ubuntu 22.04.5 · 62.5 GiB RAM · SYNAPSE 0.1.0rc3
+(`545a7ebf`) · 4K context · 8 generation / 8 prompt threads · one slot · FP16
+KV cache.** Rates are medians of three forced 512-token requests using
+temperature zero, seed 42, model-default reasoning, prompt caching off and EOS
+ignored. Standard used Auto-to-Standard placement with an unmodified
+llama.cpp `620d2225` backend and a 1,024 MiB VRAM reserve. Hybrid used required
+experimental dispatch on the same upstream revision with the pinned hybrid
+patch, staged transfers and an 8,192 MiB expert cache. CUDA Toolkit 12.8.93,
+NVIDIA driver 580.178.04. Change is calculated from unrounded medians as
+`(Hybrid / Control - 1) * 100`. These are observed rate changes from different
+backend builds, **not a matched speedup comparison**.
+
+| Model / quantization | Control tok/s | Hybrid tok/s | Change | Notes |
+| --- | ---: | ---: | ---: | --- |
+| GPT-OSS-120B MXFP4 | 12.41 | 17.82 | +43.7% | |
+| Qwen3.8-Flash-Next IQ3_S | 10.11 | 19.61 | +93.9% | |
+| GLM-4.5-Air IQ4_XS | 6.47 | 8.35 | +29.0% | |
+| Qwen3.6-35B-A3B Q8_0 | 28.04 | 37.37 | +33.3% | |
+| Mistral Small 4 UD-IQ4_XS | 1.26 | — | — | Required-hybrid load failed; no generation |
