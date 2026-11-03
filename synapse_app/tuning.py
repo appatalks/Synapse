@@ -485,7 +485,7 @@ class AutoTuner:
         self._update(phase=f"Loading {label}", detail="", progress=None)
         try:
             runtime.stop()
-            runtime.load(settings)
+            runtime.load(settings, remember=False)
             loaded = self._wait_ready(runtime)
             if loaded["context"] != settings["context"]:
                 raise TrialError(f"Backend loaded {loaded['context']} rather than {settings['context']} tokens.")
@@ -544,7 +544,7 @@ class AutoTuner:
             total, available = self.memory()
             if available < min(4 * 1024 ** 3, total // 10):
                 raise TrialError("RAM safety reserve prevents reloading the model; it has been left unloaded.")
-            runtime.load(settings)
+            runtime.load(settings, remember=False)
             loaded = self._wait_ready(runtime, restoring=restoring)
             measured = expected is not None
             expected = expected or settings
@@ -648,6 +648,7 @@ class AutoTuner:
                             LOG.error("%s", error)
             recommendation = None
             if selected is not None and not self.closed:
+                runtime.remember_settings()
                 recommendation = {"settings": selected["settings"],
                                   "apps": client_settings(selected["settings"]["context"]),
                                   "prompt_tokens_tested": selected["prompt_tokens"],

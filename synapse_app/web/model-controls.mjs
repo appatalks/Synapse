@@ -34,7 +34,25 @@ export function modelLoadPayload(settings) {
     cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll,
     expert_cache_mib: settings.expert_cache_mib,
   });
+  if (settings.execution_mode === "hybrid" && settings.hybrid_variant !== undefined) {
+    payload.hybrid_variant = settings.hybrid_variant;
+  }
   return payload;
+}
+
+export function restoreModelControls(status, initialized, control) {
+  const active = status.model && ["loading", "ready", "stopping"].includes(status.state);
+  if (initialized && !active) return null;
+  const settings = active ? status : status.saved_model_settings || status;
+  const fields = {
+    model: "model", execution_mode: "execution-mode", context: "context", placement: "placement",
+    cpu_threads: "cpu-threads", batch_threads: "batch-threads", cpu_poll: "cpu-poll",
+    host_op_offload: "host-op-offload", op_offload_min_batch: "op-offload-min-batch",
+    kv_cache_type: "kv-cache-type", load_mode: "load-mode", expert_cache_mib: "expert-cache",
+    fit_target_mib: "fit-target", draft_model: "draft-model", draft_type: "draft-type", draft_tokens: "draft-tokens",
+  };
+  for (const [field, id] of Object.entries(fields)) control(id).value = String(settings[field] ?? "");
+  return settings;
 }
 
 export function bindReasoningEffort(primary, quick, invalid) {

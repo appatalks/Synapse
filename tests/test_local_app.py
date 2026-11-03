@@ -152,6 +152,197 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(code, 503)
         self.assertIn(b"--llama-server", body)
 
+    def test_model_settings_survive_restart_without_loading(self):
+        store = self.root / "config" / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        settings = {"execution_mode": "standard", "context": 131072, "placement": "cpu",
+                    "cpu_threads": 1, "batch_threads": min(2, len(app.available_cpus())),
+                    "cpu_poll": 0, "host_op_offload": False, "op_offload_min_batch": 256,
+                    "load_mode": "none", "expert_cache_mib": 0, "fit_target_mib": 2048}
+        self.load(**settings)
+        saved = json.loads(store.read_text())["settings"]
+        self.assertEqual(saved, self.runtime.status()["saved_model_settings"])
+        self.assertEqual({key: saved[key] for key in settings}, settings)
+        self.assertEqual(saved["model"], str(self.model))
+        if os.name != "nt":
+            self.assertEqual(store.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(store.parent.stat().st_mode & 0o777, 0o700)
+        self.runtime.stop()
+        with mock.patch.object(app.subprocess, "Popen", side_effect=AssertionError("Unexpected autoload")):
+            restarted = app.Runtime(str(self.backend), execution_mode="auto", settings_store=store)
+            try:
+                status = restarted.status()
+                self.assertEqual(status["state"], "stopped")
+                self.assertIsNone(status["model"])
+                self.assertIsNone(restarted.process)
+                self.assertEqual(status["execution_mode"], "auto")
+                self.assertEqual(status["saved_model_settings"], saved)
+            finally:
+                restarted.stop(closing=True)
+
+    def test_model_settings_keep_requested_context_when_backend_adjusts_it(self):
+        store = self.root / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        model = self.root / "context-cap.gguf"
+        model.write_bytes(b"GGUF-test-model")
+        status = self.load(model=model, execution_mode="standard", context=8192)
+        self.assertEqual(status["context"], 2048)
+        self.assertEqual(status["saved_model_settings"]["context"], 8192)
+        self.assertEqual(json.loads(store.read_text())["settings"]["context"], 8192)
+
+    def test_failed_cancelled_and_trial_loads_do_not_replace_model_settings(self):
+        store = self.root / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        self.load(execution_mode="standard", context=16384)
+        original = store.read_bytes()
+        self.runtime.stop()
+        failed = self.root / "fail.gguf"
+        failed.write_bytes(b"GGUF-test-model")
+        self.assertEqual(self.request("POST", "/api/v1/model/load", {"model": str(failed)})[0], 202)
+        self.wait_state("error")
+        self.assertEqual(store.read_bytes(), original)
+        self.runtime.stop()
+        slow = self.root / "slow.gguf"
+        slow.write_bytes(b"GGUF-test-model")
+        self.assertEqual(self.request("POST", "/api/v1/model/load", {"model": str(slow)})[0], 202)
+        self.assertEqual(self.request("POST", "/api/v1/model/unload", {})[0], 200)
+        self.assertEqual(store.read_bytes(), original)
+        self.runtime.load({"model": str(self.model), "context": 8192}, remember=False)
+        self.wait_state("ready")
+        self.assertEqual(store.read_bytes(), original)
+
+    def test_invalid_model_settings_are_reported_without_starting_a_backend(self):
+        store = self.root / "model-settings.json"
+        self.load(execution_mode="standard")
+        valid = self.runtime.status()["saved_model_settings"]
+        malformed = ["not JSON", "x" * (64 * 1024 + 1), "{}"]
+        malformed.extend(json.dumps({"schema_version": 1, "settings": {**valid, **changes}})
+                         for changes in ({"context": True}, {"execution_mode": "fast"},
+                                         {"draft_model": {}}, {"model": ""}, {"cpu_poll": 101}))
+        for text in malformed:
+            with self.subTest(text=text[:80]):
+                store.write_text(text)
+                with self.assertLogs("synapse.settings", level="ERROR"):
+                    saved = app._settings.ModelSettings(store)
+                self.assertIsNone(saved.settings)
+                self.assertIn("Saved model settings unavailable", saved.error)
+        self.assertEqual(app._settings.ModelSettings(self.root / "absent.json").error, None)
+
+    def test_model_settings_save_errors_are_visible_and_recoverable(self):
+        blocked = self.root / "blocked"
+        blocked.write_text("not a folder")
+        self.runtime.model_settings = app._settings.ModelSettings(None)
+        self.runtime.model_settings.store = blocked / "model-settings.json"
+        with self.assertLogs("synapse.settings", level="ERROR"):
+            self.load(execution_mode="standard")
+        code, _, body = self.request("GET", "/api/v1/status")
+        status = json.loads(body)
+        self.assertEqual(code, 200)
+        self.assertEqual(status["state"], "ready")
+        self.assertIn("Could not save model settings", status["settings_error"])
+        self.assertIsNone(status["saved_model_settings"])
+        self.runtime.stop()
+        self.runtime.model_settings.store = self.root / "model-settings.json"
+        self.load(execution_mode="standard", context=8192)
+        self.assertIsNone(self.runtime.status()["settings_error"])
+        self.assertEqual(self.runtime.status()["saved_model_settings"]["context"], 8192)
+
+    def test_auto_tune_saves_only_its_applied_final_model_settings(self):
+        store = self.root / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        self.load(execution_mode="standard", context=4096)
+        original = store.read_bytes()
+        probe = self.server.tuner._probe
+        observed = []
+
+        def checking_probe(runtime, context):
+            observed.append(store.read_bytes())
+            return probe(runtime, context)
+
+        with mock.patch.object(self.server.tuner, "_probe", side_effect=checking_probe):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(self.model), "confirm": True})[0], 202)
+            self.wait_tuning("completed")
+        self.assertTrue(observed)
+        self.assertTrue(all(saved == original for saved in observed))
+        saved = json.loads(store.read_text())["settings"]
+        self.assertEqual(saved["context"], 8192)
+        self.assertEqual(saved["model"], str(self.model))
+        self.assertEqual(saved, self.runtime.status()["saved_model_settings"])
+
+    def test_cancelled_auto_tune_preserves_saved_manual_settings(self):
+        store = self.root / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        write_metadata(self.model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        self.load(execution_mode="standard", context=4096)
+        original = store.read_bytes()
+        probe = self.server.tuner._probe
+
+        def cancel_probe(runtime, context):
+            self.server.tuner.cancel()
+            return probe(runtime, context)
+
+        with mock.patch.object(self.server.tuner, "_probe", side_effect=cancel_probe):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(self.model), "confirm": True})[0], 202)
+            self.wait_tuning("cancelled")
+        self.assertEqual(store.read_bytes(), original)
+        self.assertEqual(self.runtime.status()["saved_model_settings"]["execution_mode"], "standard")
+        self.assertEqual(self.runtime.status()["context"], 4096)
+
+    def test_model_settings_atomic_save_failure_keeps_previous_file(self):
+        store = self.root / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        self.load(execution_mode="standard", context=8192)
+        original = store.read_bytes()
+        saved = self.runtime.status()["saved_model_settings"]
+        with mock.patch.object(app._settings.Path, "replace", side_effect=PermissionError("read-only")), \
+                self.assertLogs("synapse.settings", level="ERROR"):
+            self.runtime.model_settings.remember({**saved, "context": 16384})
+        self.assertEqual(store.read_bytes(), original)
+        self.assertEqual(self.runtime.model_settings.settings, saved)
+        self.assertIn("Could not save model settings", self.runtime.model_settings.error)
+        self.assertEqual(list(self.root.glob(".model-settings-*")), [])
+
+    def test_launcher_reads_saved_model_settings_but_does_not_autoload(self):
+        config = self.root / "config"
+        directory = (self.root / "Library/Application Support/SYNAPSE" if sys.platform == "darwin" else
+                     config / "SYNAPSE" if sys.platform == "win32" else config / "synapse")
+        store = directory / "model-settings.json"
+        self.runtime.model_settings = app._settings.ModelSettings(store)
+        self.load(execution_mode="standard", context=131072)
+        saved = self.runtime.status()["saved_model_settings"]
+        self.runtime.stop()
+        process = subprocess.Popen(
+            [sys.executable, str(APP_PATH), "--port", "0", "--no-browser", "--no-update-check",
+             "--llama-server", str(self.backend), "--execution-mode", "standard"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "XDG_CONFIG_HOME": str(config), "HOME": str(self.root),
+                 "LOCALAPPDATA": str(config)},
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0)
+        try:
+            line = process.stdout.readline()
+            self.assertIn("http://127.0.0.1:", line)
+            connection = http.client.HTTPConnection("127.0.0.1", urlsplit(line.split(" ", 1)[1].strip()).port,
+                                                    timeout=5)
+            try:
+                connection.request("GET", "/api/v1/status")
+                response = connection.getresponse()
+                status = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(status["state"], "stopped")
+                self.assertIsNone(status["model"])
+                self.assertEqual(status["saved_model_settings"], saved)
+            finally:
+                connection.close()
+        finally:
+            if sys.platform == "win32":
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                process.terminate()
+            process.communicate(timeout=10)
+
     def test_update_status_and_installation_guards(self):
         self.server.updates.automatic = False
         code, _, body = self.request("GET", "/api/v1/update")
@@ -1850,6 +2041,7 @@ class LocalAppTests(unittest.TestCase):
             [sys.executable, str(APP_PATH), "--port", "0", "--no-browser",
              "--llama-server", str(self.backend), "--execution-mode", "standard"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "XDG_CONFIG_HOME": str(self.root / "config"), "HOME": str(self.root)},
         )
         try:
             line = process.stdout.readline()

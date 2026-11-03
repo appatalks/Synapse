@@ -39,6 +39,7 @@ HardwareMonitor, number, rate, system_probe = (
     _telemetry.HardwareMonitor, _telemetry.number, _telemetry.rate, _telemetry.system_probe)
 _updates = import_module(f"{APP_PACKAGE}.updates")
 _tuning = import_module(f"{APP_PACKAGE}.tuning")
+_settings = import_module(f"{APP_PACKAGE}.settings")
 
 LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
@@ -432,7 +433,7 @@ class Runtime:
                  hybrid_context: int = 16384, hybrid_cache_mib: int = 10240, hybrid_transfer: str = "direct",
                  hybrid_decode_pipeline: bool = False, hybrid_async_ids: bool = False,
                  hybrid_generic_cache_mib: int | None = None, hybrid_generic_transfer: str | None = None,
-                 hybrid_hosted: bool = False):
+                 hybrid_hosted: bool = False, settings_store: Path | None = None):
         if backend_kind not in ("llama.cpp", "ik_llama.cpp"):
             raise ValueError("Unsupported backend kind.")
         if (hybrid_plan is None) != (hybrid_cuda_plugin is None):
@@ -507,6 +508,8 @@ class Runtime:
         self.load_timeout = load_timeout
         self.lock = threading.RLock()
         self.chat_lock = threading.Lock()
+        self.model_settings = _settings.ModelSettings(settings_store)
+        self.remember_load = True
         self.process: subprocess.Popen[str] | None = None
         self.state = "stopped"
         self.model: str | None = None
@@ -686,6 +689,8 @@ class Runtime:
                 "state": self.state,
                 "model": self.model,
                 "error": self.error,
+                "saved_model_settings": dict(self.model_settings.settings) if self.model_settings.settings else None,
+                "settings_error": self.model_settings.error,
                 "readiness_error": self.readiness_error,
                 "loading": loading,
                 "logs": list(self.logs),
@@ -851,7 +856,18 @@ class Runtime:
             ],
         }
 
-    def load(self, data: dict) -> None:
+    def remember_settings(self) -> None:
+        with self.lock:
+            if self.state != "ready" or self.closed:
+                return
+            current = self.status()
+            settings = {key: current[key] for key in _tuning.LOAD_FIELDS}
+            settings["context"] = self.requested_context
+            if self.execution_mode == "auto":
+                settings["hybrid_variant"] = "auto"
+            self.model_settings.remember(settings)
+
+    def load(self, data: dict, *, remember: bool = True) -> None:
         model_value = data.get("model")
         model = readable_gguf(model_value, "Model")
         mode = data.get("execution_mode", self.default_execution_mode)
@@ -1148,6 +1164,7 @@ class Runtime:
             self.generation_serial += 1
             self.generation = {}
             self.slot_sample = None
+            self.remember_load = remember
             try:
                 process = subprocess.Popen(
                     command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1316,6 +1333,8 @@ class Runtime:
                                      (self.kv_cache_verified and self.flash_attention_verified is True)) and
                                     (not verify_speculation or self.speculation_verified)):
                                 self.state = "ready"
+                                if self.remember_load:
+                                    self.remember_settings()
                     else:
                         with self.lock:
                             if self.process is process:
@@ -1859,7 +1878,7 @@ def main() -> None:
         mode = "hybrid" if explicit and args.execution_mode == "auto" else args.execution_mode
         runtime = Runtime(args.llama_server, backend_kind=args.backend_kind,
                           enable_speculation=args.experimental_speculation,
-                          execution_mode=mode, **profile)
+                          execution_mode=mode, settings_store=user_config_dir() / "model-settings.json", **profile)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if runtime.hybrid_plan is not None:

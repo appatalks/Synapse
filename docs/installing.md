@@ -145,6 +145,26 @@ on Windows. It contains the local model path, hardware summary, settings and
 measurements, not prompt text or chat history. Page refresh/app restart retains
 the report but does not automatically load its model.
 
+## Remembered model settings
+
+Synapse privately saves the last successfully loaded model path and run settings
+in `model-settings.json`, in the same configuration directory as `tuning.json`.
+This includes your selected engine (including **Standard only**), requested
+context, CPU threads, placement, KV cache, loading, offload, expert-cache and draft
+settings. Restarting or refreshing restores the controls; **Load model** is still
+required. No model loads or Auto Tune trials start automatically.
+
+Failed or cancelled loads do not replace the saved configuration. Auto Tune's
+intermediate trials are not saved as your last model; only its successfully
+applied final choice replaces it. A later manual load takes precedence over that
+choice. Saved settings are checked again when loading, so a missing model,
+changed backend or unavailable experimental feature is reported rather than
+silently switching settings. Save/read failures are shown in the UI.
+
+This does not save browser chat history or change another app's token limits.
+Versions without this feature did not save manual settings; those settings
+cannot be recovered from an earlier restart unless recorded separately.
+
 ## Loading feedback
 
 The loading banner remains visible outside Model Controls and shows the actual

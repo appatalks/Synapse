@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck } from "./model-controls.mjs";
+import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -13,6 +13,7 @@ let controller = null;
 let actionPending = false;
 let history = [];
 let settingsInitialized = false;
+let hybridVariant = "auto";
 let browserLocation = null;
 let browserBusy = false;
 let appliedTuningAt = null;
@@ -164,36 +165,15 @@ function renderStatus() {
   } else {
     el("resources").textContent = status.model ? "Collecting process resource usage..." : "";
   }
-  if (status.model && ["loading", "ready", "stopping"].includes(status.state)) {
-    if (el("model").value !== status.model) modelPrecheck.invalidate();
-    el("model").value = status.model;
-    el("context").value = status.context;
-    el("placement").value = status.placement;
-  }
-  if (!settingsInitialized || (status.model && ["loading", "ready", "stopping"].includes(status.state))) {
-    el("execution-mode").value = status.execution_mode || "standard";
-    if (hybrid) {
-      el("context").value = status.context;
-      el("placement").value = status.placement;
-    }
-    el("cpu-threads").value = status.cpu_threads;
-    el("batch-threads").value = status.batch_threads;
-    el("cpu-poll").value = status.cpu_poll;
-    el("host-op-offload").value = String(status.host_op_offload);
-    el("op-offload-min-batch").value = status.op_offload_min_batch;
-    el("kv-cache-type").value = status.kv_cache_type || "f16";
-    el("load-mode").value = status.load_mode;
-    el("expert-cache").value = status.expert_cache_mib;
-    el("fit-target").value = status.fit_target_mib;
-    el("draft-model").value = status.draft_model || "";
-    el("draft-type").value = status.draft_type || (status.draft_model ? "dflash" : "none");
-    el("draft-tokens").value = status.draft_tokens;
-    settingsInitialized = true;
-  }
+  const previousModel = el("model").value;
+  const restored = restoreModelControls(status, settingsInitialized, el);
+  if (restored) hybridVariant = restored.hybrid_variant || "auto";
+  settingsInitialized = true;
+  if (el("model").value !== previousModel) modelPrecheck.invalidate();
   el("backend-help").hidden = status.backend_available;
   el("backend-help").textContent = "Backend missing. Install llama.cpp, then start SYNAPSE with: synapse --llama-server /path/to/llama-server (llama-server.exe on Windows). No backend or model is downloaded automatically.";
-  if (status.error) notice(status.error);
-  else if (status.context_warning) notice(status.context_warning);
+  const warnings = [status.error, status.context_warning, status.settings_error].filter(Boolean);
+  if (warnings.length) notice(warnings.join(" "));
   contextNote();
   renderTuning();
   controls();
@@ -395,6 +375,7 @@ el("browser-path").addEventListener("keydown", (event) => {
   }
 });
 el("execution-mode").addEventListener("change", () => {
+  hybridVariant = "auto";
   el("draft-type").value = "none";
   el("draft-model").value = "";
   if (el("execution-mode").value !== "auto") {
@@ -482,9 +463,14 @@ el("load-form").addEventListener("submit", async (event) => {
   notice();
   controls();
   try {
+    if (el("draft-type").value !== "none" && !status?.speculation_enabled) {
+      throw new Error("Saved speculative decoding settings require restarting with --experimental-speculation. "
+        + "Select Off to load without a draft.");
+    }
     const settings = {
       model: el("model").value,
       execution_mode: el("execution-mode").value,
+      hybrid_variant: hybridVariant,
       context: Number(el("context").value),
       placement: el("placement").value,
       cpu_threads: Number(el("cpu-threads").value),

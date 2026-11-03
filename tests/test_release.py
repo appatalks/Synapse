@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import tempfile
 import unittest
 from urllib.parse import urlsplit
 import zipfile
@@ -18,20 +19,25 @@ class ReleaseTests(unittest.TestCase):
     def test_version_and_public_payload(self):
         result = subprocess.run([sys.executable, str(ARCHIVE), "--version"],
                                 capture_output=True, text=True, check=True, timeout=10)
-        self.assertIn("SYNAPSE 0.1.0rc4", result.stdout)
+        self.assertIn("SYNAPSE 0.1.0rc5", result.stdout)
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
         self.assertIn("synapse_app/tuning.py", names)
+        self.assertIn("synapse_app/settings.py", names)
         self.assertIn("synapse_app/web/model-controls.mjs", names)
         self.assertFalse(any(name.endswith((".gguf", ".bin", ".log")) or
                              "/results/" in name or "__pycache__" in name for name in names))
 
     def test_packaged_http_assets_and_monitor(self):
+        config = tempfile.TemporaryDirectory()
+        self.addCleanup(config.cleanup)
         process = subprocess.Popen(
             [sys.executable, str(ARCHIVE), "--no-browser", "--port", "0", "--execution-mode", "standard",
              "--llama-server", str(ARCHIVE.parent / "missing-backend")],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "XDG_CONFIG_HOME": config.name, "HOME": config.name,
+                 "LOCALAPPDATA": config.name},
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0)
         try:
             line = process.stdout.readline()

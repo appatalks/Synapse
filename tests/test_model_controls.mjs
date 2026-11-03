@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck, precheckText } from "../synapse_app/web/model-controls.mjs";
+import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls } from "../synapse_app/web/model-controls.mjs";
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
@@ -141,4 +141,72 @@ test("Automatic and Hybrid payloads retain the explicit MTP draft instead of sil
   });
   const standard = { ...settings, execution_mode: "standard", draft_type: "dflash" };
   assert.equal(modelLoadPayload(standard), standard);
+});
+
+const savedSettings = {
+  model: "/models/manual.gguf", execution_mode: "standard", context: 142128, placement: "cpu",
+  cpu_threads: 4, batch_threads: 8, cpu_poll: 0, host_op_offload: false, op_offload_min_batch: 256,
+  kv_cache_type: "f16", load_mode: "none", expert_cache_mib: 0, fit_target_mib: 2048,
+  draft_model: null, draft_type: "none", draft_tokens: 9, hybrid_variant: "auto",
+};
+
+function modelControls() {
+  const fields = new Map();
+  return { fields, control: (id) => {
+    if (!fields.has(id)) fields.set(id, { value: "" });
+    return fields.get(id);
+  } };
+}
+
+test("a stopped service restores every saved manual control without loading or selecting Automatic", () => {
+  const { control } = modelControls();
+  const status = { ...savedSettings, model: null, state: "stopped", execution_mode: "auto", context: 4096,
+    saved_model_settings: savedSettings };
+  assert.equal(restoreModelControls(status, false, control), savedSettings);
+  const expected = {
+    model: "/models/manual.gguf", "execution-mode": "standard", context: "142128", placement: "cpu",
+    "cpu-threads": "4", "batch-threads": "8", "cpu-poll": "0", "host-op-offload": "false",
+    "op-offload-min-batch": "256", "kv-cache-type": "f16", "load-mode": "none",
+    "expert-cache": "0", "fit-target": "2048", "draft-model": "", "draft-type": "none", "draft-tokens": "9",
+  };
+  for (const [id, value] of Object.entries(expected)) assert.equal(control(id).value, value, id);
+  control("context").value = "131072";
+  assert.equal(restoreModelControls(status, true, control), null);
+  assert.equal(control("context").value, "131072");
+  assert.equal(status.model, null);
+  assert.equal(status.state, "stopped");
+});
+
+test("active runtime settings override older saved controls; idle polling and unload preserve edits", () => {
+  const { control } = modelControls();
+  const status = { ...savedSettings, model: "/models/current.gguf", context: 32768,
+    execution_mode: "auto", state: "ready", saved_model_settings: savedSettings };
+  assert.equal(restoreModelControls(status, true, control), status);
+  assert.equal(control("model").value, status.model);
+  assert.equal(control("execution-mode").value, "auto");
+  assert.equal(control("context").value, "32768");
+  const stopped = { ...status, model: null, state: "stopped" };
+  assert.equal(restoreModelControls(stopped, true, control), null);
+  assert.equal(control("model").value, status.model);
+  assert.equal(control("context").value, "32768");
+});
+
+test("first runs use runtime defaults and speculative settings remain visible for explicit revalidation", () => {
+  const { control } = modelControls();
+  restoreModelControls({ ...savedSettings, model: null, execution_mode: "auto", context: 4096,
+    state: "stopped", saved_model_settings: null }, false, control);
+  assert.equal(control("model").value, "");
+  assert.equal(control("execution-mode").value, "auto");
+  assert.equal(control("context").value, "4096");
+  const draft = { ...savedSettings, draft_type: "mtp", draft_model: "/models/draft.gguf", draft_tokens: 4 };
+  restoreModelControls({ state: "stopped", saved_model_settings: draft, speculation_enabled: false }, false, control);
+  assert.equal(control("draft-type").value, "mtp");
+  assert.equal(control("draft-model").value, draft.draft_model);
+  assert.equal(control("draft-tokens").value, "4");
+});
+
+test("manual Hybrid restores its explicit method without pinning Automatic to a stale method", () => {
+  const settings = { ...savedSettings, execution_mode: "hybrid", hybrid_variant: "hosted" };
+  assert.equal(modelLoadPayload(settings).hybrid_variant, "hosted");
+  assert.equal(modelLoadPayload({ ...settings, execution_mode: "auto" }).hybrid_variant, undefined);
 });
