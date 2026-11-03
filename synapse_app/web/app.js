@@ -44,13 +44,13 @@ function controls() {
   const active = tuning || (status && ["loading", "ready", "stopping"].includes(status.state));
   el("load").disabled = !status?.backend_available || active || actionPending || !!controller;
   el("unload").disabled = !active || tuning || status?.state === "stopping" || actionPending;
-  el("send").disabled = status?.state !== "ready" || tuning || !!controller || actionPending || status?.chat_busy;
+  el("send").disabled = status?.state !== "ready" || tuning || !!controller || actionPending || status?.chat_busy || status?.chat_queued;
   el("stop").disabled = !controller;
   el("clear").disabled = !!controller;
   el("max-output").disabled = !!controller;
   el("reasoning-effort").disabled = !!controller;
   el("quick-reasoning-effort").disabled = !!controller;
-  el("start-tuning").disabled = tuning || !!controller || actionPending || status?.chat_busy ||
+  el("start-tuning").disabled = tuning || !!controller || actionPending || status?.chat_busy || status?.chat_queued ||
     !status?.backend_available || ["loading", "stopping"].includes(status?.state) || !el("tuning-consent").checked;
   el("cancel-tuning").disabled = !tuning || actionPending;
   el("cancel-work").disabled = actionPending || status?.state === "stopping";
@@ -141,6 +141,7 @@ function renderStatus() {
   el("connection-state").textContent = status.tuning?.active ? "Auto Tune owns this model. Cancel it or wait before connecting apps."
     : status.state === "ready" ? "Ready. Your apps can connect now."
     : "No model is ready. Open Chat → Model Controls to load a model before sending API requests.";
+  if (status.chat_queued) el("connection-state").textContent += ` ${status.chat_queued} chat request(s) waiting.`;
   el("controls-action-status").textContent = labels[status.state] || status.state;
   el("model-status").textContent = status.model || "No model loaded.";
   el("run-status").textContent = status.model
@@ -148,6 +149,7 @@ function renderStatus() {
     : "Load an existing GGUF to begin.";
   if (status.model) el("run-status").textContent += ` · Attention KV ${status.kv_cache_type || "f16"}`
     + (status.kv_cache_verified ? " (backend confirmed)" : " (backend confirmation unavailable)");
+  if (status.chat_queued) el("run-status").textContent += ` · ${status.chat_queued} queued chat request(s)`;
   el("logs").textContent = status.logs.join("\n") || "No output yet.";
   const resources = status.resources;
   if (status.resource_error) {
@@ -566,7 +568,7 @@ bindChatInput(el("prompt"), el("chat-form"), el("send"));
 el("chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = el("prompt").value.trim();
-  if (!prompt || controller || actionPending || status?.state !== "ready" || status.chat_busy) return;
+  if (!prompt || controller || actionPending || status?.state !== "ready" || status.chat_busy || status.chat_queued) return;
   const maxTokens = Number(el("max-output").value);
   const reasoningEffort = el("reasoning-effort").value;
   if (!["default", "low", "medium", "high"].includes(reasoningEffort)) {

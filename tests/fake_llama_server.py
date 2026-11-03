@@ -45,7 +45,7 @@ if Path(args.model).stem in ("not-a-server", "old-server"):
     print("error: invalid argument: " + ("--model" if Path(args.model).stem == "not-a-server" else "--load-mode"),
           flush=True)
     sys.exit(1)
-stats = {"tokens": 0, "decoded": 0}
+stats = {"tokens": 0, "decoded": 0, "requests": 0}
 if Path(args.model).stem == "fail":
     print("Unsupported model architecture (test fixture).", flush=True)
     sys.exit(7)
@@ -198,6 +198,8 @@ class Handler(BaseHTTPRequestHandler):
                 "prompt_n": 18, "prompt_per_second": 900.0}})
             return
         prompt = data["messages"][-1]["content"]
+        stats["requests"] += 1
+        request_index = stats["requests"]
         if prompt.startswith("SYNAPSE_TUNING_CHECK"):
             content = json.dumps({"start": "cedar4821", "middle": "violet7319", "end": "quartz9067"})
             if Path(args.model).stem == "tuning-wrong-answer":
@@ -220,6 +222,9 @@ class Handler(BaseHTTPRequestHandler):
         if prompt == "backend-error":
             self.send_json(400, {"error": {"message": "Context limit exceeded."}})
             return
+        if prompt == "prefill-wait":
+            print("fixture: waiting for first response", flush=True)
+            time.sleep(2)
         if data.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -254,6 +259,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(200, {
                 "model": data["model"],
+                "fixture_request_index": request_index,
                 "choices": [{"message": {"role": "assistant", "content": "Hello"}}],
             })
 

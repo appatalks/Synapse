@@ -45,6 +45,27 @@ The browser chat's output limit is separate from an editor client's output limit
 JSON request bodies are limited to 8 MiB so long prompts can pass through the API;
 the backend still enforces its token limit.
 
+### Compaction and overlapping API requests
+
+The backend still processes one chat request at a time with its full context.
+Up to four additional requests wait in a first-in, first-out queue, for at most
+15 minutes each. This lets a client send background compaction or other chat
+requests without immediately failing because another request is running.
+Streaming and non-streaming requests use the same queue. No model-name detection,
+parallel context slots, extra GPU allocation or prompt truncation is involved.
+
+The wait limit applies only to admission, not to the total time spent generating.
+Your client's own timeout may be shorter, especially when compaction processes
+a long prompt. Cancelled clients are removed from the queue without running
+their queued prompt. Cancellation is also monitored while forwarding an active
+request and waiting for the backend's first response.
+
+A full queue returns HTTP 429; an expired wait or model unloaded/replaced while
+waiting returns HTTP 503 with an explanation. Auto Tune still owns the model
+exclusively and rejects chat requests with HTTP 409. Model Controls and the
+connection status show the queued count; `/api/v1/status` exposes `chat_queued`.
+The queue is not saved across app restarts.
+
 ### Optional Q8 attention cache
 
 Under **Run settings -> Advanced performance**, the official llama.cpp backend

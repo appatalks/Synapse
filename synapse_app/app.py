@@ -45,6 +45,8 @@ LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
 BODY_LIMIT = 8 * 1024 * 1024
 RESPONSE_LIMIT = 8 * 1024 * 1024
+MAX_QUEUED_CHATS = 4
+CHAT_QUEUE_TIMEOUT = 15 * 60
 MAX_CONTEXT = 262144
 HYBRID_VERIFICATION_TIMEOUT = 60
 KV_VERIFICATION_TIMEOUT = 60
@@ -1461,6 +1463,8 @@ class AppServer(ThreadingHTTPServer):
         self._gpus: list[dict] | None = None
         self.runtime = runtime
         self.operation_lock = threading.RLock()
+        self.chat_queue: deque[object] = deque()
+        self.closing = threading.Event()
         self.tuner = _tuning.AutoTuner(
             lambda: self.runtime, metadata=model_metadata, compatible=supports_hybrid, layout=moe_layout,
             memory=lambda: system_probe().memory(), hardware=self._tuning_hardware,
@@ -1544,7 +1548,9 @@ class AppServer(ThreadingHTTPServer):
                 "hosted": runtime.hosted_capable}
 
     def status(self) -> dict:
-        return {**self.runtime.status(), "tuning": self.tuner.snapshot()}
+        with self.operation_lock:
+            queued = len(self.chat_queue)
+        return {**self.runtime.status(), "chat_queued": queued, "tuning": self.tuner.snapshot()}
 
     def server_bind(self) -> None:
         TCPServer.server_bind(self)
@@ -1553,6 +1559,7 @@ class AppServer(ThreadingHTTPServer):
         self.server_port = self.server_address[1]
 
     def server_close(self) -> None:
+        self.closing.set()
         self.tuner.close()
         self.runtime.monitor.close()
         super().server_close()
@@ -1639,6 +1646,8 @@ class Handler(BaseHTTPRequestHandler):
                 data["model"] = str(readable_gguf(data.get("model"), "Model"))
                 try:
                     with self.server.operation_lock:
+                        if self.server.chat_queue:
+                            raise AppError(409, "Wait for queued chat requests to finish before starting Auto Tune.")
                         self.server.tuner.start(data)
                 except ValueError as exc:
                     raise AppError(400, str(exc)) from exc
@@ -1659,7 +1668,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(202, self.server.updates.snapshot())
             elif method == "POST" and path == "/api/v1/update/apply":
                 data = self._body()
-                if self.server.runtime.chat_lock.locked() or self.server.runtime.state in ("loading", "stopping"):
+                if (self.server.runtime.chat_lock.locked() or self.server.chat_queue or
+                        self.server.runtime.state in ("loading", "stopping")):
                     raise AppError(409, "Wait until the model is idle before updating.")
                 try:
                     self.server.updates.apply(data.get("version"), self.server.install_update)
@@ -1734,21 +1744,71 @@ class Handler(BaseHTTPRequestHandler):
             self._json(502, {"error": {"message": f"Local service request failed: {exc}",
                                      "type": "vrambridge_error"}})
 
+    def _admit_chat(self, runtime: Runtime, disconnected: threading.Event) -> bool:
+        ticket = object()
+        deadline = time.monotonic() + CHAT_QUEUE_TIMEOUT
+        with self.server.operation_lock:
+            if self.server.tuner.active:
+                raise AppError(409, "Auto Tune owns the model. Cancel it or wait before sending chat requests.")
+            with runtime.lock:
+                process = runtime.process
+                if self.server.closing.is_set() or runtime.closed or runtime.state != "ready" or process is None:
+                    raise AppError(503, "No model is ready. Load a model and check its status first.")
+            if disconnected.is_set():
+                return False
+            if not self.server.chat_queue and runtime.chat_lock.acquire(blocking=False):
+                return True
+            if len(self.server.chat_queue) >= MAX_QUEUED_CHATS:
+                raise AppError(429, "The chat queue is full. Wait for current requests to finish before retrying.")
+            self.server.chat_queue.append(ticket)
+            LOG.info("Chat request queued (%s waiting).", len(self.server.chat_queue))
+        try:
+            while not disconnected.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AppError(503, "Timed out waiting for the current chat. Stop it or retry when the model is idle.")
+                with self.server.operation_lock:
+                    with runtime.lock:
+                        if (self.server.closing.is_set() or runtime.closed or self.server.runtime is not runtime or
+                                runtime.process is not process or runtime.state != "ready"):
+                            raise AppError(503, "The model changed while this chat was queued. Check its status and retry.")
+                    if self.server.tuner.active:
+                        raise AppError(409, "Auto Tune owns the model. Cancel it or wait before sending chat requests.")
+                    if self.server.chat_queue[0] is ticket and runtime.chat_lock.acquire(blocking=False):
+                        return True
+                disconnected.wait(min(0.1, remaining))
+            LOG.info("Queued chat cancelled by local client.")
+            return False
+        finally:
+            with self.server.operation_lock:
+                self.server.chat_queue.remove(ticket)
+
     def _proxy(self, method: str, path: str, data: dict | None) -> None:
         runtime = self.server.runtime
         chat = path == "/v1/chat/completions"
-        with self.server.operation_lock:
-            if chat and self.server.tuner.active:
-                raise AppError(409, "Auto Tune owns the model. Cancel it or wait before sending chat requests.")
-            if chat and not runtime.chat_lock.acquire(blocking=False):
-                raise AppError(409, "Another chat is running. Stop it or wait before sending.")
         connection: http.client.HTTPConnection | None = None
+        upstream_socket: socket.socket | None = None
+        admitted = False
         streaming_started = False
         finished = threading.Event()
         disconnected = threading.Event()
-        serial = runtime.begin_generation() if chat else None
+        serial = None
         event_lines: list[bytes] = []
         event_bytes = 0
+
+        def watch_client() -> None:
+            while not finished.wait(0.1):
+                try:
+                    readable, _, _ = select.select([self.connection], [], [], 0)
+                    if readable and not self.connection.recv(1, socket.MSG_PEEK):
+                        disconnected.set()
+                        if upstream_socket is not None:
+                            upstream_socket.shutdown(socket.SHUT_RDWR)
+                        return
+                except OSError:
+                    if not finished.is_set():
+                        disconnected.set()
+                    return
 
         def observe(payload: bytes) -> None:
             if serial is None or not payload or payload.strip() == b"[DONE]":
@@ -1758,30 +1818,23 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, UnicodeDecodeError) as exc:
                 LOG.warning("Backend telemetry event unavailable: %s", exc)
         try:
+            if chat:
+                threading.Thread(target=watch_client, daemon=True).start()
+                if not self._admit_chat(runtime, disconnected):
+                    return
+                admitted = True
+                serial = runtime.begin_generation()
             connection, key = runtime.connection()
+            connection.connect()
+            upstream_socket = connection.sock
+            if disconnected.is_set():
+                LOG.info("Chat cancelled before forwarding to the backend.")
+                return
             if data is not None:
                 data["model"] = "local-model"
             connection.request(method, path, body=json.dumps(data) if data is not None else None,
                                headers={"Content-Type": "application/json",
                                         "Authorization": f"Bearer {key}"})
-            upstream_socket = connection.sock
-            assert upstream_socket is not None
-
-            def watch_client() -> None:
-                while not finished.wait(0.1):
-                    try:
-                        readable, _, _ = select.select([self.connection], [], [], 0)
-                        if readable and not self.connection.recv(1, socket.MSG_PEEK):
-                            disconnected.set()
-                            upstream_socket.shutdown(socket.SHUT_RDWR)
-                            return
-                    except OSError:
-                        if not finished.is_set():
-                            disconnected.set()
-                        return
-
-            if chat:
-                threading.Thread(target=watch_client, daemon=True).start()
             response = connection.getresponse()
             streaming = data is not None and data.get("stream") is True and response.status == 200
             if not streaming:
@@ -1831,8 +1884,9 @@ class Handler(BaseHTTPRequestHandler):
             finished.set()
             if connection is not None:
                 connection.close()
-            if chat:
-                runtime.end_generation(serial)
+            if admitted:
+                if serial is not None:
+                    runtime.end_generation(serial)
                 runtime.chat_lock.release()
 
 

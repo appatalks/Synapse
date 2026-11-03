@@ -98,6 +98,22 @@ class LocalAppTests(unittest.TestCase):
             time.sleep(0.03)
         self.fail(f"Expected {wanted}: {self.runtime.status()}")
 
+    def open_chat(self, prompt="hello", *, stream=False):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        connection.request("POST", "/v1/chat/completions",
+                           json.dumps({"messages": [{"role": "user", "content": prompt}], "stream": stream}),
+                           {"Content-Type": "application/json"})
+        self.addCleanup(connection.close)
+        return connection
+
+    def wait_queued(self, count):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if self.server.status()["chat_queued"] == count:
+                return
+            time.sleep(0.01)
+        self.fail(f"Expected {count} queued requests: {self.server.status()}")
+
     def load(self, model=None, **extra):
         code, _, body = self.request("POST", "/api/v1/model/load",
                                     {"model": str(model or self.model), **extra})
@@ -1941,7 +1957,7 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn(b"Context limit", body)
 
-    def test_stream_and_single_request_admission(self):
+    def test_stream_and_finite_request_admission(self):
         self.load()
         payload = {"messages": [{"role": "user", "content": "hello"}], "stream": True}
         code, headers, body = self.request("POST", "/v1/chat/completions", payload)
@@ -1951,9 +1967,130 @@ class LocalAppTests(unittest.TestCase):
         self.assertIn(b"<script>not executable</script>", body)
         self.runtime.chat_lock.acquire()
         try:
-            self.assertEqual(self.request("POST", "/v1/chat/completions", payload)[0], 409)
+            serial = self.runtime.generation_serial
+            with mock.patch.object(app, "CHAT_QUEUE_TIMEOUT", 0.05):
+                code, _, body = self.request("POST", "/v1/chat/completions", payload)
+            self.assertEqual(code, 503)
+            self.assertIn(b"Timed out waiting", body)
+            self.assertTrue(self.runtime.chat_lock.locked())
+            self.assertEqual(self.runtime.generation_serial, serial)
+            self.wait_queued(0)
         finally:
             self.runtime.chat_lock.release()
+
+    def test_overlapping_compaction_requests_wait_in_fifo_order(self):
+        self.load()
+        first = self.open_chat("wait", stream=True)
+        response = first.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertTrue(self.runtime.chat_lock.locked())
+        second = self.open_chat("compaction")
+        self.wait_queued(1)
+        third = self.open_chat("continue")
+        self.wait_queued(2)
+        self.assertEqual(self.request("GET", "/v1/models")[0], 200)
+        self.assertEqual(self.request("GET", "/api/v1/status")[0], 200)
+        self.assertIn(b"data: [DONE]", response.read())
+        for expected, client in ((2, second), (3, third)):
+            reply = client.getresponse()
+            self.assertEqual(reply.status, 200)
+            self.assertEqual(json.loads(reply.read())["fixture_request_index"], expected)
+        self.wait_queued(0)
+        self.assertTrue(self.runtime.chat_lock.acquire(timeout=1))
+        self.runtime.chat_lock.release()
+
+    def test_cancelled_queue_head_is_removed_without_running_its_prompt(self):
+        self.load()
+        self.runtime.chat_lock.acquire()
+        held = True
+        try:
+            cancelled = self.open_chat("cancelled compaction")
+            self.wait_queued(1)
+            following = self.open_chat("continue")
+            self.wait_queued(2)
+            serial = self.runtime.generation_serial
+            cancelled.close()
+            self.wait_queued(1)
+            self.assertEqual(self.runtime.generation_serial, serial)
+            self.runtime.chat_lock.release()
+            held = False
+            response = following.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["fixture_request_index"], 1)
+            self.wait_queued(0)
+        finally:
+            if held:
+                self.runtime.chat_lock.release()
+
+    def test_chat_queue_has_exact_capacity_and_rejects_tuning(self):
+        self.load()
+        self.runtime.chat_lock.acquire()
+        clients = []
+        try:
+            for count in range(1, app.MAX_QUEUED_CHATS + 1):
+                clients.append(self.open_chat())
+                self.wait_queued(count)
+            code, _, body = self.request("POST", "/v1/chat/completions",
+                                        {"messages": [{"role": "user", "content": "overflow"}]})
+            self.assertEqual(code, 429)
+            self.assertIn(b"queue is full", body)
+            self.assertEqual(self.server.status()["chat_queued"], 4)
+            code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                        {"model": str(self.model), "confirm": True})
+            self.assertEqual(code, 409)
+            self.assertIn(b"queued chat", body)
+        finally:
+            for client in clients:
+                client.close()
+            self.wait_queued(0)
+            self.runtime.chat_lock.release()
+        reply = self.open_chat().getresponse()
+        self.assertEqual(json.loads(reply.read())["fixture_request_index"], 1)
+
+    def test_unloading_model_cancels_waiting_requests(self):
+        self.load()
+        self.runtime.chat_lock.acquire()
+        try:
+            waiting = self.open_chat()
+            self.wait_queued(1)
+            self.assertEqual(self.request("POST", "/api/v1/model/unload", {})[0], 200)
+            response = waiting.getresponse()
+            self.assertEqual(response.status, 503)
+            self.assertIn(b"model changed", response.read())
+            self.wait_queued(0)
+            self.assertIsNone(self.runtime.process)
+        finally:
+            self.runtime.chat_lock.release()
+
+    def test_closing_server_cancels_waiting_requests(self):
+        self.load()
+        self.runtime.chat_lock.acquire()
+        try:
+            waiting = self.open_chat()
+            self.wait_queued(1)
+            self.server.closing.set()
+            response = waiting.getresponse()
+            self.assertEqual(response.status, 503)
+            self.assertIn(b"model changed", response.read())
+            self.wait_queued(0)
+        finally:
+            self.runtime.chat_lock.release()
+
+    def test_disconnect_cancels_prompt_processing_before_response_headers(self):
+        self.load()
+        client = self.open_chat("prefill-wait")
+        deadline = time.monotonic() + 3
+        while not any("fixture: waiting for first response" in line for line in self.runtime.status()["logs"]):
+            if time.monotonic() >= deadline:
+                self.fail("Backend did not begin processing the prompt.")
+            time.sleep(0.01)
+        self.assertTrue(self.runtime.chat_lock.locked())
+        client.close()
+        deadline = time.monotonic() + 1
+        while self.runtime.chat_lock.locked() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(self.runtime.chat_lock.locked())
+        self.wait_queued(0)
 
     def test_disconnect_cancels_stream(self):
         self.load()
