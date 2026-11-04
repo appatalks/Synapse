@@ -259,7 +259,8 @@ class AutoTuner:
                           "quality or sustained-speed qualification."),
             }
             self.worker = threading.Thread(
-                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal),
+                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal,
+                                       data.get("include_hybrid") is False),
                 daemon=True)
             self.worker.start()
         return self.snapshot()
@@ -290,8 +291,13 @@ class AutoTuner:
                 raise Cancelled("The application is shutting down.")
             current = runtime.status()
             if current["state"] == "error":
-                details = [line for line in current["logs"] if any(term in line.lower()
-                           for term in ("failed", "out of memory", "error", "headroom"))][-3:]
+                failures = [line for line in current["logs"] if any(term in line.lower()
+                            for term in ("failed", "out of memory", "error", "headroom"))]
+                details = failures[-3:]
+                memory_failure = next((line for line in failures if any(term in line.lower()
+                                       for term in ("allocat", "out of memory", "headroom", "residency", "cache"))), None)
+                if memory_failure is not None and memory_failure not in details:
+                    details.insert(0, memory_failure)
                 raise TrialError((current["error"] or "The backend could not load the trial.") +
                                  (" " + " ".join(details) if details else ""))
             if current["state"] == "ready":
@@ -556,7 +562,8 @@ class AutoTuner:
                 raise TrialError("The applied engine differs from the measured choice.")
 
     def _run(self, runtime, model: str, contexts: list[int], placement: str, hybrid: bool,
-             metadata: dict, previous: dict | None, cache: str, goal: str = "balanced") -> None:
+             metadata: dict, previous: dict | None, cache: str, goal: str = "balanced",
+             standard_only: bool = False) -> None:
         original_budget = runtime.hybrid_context
         selected = None
         remembered = False
@@ -604,7 +611,8 @@ class AutoTuner:
                         break
                 if best_hybrid is not None and self._better(best_hybrid, selected, goal):
                     selected = best_hybrid
-            remembered = self._remember(model, selected, standard, goal)
+            if not standard_only:
+                remembered = self._remember(model, selected, standard, goal)
         except Cancelled as exc:
             final_state, error = "cancelled", str(exc)
             selected = None

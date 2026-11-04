@@ -1288,6 +1288,7 @@ class Runtime:
 
     def _watch(self, process: subprocess.Popen[str]) -> None:
         deadline = time.monotonic() + self.load_timeout
+        next_resources = 0.0
         while True:
             with self.lock:
                 if self.process is not process or self.state in ("stopping", "error"):
@@ -1301,7 +1302,10 @@ class Runtime:
                 loading = self.state == "loading"
                 port, key = self.port, self.key
                 verify_speculation = self.draft_model is not None and self.backend_kind == "llama.cpp"
-            self._sample_resources(process)
+            now = time.monotonic()
+            if now >= next_resources:
+                self._sample_resources(process)
+                next_resources = now + 1
             if loading:
                 connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
                 try:
@@ -1474,7 +1478,15 @@ class AppServer(ThreadingHTTPServer):
         archive = Path(sys.argv[0]).resolve() if sys.argv[0].endswith(".pyz") else None
         self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
         self.restart_requested = False
+        self.stop_requested = False
         super().__init__(address, Handler)
+
+    def shutdown_app(self) -> None:
+        self.stop_requested = True
+        self.closing.set()
+        self.runtime.stop(closing=True)
+        self.tuner.close()
+        self.shutdown()
 
     def install_update(self, staged: Path, receipt: dict) -> None:
         with self.operation_lock:
@@ -1572,6 +1584,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         LOG.info("%s %s", self.client_address[0], format % args)
 
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        if self.command == "GET" and str(code) == "200" and urlsplit(self.path).path in (
+                "/api/v1/status", "/api/v1/monitor", "/v1/models"):
+            LOG.debug('%s "%s" %s %s', self.client_address[0], self.requestline, code, size)
+        else:
+            super().log_request(code, size)
+
     def _guard(self) -> None:
         port = self.server.server_address[1]
         hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -1641,6 +1660,12 @@ class Handler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if method == "GET" and path == "/api/v1/status":
                 self._json(200, self.server.status())
+            elif method == "POST" and path == "/api/v1/shutdown":
+                if self._body():
+                    raise AppError(400, "Shutdown accepts an empty JSON object.")
+                self._json(202, {"app_name": "SYNAPSE", "state": "stopping"})
+                self.close_connection = True
+                threading.Thread(target=self.server.shutdown_app, daemon=True).start()
             elif method == "POST" and path == "/api/v1/tuning/start":
                 data = self._body()
                 data["model"] = str(readable_gguf(data.get("model"), "Model"))
@@ -1890,6 +1915,45 @@ class Handler(BaseHTTPRequestHandler):
                 runtime.chat_lock.release()
 
 
+def stop_server(port: int) -> None:
+    def request(method: str, path: str, data: dict | None = None, *, timeout: float = 2) -> dict:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        try:
+            connection.request(method, path, json.dumps(data) if data is not None else None,
+                               {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            body = response.read(RESPONSE_LIMIT + 1)
+            if len(body) > RESPONSE_LIMIT:
+                raise ValueError("The local server response exceeds 8 MiB.")
+            if response.status not in (200, 202):
+                raise RuntimeError(f"Local server {path} returned HTTP {response.status}: "
+                                   f"{body[:300].decode(errors='replace')}")
+            result = json.loads(body)
+            if not isinstance(result, dict):
+                raise ValueError("The local server did not return a JSON object.")
+            return result
+        finally:
+            connection.close()
+
+    identity = request("GET", "/api/v1/status")
+    if identity.get("app_name") != "SYNAPSE" or identity.get("api_version") != 1:
+        raise ValueError(f"Port {port} is not a supported SYNAPSE app; no shutdown was requested.")
+    result = request("POST", "/api/v1/shutdown", {})
+    if result.get("app_name") != "SYNAPSE" or result.get("state") != "stopping":
+        raise ValueError("The app did not acknowledge the shutdown request.")
+    deadline = time.monotonic() + 30
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            request("GET", "/api/v1/status", timeout=min(2, remaining))
+        except ConnectionRefusedError:
+            return
+        except (ConnectionResetError, ConnectionAbortedError, TimeoutError,
+                http.client.RemoteDisconnected, http.client.IncompleteRead) as exc:
+            LOG.debug("Local connection closed while waiting for shutdown: %s", exc)
+        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+    raise RuntimeError("The app acknowledged shutdown but did not close its listener within 30 seconds.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"SYNAPSE {__version__}")
@@ -1908,12 +1972,23 @@ def main() -> None:
     parser.add_argument("--hybrid-profile", type=Path,
                         help="optional Linux/CUDA experimental installation JSON; legacy VRAMBridge profiles are supported")
     parser.add_argument("--port", type=int, default=8080, help="local app port; 0 chooses a free port")
+    parser.add_argument("--stop", action="store_true",
+                        help="gracefully stop the local SYNAPSE app and its owned model backend on --port")
     parser.add_argument("--no-browser", action="store_true", help="do not open a browser")
     parser.add_argument("--no-update-check", action="store_true", help="disable automatic GitHub release checks")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    if args.stop:
+        if args.port == 0:
+            parser.error("--stop requires the app's listening port, not --port 0.")
+        try:
+            stop_server(args.port)
+        except (OSError, ValueError, RuntimeError, http.client.HTTPException) as exc:
+            parser.exit(1, f"Cannot stop SYNAPSE on port {args.port}: {exc}\n")
+        print(f"Stopped SYNAPSE on port {args.port}, including its owned model backend.")
+        return
     try:
         profile = {}
         explicit = args.experimental_hybrid_plan is not None or args.hybrid_cuda_plugin is not None
@@ -1945,7 +2020,7 @@ def main() -> None:
     url = f"http://127.0.0.1:{server.server_address[1]}"
 
     def shutdown(signum: int, frame: object) -> None:
-        threading.Thread(target=server.shutdown, daemon=True).start()
+        threading.Thread(target=server.shutdown_app, daemon=True).start()
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -1961,7 +2036,7 @@ def main() -> None:
     finally:
         runtime.stop(closing=True)
         server.server_close()
-    if server.restart_requested:
+    if server.restart_requested and not server.stop_requested:
         os.execv(sys.executable, [sys.executable, *sys.argv, "--port", str(server.server_address[1]), "--no-browser"])
 
 

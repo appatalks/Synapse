@@ -1,11 +1,94 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls } from "../synapse_app/web/model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
   choose(value) { this.value = value; this.dispatchEvent(new Event("change")); }
 }
+
+test("Hybrid checkbox allows Automatic and disables Hybrid through Standard without forcing it", () => {
+  const toggle = new Select(""), select = new Select("auto"), changes = [];
+  bindEngineSelection(toggle, select, (previous) => changes.push(previous));
+  assert.equal(toggle.checked, true);
+  toggle.checked = false;
+  toggle.dispatchEvent(new Event("change"));
+  assert.equal(select.value, "standard");
+  toggle.checked = true;
+  toggle.dispatchEvent(new Event("change"));
+  assert.equal(select.value, "auto");
+  select.choose("hybrid");
+  assert.equal(toggle.checked, true);
+  select.choose("standard");
+  assert.equal(toggle.checked, false);
+  assert.deepEqual(changes, ["auto", "standard", "auto", "hybrid"]);
+});
+
+test("restored engine choices synchronize the checkbox without dispatching a change", () => {
+  const toggle = new Select(""), select = new Select("auto"), changes = [];
+  const sync = bindEngineSelection(toggle, select, (previous) => changes.push(previous));
+  select.value = "standard";
+  sync();
+  assert.equal(toggle.checked, false);
+  assert.deepEqual(changes, []);
+  toggle.checked = true;
+  toggle.dispatchEvent(new Event("change"));
+  assert.deepEqual(changes, ["standard"]);
+});
+
+test("engine guidance distinguishes measured defaults, manual context and unavailable Hybrid", () => {
+  const automatic = engineSettingsText({ hybrid_available: true, hybrid_context_budget: 16384 }, "auto", "142128");
+  assert.match(automatic, /allowed, not forced/);
+  assert.match(automatic, /measured winner/);
+  assert.match(automatic, /otherwise it uses installation defaults/);
+  assert.match(automatic, /not always faster/);
+  assert.match(automatic, /142.?128-token context is not requested manually/);
+  assert.match(automatic, /16.?384 context tokens/);
+  assert.match(automatic, /switching modes may change it/);
+  assert.match(engineSettingsText({}, "auto", ""), /No Hybrid profile is configured/);
+  assert.match(engineSettingsText({}, "standard", "142128"), /Auto Tune use Standard only/);
+  assert.match(engineSettingsText({}, "hybrid", "16384"), /failed Hybrid load is reported instead of retrying/);
+  for (const mode of ["auto", "standard", "hybrid"]) {
+    assert.match(engineSettingsText({ model: "/models/target.gguf", state: "ready", context: 16384 }, mode, "16384"),
+      /Unload the active model.*next load/);
+  }
+});
+
+test("Hybrid permission cannot be mistaken for the actual active engine or tuning objective", () => {
+  const status = { model: "/models/target.gguf", state: "ready", context: 262144,
+    hybrid_active: false, hybrid_available: true, engine_source: "measured",
+    tuning: { model: "/models/target.gguf", goal: "maximum", recommendation: { settings: { context: 262144 } } } };
+  const text = engineSettingsText(status, "auto", "262144");
+  assert.match(text, /^Running now: Standard \(Hybrid is not active\) at 262.?144 context tokens/);
+  assert.match(text, /Maximum Context tuning prioritizes capacity and long-prompt time, not fastest generation/);
+  assert.match(engineSettingsText({ ...status, hybrid_active: true }, "auto", "262144"), /^Running now: Hybrid/);
+  assert.doesNotMatch(engineSettingsText({ ...status, state: "loading" }, "auto", "262144"), /Running now/);
+  for (const changes of [{ engine_source: "manual" }, { context: 16384 }, { model: "/models/another.gguf" }]) {
+    assert.doesNotMatch(engineSettingsText({ ...status, ...changes }, "auto", "262144"), /Maximum Context tuning prioritizes/);
+  }
+});
+
+test("status polling backs off while idle or hidden and stays responsive during work", () => {
+  for (const status of [null, { state: "stopped" }, { state: "ready", chat_busy: false }, { state: "error" }]) {
+    assert.equal(statusPollDelay(status, false), 5000);
+    assert.equal(statusPollDelay(status, true), 30000);
+  }
+  for (const status of [{ state: "loading" }, { state: "stopping" }, { state: "ready", chat_busy: true },
+    { state: "ready", chat_queued: 1 }, { state: "stopped", tuning: { active: true } }]) {
+    assert.equal(statusPollDelay(status, false), 1500);
+    assert.equal(statusPollDelay(status, true), 30000);
+  }
+});
+
+test("Auto Tune honors Standard-only opt-out without forcing Hybrid on unsupported systems", () => {
+  const settings = { model: "/models/target.gguf", goal: "balanced", placement: "auto",
+    kv_cache_type: "f16", confirm: true };
+  assert.deepEqual(tuningPayload(settings, "standard"), { ...settings, include_hybrid: false });
+  for (const mode of ["auto", "hybrid"]) assert.deepEqual(tuningPayload(settings, mode), settings);
+  assert.equal(tuningPayload({ ...settings, placement: "cpu" }, "auto").placement, "auto");
+  assert.equal(tuningPayload({ ...settings, placement: "cpu" }, "standard").placement, "cpu");
+  assert.equal(settings.include_hybrid, undefined);
+});
 
 test("reasoning selectors share the initial value and synchronize in both directions", () => {
   const primary = new Select("medium"), quick = new Select("default");
@@ -170,6 +253,7 @@ test("a stopped service restores every saved manual control without loading or s
     "expert-cache": "0", "fit-target": "2048", "draft-model": "", "draft-type": "none", "draft-tokens": "9",
   };
   for (const [id, value] of Object.entries(expected)) assert.equal(control(id).value, value, id);
+  assert.equal(control("allow-hybrid").checked, false);
   control("context").value = "131072";
   assert.equal(restoreModelControls(status, true, control), null);
   assert.equal(control("context").value, "131072");
@@ -184,6 +268,7 @@ test("active runtime settings override older saved controls; idle polling and un
   assert.equal(restoreModelControls(status, true, control), status);
   assert.equal(control("model").value, status.model);
   assert.equal(control("execution-mode").value, "auto");
+  assert.equal(control("allow-hybrid").checked, true);
   assert.equal(control("context").value, "32768");
   const stopped = { ...status, model: null, state: "stopped" };
   assert.equal(restoreModelControls(stopped, true, control), null);
@@ -207,6 +292,9 @@ test("first runs use runtime defaults and speculative settings remain visible fo
 
 test("manual Hybrid restores its explicit method without pinning Automatic to a stale method", () => {
   const settings = { ...savedSettings, execution_mode: "hybrid", hybrid_variant: "hosted" };
+  const { control } = modelControls();
+  restoreModelControls({ state: "stopped", saved_model_settings: settings }, false, control);
+  assert.equal(control("allow-hybrid").checked, true);
   assert.equal(modelLoadPayload(settings).hybrid_variant, "hosted");
   assert.equal(modelLoadPayload({ ...settings, execution_mode: "auto" }).hybrid_variant, undefined);
 });

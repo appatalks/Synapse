@@ -91,6 +91,8 @@ export class MonitorView {
     this.history = [];
     this.cursor = 0;
     this.paused = false;
+    this.polling = false;
+    this.timer = null;
     this.cards = {};
     this.gpu = document.getElementById("monitor-gpu");
     this.status = document.getElementById("monitor-status");
@@ -117,10 +119,20 @@ export class MonitorView {
       event.currentTarget.textContent = this.paused ? "Resume charts" : "Pause charts";
       event.currentTarget.setAttribute("aria-pressed", String(this.paused));
       this.render();
+      this.poll();
     });
+    document.addEventListener("visibilitychange", () => this.poll());
+    window.addEventListener("hashchange", () => this.poll());
+  }
+
+  visible() {
+    return !document.hidden && viewForHash(window.location.hash) === "monitor" && !this.paused;
   }
 
   async poll() {
+    window.clearTimeout(this.timer);
+    if (this.polling || !this.visible()) return;
+    this.polling = true;
     try {
       const data = await this.request(`/api/v1/monitor?after=${this.cursor}`);
       if (data.reset) {
@@ -156,7 +168,8 @@ export class MonitorView {
       this.error.textContent = `Monitoring unavailable: ${error.message}`;
       this.status.textContent = "Disconnected — displayed samples are not current.";
     } finally {
-      window.setTimeout(() => this.poll(), document.hidden ? 3000 : 1000);
+      this.polling = false;
+      if (this.visible()) this.timer = window.setTimeout(() => this.poll(), 2000);
     }
   }
 
@@ -231,3 +244,4 @@ export class MonitorView {
     }
   }
 }
+import { viewForHash } from "./navigation.mjs";

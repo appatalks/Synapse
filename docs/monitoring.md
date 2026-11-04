@@ -4,6 +4,24 @@ SYNAPSE keeps at most 300 one-second samples in memory. There is no telemetry
 upload or disk history. Opening Monitor does not restart a model or clear a chat.
 Pausing charts pauses display updates, not sampling.
 
+Monitor fetches batches every two seconds only while that view is visible
+and charts are not paused. Chat, Connect and hidden browser tabs do not fetch
+Monitor data. Returning to Monitor or resuming charts fetches immediately and
+catches up from the retained sample cursor; once started, server-side sampling
+still retains at most 300 one-second samples.
+
+App status refreshes every five seconds when idle, every 1.5 seconds during
+loading, unloading, tuning or chat work, and every 30 seconds in a hidden tab.
+Returning to a visible tab refreshes immediately. Multiple tabs still have
+their own status polling loops. Process CPU/RAM/I/O telemetry is sampled once
+per second; backend lifecycle/readiness checks retain their 0.2-second cadence.
+The reduced polling is not a measured model-throughput optimization.
+
+Successful status, Monitor and model-list GET access messages are DEBUG-level,
+not repeated INFO output. Failed requests, model actions and backend errors
+remain visible. External clients still control how often they request
+`/v1/models`; Synapse does not suppress or cache their actual requests.
+
 CPU and GPU load share one history graph with independently labeled values:
 mint is whole-machine CPU, blue is the selected device-wide GPU load. They
 are not added into a misleading utilization total. System RAM and context
@@ -68,6 +86,14 @@ for loading/unloading, runtime settings, max output tokens and reasoning effort.
 Closing it preserves the settings; they apply to the next message. Runtime
 selection stays locked while a model is loaded, and generation settings cannot
 change during a browser request.
+
+**Allow experimental Hybrid acceleration** is permission for Automatic, not an
+indicator that Hybrid is running. The explanation names the actual loaded
+engine and context. A matching **Maximum Context** result is labeled as
+prioritizing capacity and long-prompt time rather than generation speed.
+For example, Standard at a measured 262K capacity is not a matched speed
+comparison against Standard or Hybrid at 142K. Review the active engine,
+actual context and tuning goal before attributing a speed change to Hybrid.
 
 For an unbound causal layout, **Require hybrid** permits a manual GPU expert-cache
 budget in Advanced performance. This can leave room for a model's larger KV

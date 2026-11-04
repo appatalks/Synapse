@@ -18,6 +18,27 @@ models; the explicit acceleration option downloads/builds a pinned native backen
 The loopback app listener does not perform reverse DNS during startup; local
 name-service problems must not delay opening the UI or checking backend health.
 
+## Stop gracefully
+
+```sh
+synapse --stop
+# For an app listening on a different port:
+synapse --stop --port 8081
+```
+
+From source use `python -m synapse_app --stop`; for the standalone app use
+`python SYNAPSE.pyz --stop`. The command verifies that the local port serves
+SYNAPSE, requests shutdown, and waits up to 30 seconds for the listener to close.
+Shutdown cancels active/queued chats and Auto Tune, stops the app's owned
+model backend, and preserves saved settings. It does not stop unrelated
+`llama-server` processes. Missing servers, unsupported services and incomplete
+shutdowns return a nonzero exit status rather than claiming success.
+
+Ctrl+C and SIGTERM use the same cleanup path. Avoid `kill -9`: SIGKILL cannot
+run cleanup and can leave a model backend running after the app has gone.
+`--stop` requires the app to still be running; it does not search for or kill
+orphaned backend processes.
+
 ## Validate and build
 
 ```sh

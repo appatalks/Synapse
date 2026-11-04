@@ -49,9 +49,13 @@ stats = {"tokens": 0, "decoded": 0, "requests": 0}
 if Path(args.model).stem == "fail":
     print("Unsupported model architecture (test fixture).", flush=True)
     sys.exit(7)
-if (Path(args.model).stem == "tuning-cache-limit" and os.getenv("VRAMBRIDGE_HYBRID_PLAN") and
+if (Path(args.model).stem in ("tuning-cache-limit", "tuning-cache-limit-tail") and os.getenv("VRAMBRIDGE_HYBRID_PLAN") and
         int(args.moe_cache_mib) > 4096):
     print("CUDA cache allocation failed: out of memory (test fixture).", flush=True)
+    if Path(args.model).stem == "tuning-cache-limit-tail":
+        for line in ("failed to create context", "failed to create_context",
+                     "server exiting due to model loading error"):
+            print(line, flush=True)
     sys.exit(7)
 if Path(args.model).stem == "slow":
     time.sleep(5)

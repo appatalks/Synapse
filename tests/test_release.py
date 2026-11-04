@@ -4,7 +4,6 @@ import http.client
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
@@ -19,7 +18,7 @@ class ReleaseTests(unittest.TestCase):
     def test_version_and_public_payload(self):
         result = subprocess.run([sys.executable, str(ARCHIVE), "--version"],
                                 capture_output=True, text=True, check=True, timeout=10)
-        self.assertIn("SYNAPSE 0.1.0rc6", result.stdout)
+        self.assertIn("SYNAPSE 0.2.0rc1", result.stdout)
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
@@ -43,9 +42,9 @@ class ReleaseTests(unittest.TestCase):
             line = process.stdout.readline()
             self.assertTrue(line.startswith("SYNAPSE: http://127.0.0.1:"), line)
             port = urlsplit(line.split(" ", 1)[1].strip()).port
-            for path, content in (("/", b"SYNAPSE"), ("/monitor.mjs", b"MonitorView"),
+            for path, content in (("/", b'id="allow-hybrid"'), ("/monitor.mjs", b"MonitorView"),
                                   ("/chat-input.mjs", b"bindChatInput"), ("/theme.js", b"synapse.theme"),
-                                  ("/model-controls.mjs", b"bindReasoningEffort"),
+                                  ("/model-controls.mjs", b"bindEngineSelection"), ("/app.js", b"tuningPayload"),
                                   ("/navigation.mjs", b"navigate"), ("/style.css", b"sidebar"),
                                   ("/icon.svg", b"<svg"), ("/api/v1/status", b'"app_name": "SYNAPSE"'),
                                   ("/api/v1/monitor", b'"samples"')):
@@ -56,10 +55,10 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(response.status, 200)
                     self.assertIn(content, response.read())
                     connection.close()
-            if sys.platform == "win32":
-                process.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                process.terminate()
+            result = subprocess.run([sys.executable, str(ARCHIVE), "--stop", "--port", str(port)],
+                                    capture_output=True, text=True, timeout=40)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Stopped SYNAPSE", result.stdout)
             stdout, stderr = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, stdout + stderr)
         finally:

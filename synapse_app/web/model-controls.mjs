@@ -40,6 +40,62 @@ export function modelLoadPayload(settings) {
   return payload;
 }
 
+export function tuningPayload(settings, mode) {
+  return mode === "standard" ? { ...settings, include_hybrid: false } : { ...settings, placement: "auto" };
+}
+
+export function bindEngineSelection(toggle, select, changed) {
+  let previous = select.value;
+  const sync = () => {
+    toggle.checked = select.value !== "standard";
+    previous = select.value;
+  };
+  const change = () => {
+    const before = previous;
+    sync();
+    changed(before);
+  };
+  toggle.addEventListener("change", () => {
+    select.value = toggle.checked ? "auto" : "standard";
+    change();
+  });
+  select.addEventListener("change", change);
+  sync();
+  return sync;
+}
+
+export function engineSettingsText(status, mode, context) {
+  const running = status?.model && status.state === "ready"
+    ? `Running now: ${status.hybrid_active ? "Hybrid" : "Standard (Hybrid is not active)"} at ${status.context.toLocaleString()} context tokens. ` : "";
+  const maximum = status?.engine_source === "measured" && status.tuning?.goal === "maximum" &&
+    status.tuning.model === status.model && status.tuning.recommendation?.settings.context === status.context
+    ? "Maximum Context tuning prioritizes capacity and long-prompt time, not fastest generation. " : "";
+  const reload = status?.model && ["loading", "ready", "stopping"].includes(status.state)
+    ? " Unload the active model before changing this setting; changes apply on the next load." : "";
+  if (mode === "standard") {
+    return `${running}${maximum}Hybrid is off. Loading and Auto Tune use Standard only. Context and run settings are editable below; Standard is an engine choice, not a general manual-settings switch.${reload}`;
+  }
+  if (mode === "hybrid") {
+    return `${running}${maximum}Advanced override: Hybrid is required, not selected automatically. Context follows the installed profile; a failed Hybrid load is reported instead of retrying as Standard.${reload}`;
+  }
+  const policy = status?.hybrid_available
+    ? "Hybrid is allowed, not forced. Automatic reuses Auto Tune's measured winner for this model and backend; otherwise it uses installation defaults. Hybrid is not always faster."
+    : "No Hybrid profile is configured for this app. Automatic uses Standard here; allowing Hybrid does not install or activate it.";
+  const budget = status?.hybrid_context_budget ?? status?.hybrid_context;
+  const profile = status?.hybrid_available && Number.isInteger(budget)
+    ? ` The installed Hybrid profile defaults to ${budget.toLocaleString()} context tokens; model limits and a matching Auto Tune result may change this.` : "";
+  const manual = Number(context);
+  const warning = Number.isInteger(manual) && manual >= 512
+    ? ` The displayed ${manual.toLocaleString()}-token context is not requested manually in Automatic; switching modes may change it.` : "";
+  return `${running}${maximum}${policy} Automatic manages context and run settings.${profile}${warning} Use Auto Tune to measure supported contexts, or uncheck Hybrid for editable Standard-only settings.${reload}`;
+}
+
+export function statusPollDelay(status, hidden) {
+  if (hidden) return 30000;
+  return status?.tuning?.active || status?.chat_busy || status?.chat_queued ||
+    ["loading", "stopping"].includes(status?.state) ? 1500 : 5000;
+}
+
 export function restoreModelControls(status, initialized, control) {
   const active = status.model && ["loading", "ready", "stopping"].includes(status.state);
   if (initialized && !active) return null;
@@ -52,6 +108,7 @@ export function restoreModelControls(status, initialized, control) {
     fit_target_mib: "fit-target", draft_model: "draft-model", draft_type: "draft-type", draft_tokens: "draft-tokens",
   };
   for (const [field, id] of Object.entries(fields)) control(id).value = String(settings[field] ?? "");
+  control("allow-hybrid").checked = settings.execution_mode !== "standard";
   return settings;
 }
 

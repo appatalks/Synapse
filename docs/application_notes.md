@@ -51,17 +51,41 @@ result; checks run again at load time.
 
 ## Auto Tune
 
+**Allow experimental Hybrid acceleration** is the main engine control in
+Model Controls. Checked keeps **Automatic**: it permits GPU + CPU expert
+sharing when compatible and reuses a matching Auto Tune winner, rather than
+assuming Hybrid is always faster. Unchecked selects **Standard only** for
+loading and Auto Tune. Advanced performance retains explicit engine overrides
+for troubleshooting. The explanation identifies the currently running engine
+and actual context independently of the checkbox; checked can still mean
+Standard is active.
+
+Automatic manages context and run settings from the installation policy or
+matching measured choice; manually displayed values are not submitted.
+Switching from Standard to Automatic can therefore change context, as the
+control's explanation warns. Standard-only makes context and run settings
+editable. Toggling back restores your in-page manual values for the same
+model. Changing engine turns speculative decoding off; reselect a compatible
+draft before loading if needed. No engine toggle unloads or reloads a model.
+
 **Auto Tune** in Model Controls measures near-capacity input on your system and
 applies a passing configuration, then offers copyable VS Code/OpenAI-client limits.
 Balanced daily use tests up to 32K; Maximum Context can test up to the model limit
-or 256K and take an hour or more. Experimental hybrid trials require a separate
-opt-in. Tuning temporarily owns the model; cancellation restores the previous
+or 256K and take an hour or more. Hybrid trials require an installed compatible
+profile and the Hybrid checkbox to be enabled. Tuning temporarily owns the model; cancellation restores the previous
 configuration when possible. It tests input capacity, short anchor-retrieval
 replies and fixed-length generation speed for every engine the installation
 supports for the model. Balanced picks the faster generator and Maximum Context
 the faster long-prompt run; Automatic then reuses that choice on this machine
 ([automatic engine choice](installing.md#automatic-engine-choice)). It is not a
-general answer-quality check or an exhaustive speed search.
+general answer-quality check or an exhaustive speed search. With Hybrid off,
+only Standard is tested and applied; that restricted run does not replace an
+existing Automatic engine winner or turn Hybrid back on.
+
+Maximum Context prioritizes verified capacity and long-prompt request time,
+not fastest generation. Its saved winner may use a much larger context and
+decode more slowly than a previous manual run. The checkbox does not establish
+a matched engine benchmark or preserve a previous manual context.
 
 [Tuning scope, saved results and client settings](installing.md#auto-tune) ·
 [Optional Q8 attention cache](installing.md#optional-q8-attention-cache).
@@ -106,6 +130,13 @@ slower with MTP in both Standard and Hybrid execution. Keep drafting Off unless
 benchmarks of your exact target, settings and hardware demonstrate a benefit.
 
 ## Updates without reinstalling
+
+To stop the app and its owned model backend cleanly, run `synapse --stop`
+(`python SYNAPSE.pyz --stop` for the standalone app). Add `--port PORT` if
+it is not listening on 8080. Active chat/tuning work is cancelled; saved
+settings are retained. The command reports an error if no supported app is
+listening or shutdown does not complete. Avoid force-killing the app, which
+can leave its backend running.
 
 
 Click the **version in the sidebar**. It lights up when a newer compatible

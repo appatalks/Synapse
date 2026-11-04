@@ -126,7 +126,11 @@ is nothing to select. Standard execution is tried first to find the largest
 passing context. When a hybrid profile is installed and the model is a
 compatible MoE with automatic placement, GPU + CPU expert sharing is then
 tried at that context. Unbound causal layouts may try progressively smaller
-expert banks; bound training plans retain their budget. If the GPU backend
+expert banks; bound training plans retain their budget. An allocation/headroom
+failure is preserved even when the backend later emits generic loader errors,
+so those trailing messages do not prevent the existing smaller-bank retries.
+Failed trials remain visible; context and KV precision are not silently reduced.
+If the GPU backend
 supports in-graph expert calls, that method is tried with the same bank and
 replaces the classic method only when it is at least 5% better. Profiles and training plans are
 not rewritten. Every passing trial also measures generation speed after a short
@@ -222,7 +226,21 @@ again by the backend. Desktop load and model/context size can still cause OOM.
 
 ### Automatic engine choice
 
-Engine methods are internal; users keep **Engine: Automatic**. Without
+Engine methods are internal; leave **Allow experimental Hybrid acceleration**
+checked for **Automatic** selection. Unchecking it selects **Standard only**
+for loading and Auto Tune; it does not merely enable manual settings. A
+Standard-only tuning run leaves that choice off and does not overwrite an
+existing Automatic winner. Existing saved Standard choices remain off until
+explicitly changed. Advanced performance retains an engine override for
+troubleshooting.
+
+Automatic manages context and run settings; displayed manual values are not
+sent, and switching to Automatic can change context. Its hint shows the
+installed Hybrid context default when available. Standard-only enables manual
+context/settings, with in-page edits preserved when toggling back for the same
+model. The checkbox does not itself load or unload anything.
+
+Without
 measurements, Automatic uses native fitting when the weights fit and GPU + CPU
 expert sharing (classic method) for larger compatible MoE models. After an Auto
 Tune run, Automatic reuses the measured winner (engine, method, context,

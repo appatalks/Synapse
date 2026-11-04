@@ -77,8 +77,8 @@ class LocalAppTests(unittest.TestCase):
         self.thread.join(timeout=3)
         self.temporary.cleanup()
 
-    def request(self, method, path, data=None, headers=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+    def request(self, method, path, data=None, headers=None, *, port=None):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port if port is None else port, timeout=5)
         try:
             supplied = {"Content-Type": "application/json"}
             supplied.update(headers or {})
@@ -121,6 +121,132 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["state"], "loading")
         return self.wait_state("ready")
 
+    def test_shutdown_stops_the_owned_backend_and_preserves_saved_settings(self):
+        self.load()
+        process = self.runtime.process
+        saved = self.runtime.status()["saved_model_settings"]
+        self.assertEqual(self.request("POST", "/api/v1/shutdown", {"force": True})[0], 400)
+        code, _, body = self.request("POST", "/api/v1/shutdown", {})
+        self.assertEqual(code, 202)
+        self.assertEqual(json.loads(body), {"app_name": "SYNAPSE", "state": "stopping"})
+        process.wait(timeout=5)
+        self.thread.join(timeout=3)
+        self.assertFalse(self.thread.is_alive())
+        self.assertTrue(self.runtime.closed)
+        self.assertTrue(self.server.stop_requested)
+        self.assertIsNone(self.runtime.process)
+        self.assertEqual(self.runtime.status()["saved_model_settings"], saved)
+
+    def test_shutdown_cancels_active_and_queued_chats(self):
+        self.load()
+        process = self.runtime.process
+        first = self.open_chat("wait", stream=True).getresponse()
+        self.assertEqual(first.status, 200)
+        queued = self.open_chat("continue")
+        self.wait_queued(1)
+        self.assertEqual(self.request("POST", "/api/v1/shutdown", {})[0], 202)
+        process.wait(timeout=5)
+        self.thread.join(timeout=3)
+        response = queued.getresponse()
+        self.assertEqual(response.status, 503)
+        self.assertIn(b"model changed", response.read())
+        first.close()
+        self.assertFalse(self.thread.is_alive())
+
+    def test_shutdown_cancels_auto_tune_without_restoring_a_model(self):
+        model = self.root / "tuning-shutdown.gguf"
+        write_metadata(model, {"general.architecture": "fixture", "fixture.context_length": 8192})
+        started = threading.Event()
+
+        def probe(runtime, context):
+            started.set()
+            self.server.tuner.cancelled.wait(3)
+            raise app._tuning.Cancelled("Shutdown requested.")
+
+        with mock.patch.object(self.server.tuner, "_probe", side_effect=probe):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(model), "confirm": True})[0], 202)
+            self.assertTrue(started.wait(3))
+            process = self.runtime.process
+            self.assertEqual(self.request("POST", "/api/v1/shutdown", {})[0], 202)
+            process.wait(timeout=5)
+            self.thread.join(timeout=3)
+            self.server.tuner.worker.join(timeout=3)
+        self.assertFalse(self.server.tuner.worker.is_alive())
+        self.assertIsNone(self.runtime.process)
+        self.assertTrue(self.runtime.closed)
+
+    def test_cli_stop_exits_the_app_with_a_loaded_model(self):
+        process = subprocess.Popen(
+            [sys.executable, str(APP_PATH), "--port", "0", "--no-browser", "--no-update-check",
+             "--llama-server", str(self.backend), "--execution-mode", "standard"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "XDG_CONFIG_HOME": str(self.root / "cli-config"), "HOME": str(self.root),
+                 "LOCALAPPDATA": str(self.root / "cli-config")})
+        try:
+            line = process.stdout.readline()
+            self.assertIn("http://127.0.0.1:", line)
+            port = urlsplit(line.split(" ", 1)[1].strip()).port
+            self.assertEqual(self.request("POST", "/api/v1/model/load",
+                                         {"model": str(self.model)}, port=port)[0], 202)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                status = json.loads(self.request("GET", "/api/v1/status", port=port)[2])
+                if status["state"] == "ready":
+                    break
+                time.sleep(0.03)
+            self.assertEqual(status["state"], "ready")
+            result = subprocess.run(
+                [sys.executable, str(APP_PATH), "--stop", "--port", str(port),
+                 "--hybrid-profile", str(self.root / "missing-profile.json")],
+                capture_output=True, text=True, timeout=40)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Stopped SYNAPSE", result.stdout)
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, stdout + stderr)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+
+    def test_cli_stop_reports_a_missing_server_and_rejects_port_zero(self):
+        with app.socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            port = reservation.getsockname()[1]
+        result = subprocess.run([sys.executable, str(APP_PATH), "--stop", "--port", str(port)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Cannot stop SYNAPSE", result.stderr)
+        result = subprocess.run([sys.executable, str(APP_PATH), "--stop", "--port", "0"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("listening port", result.stderr)
+
+    def test_cli_stop_refuses_another_service_without_posting_shutdown(self):
+        response = mock.Mock(status=200)
+        response.read.return_value = b'{"app_name": "another-app", "api_version": 1}'
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection), \
+                self.assertRaisesRegex(ValueError, "no shutdown was requested"):
+            app.stop_server(8080)
+        self.assertEqual(connection.request.call_count, 1)
+        self.assertEqual(connection.request.call_args.args[:2], ("GET", "/api/v1/status"))
+        connection.close.assert_called_once()
+
+    def test_cli_stop_does_not_report_success_for_an_unfinished_shutdown(self):
+        response = mock.Mock(status=200)
+        response.read.side_effect = [
+            b'{"app_name": "SYNAPSE", "api_version": 1}',
+            b'{"app_name": "SYNAPSE", "state": "stopping"}',
+        ]
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection), \
+                mock.patch.object(app.time, "monotonic", side_effect=[0, 31]), \
+                self.assertRaisesRegex(RuntimeError, "did not close its listener"):
+            app.stop_server(8080)
+
     def wait_tuning(self, wanted):
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -149,6 +275,43 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["state"], "stopped")
         for path in ("/../app.py", "/%2e%2e/app.py", "/api/v2/status"):
             self.assertEqual(self.request("GET", path)[0], 404)
+
+    def test_successful_poll_logs_use_debug_but_errors_and_actions_remain_visible(self):
+        self.load()
+        for path in ("/api/v1/status", "/api/v1/monitor?after=0", "/v1/models"):
+            with self.subTest(path=path), self.assertLogs("synapse", level="DEBUG") as logs:
+                self.assertEqual(self.request("GET", path)[0], 200)
+            requests = [record for record in logs.records if f"GET {path} HTTP" in record.getMessage()]
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].levelname, "DEBUG")
+        for method, path, data, headers, expected in (
+                ("GET", "/api/v1/status", None, {"Origin": "https://invalid.example"}, 403),
+                ("GET", "/api/v1/not-found", None, None, 404),
+                ("POST", "/api/v1/model/unload", {}, None, 200)):
+            with self.subTest(path=path, expected=expected), self.assertLogs("synapse", level="INFO") as logs:
+                self.assertEqual(self.request(method, path, data, headers)[0], expected)
+            self.assertTrue(any(f"{method} {path} HTTP" in record.getMessage() for record in logs.records))
+
+    def test_process_telemetry_is_sampled_once_per_second_without_slowing_lifecycle_checks(self):
+        clock, sampled = [0.0], []
+        process = mock.Mock()
+        process.poll.side_effect = lambda: None if clock[0] < 2.2 else 0
+        self.runtime.process, self.runtime.state = process, "ready"
+
+        def advance(seconds):
+            clock[0] = round(clock[0] + seconds, 2)
+
+        try:
+            with mock.patch.object(app.time, "monotonic", side_effect=lambda: clock[0]), \
+                    mock.patch.object(app.time, "sleep", side_effect=advance), \
+                    mock.patch.object(self.runtime, "_sample_resources", side_effect=lambda _: sampled.append(clock[0])), \
+                    self.assertLogs("synapse", level="ERROR"):
+                self.runtime._watch(process)
+            self.assertEqual(sampled, [0.0, 1.0, 2.0])
+            self.assertEqual(process.poll.call_count, 12)
+            self.assertEqual(self.runtime.state, "error")
+        finally:
+            self.runtime.process = None
 
     def test_loopback_startup_does_not_require_reverse_dns(self):
         runtime = app.Runtime(str(self.backend))
@@ -642,6 +805,21 @@ class LocalAppTests(unittest.TestCase):
                                "qwen2moe.expert_used_count": 3, "qwen2moe.context_length": 8192})
         return model
 
+    def test_auto_tune_retains_early_memory_failure_before_generic_loader_errors(self):
+        model = self.tuning_hybrid_model("tuning-cache-limit-tail")
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                    {"model": str(model), "confirm": True, "include_hybrid": True})
+        self.assertEqual(code, 202, body)
+        result = self.wait_tuning("completed")
+        trials = [trial for trial in result["trials"] if trial["settings"]["execution_mode"] == "hybrid"]
+        self.assertEqual([trial["settings"]["expert_cache_mib"] for trial in trials], [8192, 6144, 4096])
+        for trial in trials[:2]:
+            self.assertFalse(trial["capacity_passed"])
+            self.assertIn("out of memory", trial["error"])
+            self.assertIn("failed to create_context", trial["error"])
+        self.assertTrue(trials[2]["capacity_passed"])
+        self.assertEqual(self.runtime.status()["state"], "ready")
+
     def test_auto_tune_balanced_selects_hybrid_by_generation_speed(self):
         for stem, mode in (("tuning-hybrid-decode", "hybrid"), ("tuning-hybrid-slow-decode", "standard")):
             model = self.tuning_hybrid_model(stem)
@@ -681,6 +859,25 @@ class LocalAppTests(unittest.TestCase):
         status = self.load(model=str(model), execution_mode="standard")
         self.assertFalse(status["hybrid_active"])
         self.assertEqual(status["engine_source"], "manual")
+
+    def test_auto_tune_standard_only_keeps_hybrid_off_and_preserves_the_automatic_winner(self):
+        model = self.tuning_hybrid_model("tuning-hybrid-decode")
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True})[0], 202)
+        self.wait_tuning("completed")
+        previous = self.server.choices.lookup(model, "f16", self.server._machine())
+        self.assertIsNotNone(previous)
+        self.assertEqual(previous["settings"]["execution_mode"], "hybrid")
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True, "include_hybrid": False})[0], 202)
+        result = self.wait_tuning("completed")
+        self.assertTrue(result["trials"])
+        self.assertTrue(all(trial["settings"]["execution_mode"] == "standard" for trial in result["trials"]))
+        status = self.runtime.status()
+        self.assertEqual(status["execution_mode"], "standard")
+        self.assertFalse(status["hybrid_active"])
+        self.assertEqual(self.server.choices.lookup(model, "f16", self.server._machine()), previous)
+        self.assertEqual(status["saved_model_settings"]["execution_mode"], "standard")
 
     def test_auto_tune_measures_hosted_when_the_plugin_supports_it(self):
         self.plugin = self.root / "libggml-cuda.so"
@@ -2134,6 +2331,7 @@ class LocalAppTests(unittest.TestCase):
                         {"Sec-Fetch-Site": "cross-site"}):
             self.assertEqual(self.request("GET", "/api/v1/status", headers=headers)[0], 403)
             self.assertEqual(self.request("POST", "/api/v1/model/unload", {}, headers)[0], 403)
+            self.assertEqual(self.request("POST", "/api/v1/shutdown", {}, headers)[0], 403)
         self.assertEqual(self.request("GET", "/api/v1/status",
                                      headers={"Origin": f"http://127.0.0.1:{self.port}"})[0], 200)
 
