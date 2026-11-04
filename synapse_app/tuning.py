@@ -291,8 +291,13 @@ class AutoTuner:
                 raise Cancelled("The application is shutting down.")
             current = runtime.status()
             if current["state"] == "error":
-                details = [line for line in current["logs"] if any(term in line.lower()
-                           for term in ("failed", "out of memory", "error", "headroom"))][-3:]
+                failures = [line for line in current["logs"] if any(term in line.lower()
+                            for term in ("failed", "out of memory", "error", "headroom"))]
+                details = failures[-3:]
+                memory_failure = next((line for line in failures if any(term in line.lower()
+                                       for term in ("allocat", "out of memory", "headroom", "residency", "cache"))), None)
+                if memory_failure is not None and memory_failure not in details:
+                    details.insert(0, memory_failure)
                 raise TrialError((current["error"] or "The backend could not load the trial.") +
                                  (" " + " ".join(details) if details else ""))
             if current["state"] == "ready":

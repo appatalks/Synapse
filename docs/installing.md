@@ -126,7 +126,11 @@ is nothing to select. Standard execution is tried first to find the largest
 passing context. When a hybrid profile is installed and the model is a
 compatible MoE with automatic placement, GPU + CPU expert sharing is then
 tried at that context. Unbound causal layouts may try progressively smaller
-expert banks; bound training plans retain their budget. If the GPU backend
+expert banks; bound training plans retain their budget. An allocation/headroom
+failure is preserved even when the backend later emits generic loader errors,
+so those trailing messages do not prevent the existing smaller-bank retries.
+Failed trials remain visible; context and KV precision are not silently reduced.
+If the GPU backend
 supports in-graph expert calls, that method is tried with the same bank and
 replaces the classic method only when it is at least 5% better. Profiles and training plans are
 not rewritten. Every passing trial also measures generation speed after a short

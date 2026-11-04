@@ -805,6 +805,21 @@ class LocalAppTests(unittest.TestCase):
                                "qwen2moe.expert_used_count": 3, "qwen2moe.context_length": 8192})
         return model
 
+    def test_auto_tune_retains_early_memory_failure_before_generic_loader_errors(self):
+        model = self.tuning_hybrid_model("tuning-cache-limit-tail")
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                    {"model": str(model), "confirm": True, "include_hybrid": True})
+        self.assertEqual(code, 202, body)
+        result = self.wait_tuning("completed")
+        trials = [trial for trial in result["trials"] if trial["settings"]["execution_mode"] == "hybrid"]
+        self.assertEqual([trial["settings"]["expert_cache_mib"] for trial in trials], [8192, 6144, 4096])
+        for trial in trials[:2]:
+            self.assertFalse(trial["capacity_passed"])
+            self.assertIn("out of memory", trial["error"])
+            self.assertIn("failed to create_context", trial["error"])
+        self.assertTrue(trials[2]["capacity_passed"])
+        self.assertEqual(self.runtime.status()["state"], "ready")
+
     def test_auto_tune_balanced_selects_hybrid_by_generation_speed(self):
         for stem, mode in (("tuning-hybrid-decode", "hybrid"), ("tuning-hybrid-slow-decode", "standard")):
             model = self.tuning_hybrid_model(stem)
