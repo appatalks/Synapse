@@ -4,7 +4,6 @@ import http.client
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
@@ -56,10 +55,10 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(response.status, 200)
                     self.assertIn(content, response.read())
                     connection.close()
-            if sys.platform == "win32":
-                process.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                process.terminate()
+            result = subprocess.run([sys.executable, str(ARCHIVE), "--stop", "--port", str(port)],
+                                    capture_output=True, text=True, timeout=40)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Stopped SYNAPSE", result.stdout)
             stdout, stderr = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, stdout + stderr)
         finally:

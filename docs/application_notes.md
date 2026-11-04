@@ -124,6 +124,13 @@ benchmarks of your exact target, settings and hardware demonstrate a benefit.
 
 ## Updates without reinstalling
 
+To stop the app and its owned model backend cleanly, run `synapse --stop`
+(`python SYNAPSE.pyz --stop` for the standalone app). Add `--port PORT` if
+it is not listening on 8080. Active chat/tuning work is cancelled; saved
+settings are retained. The command reports an error if no supported app is
+listening or shutdown does not complete. Avoid force-killing the app, which
+can leave its backend running.
+
 
 Click the **version in the sidebar**. It lights up when a newer compatible
 public release is found. Managed installs can download a verified update and
