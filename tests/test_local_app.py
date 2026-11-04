@@ -682,6 +682,25 @@ class LocalAppTests(unittest.TestCase):
         self.assertFalse(status["hybrid_active"])
         self.assertEqual(status["engine_source"], "manual")
 
+    def test_auto_tune_standard_only_keeps_hybrid_off_and_preserves_the_automatic_winner(self):
+        model = self.tuning_hybrid_model("tuning-hybrid-decode")
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True})[0], 202)
+        self.wait_tuning("completed")
+        previous = self.server.choices.lookup(model, "f16", self.server._machine())
+        self.assertIsNotNone(previous)
+        self.assertEqual(previous["settings"]["execution_mode"], "hybrid")
+        self.assertEqual(self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True, "include_hybrid": False})[0], 202)
+        result = self.wait_tuning("completed")
+        self.assertTrue(result["trials"])
+        self.assertTrue(all(trial["settings"]["execution_mode"] == "standard" for trial in result["trials"]))
+        status = self.runtime.status()
+        self.assertEqual(status["execution_mode"], "standard")
+        self.assertFalse(status["hybrid_active"])
+        self.assertEqual(self.server.choices.lookup(model, "f16", self.server._machine()), previous)
+        self.assertEqual(status["saved_model_settings"]["execution_mode"], "standard")
+
     def test_auto_tune_measures_hosted_when_the_plugin_supports_it(self):
         self.plugin = self.root / "libggml-cuda.so"
         self.plugin.write_bytes(b"patched plugin GGML_CUDA_HOST_MAILBOX")

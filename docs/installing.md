@@ -222,7 +222,21 @@ again by the backend. Desktop load and model/context size can still cause OOM.
 
 ### Automatic engine choice
 
-Engine methods are internal; users keep **Engine: Automatic**. Without
+Engine methods are internal; leave **Allow experimental Hybrid acceleration**
+checked for **Automatic** selection. Unchecking it selects **Standard only**
+for loading and Auto Tune; it does not merely enable manual settings. A
+Standard-only tuning run leaves that choice off and does not overwrite an
+existing Automatic winner. Existing saved Standard choices remain off until
+explicitly changed. Advanced performance retains an engine override for
+troubleshooting.
+
+Automatic manages context and run settings; displayed manual values are not
+sent, and switching to Automatic can change context. Its hint shows the
+installed Hybrid context default when available. Standard-only enables manual
+context/settings, with in-page edits preserved when toggling back for the same
+model. The checkbox does not itself load or unload anything.
+
+Without
 measurements, Automatic uses native fitting when the weights fit and GPU + CPU
 expert sharing (classic method) for larger compatible MoE models. After an Auto
 Tune run, Automatic reuses the measured winner (engine, method, context,

@@ -82,11 +82,10 @@
               <p id="browser-status" role="status"></p><div id="browser-error" class="callout" role="alert" hidden></div>
               <ul id="browser-files" aria-label="Folders and GGUF models"></ul>
             </section>
+            <label><input id="allow-hybrid" type="checkbox" checked disabled aria-describedby="engine-settings-note"> Allow experimental Hybrid acceleration</label>
+            <p id="engine-settings-note" class="hint" role="status" aria-live="polite">Checked allows Automatic to choose GPU + CPU expert sharing when compatible. Unchecked uses Standard only. Automatic manages context and run settings; Hybrid is not always faster.</p>
             <details>
               <summary>Run settings</summary>
-              <label for="execution-mode">Engine</label>
-              <select id="execution-mode"><option value="auto">Automatic (recommended)</option><option value="standard">Standard only (manual settings)</option><option value="hybrid">GPU + CPU expert sharing only (troubleshooting)</option></select>
-              <p id="profile-note">Automatic uses an installed experimental profile only when eligible. The pre-check explains selection; backend operations and memory fit still require load-time verification.</p>
               <label for="placement">Execution</label>
               <select id="placement"><option value="auto">Automatic CPU / GPU placement</option><option value="cpu">CPU only</option></select>
               <label for="context">Context tokens</label>
@@ -94,6 +93,9 @@
               <p id="placement-note">Automatic uses upstream fitting with a VRAM margin. Larger contexts need more memory; 256K requires model and backend support.</p>
               <details>
                 <summary>Advanced performance (experimental)</summary>
+                <label for="execution-mode">Engine override (troubleshooting)</label>
+                <select id="execution-mode"><option value="auto">Automatic (recommended)</option><option value="standard">Standard only (Hybrid off)</option><option value="hybrid">Require Hybrid (no Standard fallback)</option></select>
+                <p id="profile-note">Automatic uses measured Auto Tune choices or installed defaults. Eligibility, backend operations and memory fit still require verification.</p>
                 <label for="kv-cache-type">Attention KV cache preset</label>
                 <select id="kv-cache-type"><option value="f16">Backend default (FP16)</option><option value="q8_0">Q8 K/V + Flash Attention (experimental)</option></select>
                 <p>Q8 reduces attention-cache memory, not model weights or all recurrent state. It changes cache precision and may affect answers. Context length stays unchanged. Official llama.cpp only.</p>
@@ -135,7 +137,7 @@
           <p>Measure this model on your hardware, then recommend model and app settings. Trials use synthetic local prompts; nothing is uploaded.</p>
           <label for="tuning-goal">Tuning goal</label>
           <select id="tuning-goal"><option value="balanced">Balanced daily use (up to 32K, fastest generation)</option><option value="maximum">Maximum context (up to the model limit or 256K, fastest long prompts)</option></select>
-          <p class="hint">Every engine this installation supports for the model is measured, and Automatic then uses the winner on this machine. Balanced tests input capacity and generation speed, not every thread/cache combination. Maximum Context can take an hour or more.</p>
+          <p class="hint">With Hybrid allowed, every supported engine is measured and Automatic remembers the winner on this machine. With Hybrid off, only Standard is tested and applied. Balanced tests input capacity and generation speed, not every thread/cache combination. Maximum Context can take an hour or more.</p>
           <label><input id="tuning-consent" type="checkbox"> Allow unloading/reloading this model and running benchmarks. Other apps must wait. Cancel restores the previous model when possible.</label>
           <div class="actions"><button id="start-tuning" type="button" disabled>Start Auto Tune</button><button id="cancel-tuning" type="button" class="secondary" disabled>Cancel &amp; restore</button></div>
           <p id="tuning-status" role="status">No tuning run yet.</p>

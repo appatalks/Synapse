@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindReasoningEffort, draftControls, elapsed, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls } from "./model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, tuningPayload } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -17,6 +17,10 @@ let hybridVariant = "auto";
 let browserLocation = null;
 let browserBusy = false;
 let appliedTuningAt = null;
+let standardSettings = null;
+const manualFields = ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll",
+  "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target"];
+const syncEngineSelection = bindEngineSelection(el("allow-hybrid"), el("execution-mode"), engineChanged);
 const modelPrecheck = new ModelPrecheck({
   input: el("model"), button: el("precheck-model"), output: el("model-precheck"), request, changed: controls,
 });
@@ -67,7 +71,10 @@ function controls() {
     el(id).disabled = active || actionPending;
   }
   el("execution-mode").disabled = active || actionPending;
+  el("allow-hybrid").disabled = !status || active || actionPending;
+  syncEngineSelection();
   const selectedMode = el("execution-mode").value;
+  el("engine-settings-note").textContent = engineSettingsText(status, selectedMode, el("context").value);
   if (selectedMode === "auto") {
     for (const id of ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll", "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target", "draft-model", "draft-tokens"]) {
       el(id).disabled = true;
@@ -111,7 +118,7 @@ function renderStatus() {
   el("profile-note").textContent = status.hybrid_generic
     ? "Automatic detects routed-MoE dimensions, validates plan bindings, and prefers native fitting for small weight files. Unbound layouts use a causal plan with their configured budget and transfer policy. Backend operations and coverage must verify before Ready; speedups are not universal."
     : status.hybrid_available ? "This installation uses a model-bound or explicitly supplied plan. A version-2 installation enables generic automatic fallback; other models use native execution."
-    : "No hybrid installation profile is configured. Automatic uses the standard backend. Select Standard for manual settings.";
+    : "No hybrid installation profile is configured. Automatic uses the standard backend. Uncheck Allow experimental Hybrid for Standard-only loading and editable context.";
   el("execution-warning").hidden = !status.execution_warning;
   el("execution-warning").textContent = status.execution_warning || "";
   el("execution-footer").textContent = hybrid
@@ -262,11 +269,11 @@ el("start-tuning").addEventListener("click", async () => {
   notice();
   controls();
   try {
-    status = await request("/api/v1/tuning/start", {
+    status = await request("/api/v1/tuning/start", tuningPayload({
       model: el("model").value, goal: el("tuning-goal").value, placement: el("placement").value,
       kv_cache_type: el("kv-cache-type").value,
       confirm: el("tuning-consent").checked,
-    });
+    }, el("execution-mode").value));
     renderStatus();
   } catch (error) {
     notice(error.message);
@@ -376,13 +383,22 @@ el("browser-path").addEventListener("keydown", (event) => {
     browseModels(el("browser-path").value.trim());
   }
 });
-el("execution-mode").addEventListener("change", () => {
+function engineChanged(previousMode) {
+  if (previousMode === "standard") {
+    standardSettings = { model: el("model").value,
+      fields: Object.fromEntries(manualFields.map((id) => [id, el(id).value])) };
+  }
   hybridVariant = "auto";
+  if (el("draft-type").value !== "none") {
+    notice("Changing the engine turns speculative decoding off. Select a compatible draft again before loading.");
+  }
   el("draft-type").value = "none";
   el("draft-model").value = "";
-  if (el("execution-mode").value !== "auto") {
+  if (el("execution-mode").value === "standard" && standardSettings?.model === el("model").value) {
+    for (const [id, value] of Object.entries(standardSettings.fields)) el(id).value = value;
+  } else if (el("execution-mode").value !== "auto") {
     const hybrid = el("execution-mode").value === "hybrid";
-    el("context").value = hybrid ? String(status.hybrid_context) : "4096";
+    if (hybrid) el("context").value = String(status.hybrid_context);
     el("placement").value = "auto";
     el("cpu-threads").value = Math.min(8, status.logical_cpus);
     el("batch-threads").value = Math.min(16, status.logical_cpus);
@@ -394,7 +410,7 @@ el("execution-mode").addEventListener("change", () => {
     el("draft-model").value = "";
   }
   controls();
-});
+}
 
 el("draft-type").addEventListener("change", () => {
   const type = el("draft-type").value;

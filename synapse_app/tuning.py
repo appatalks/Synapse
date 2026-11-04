@@ -259,7 +259,8 @@ class AutoTuner:
                           "quality or sustained-speed qualification."),
             }
             self.worker = threading.Thread(
-                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal),
+                target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal,
+                                       data.get("include_hybrid") is False),
                 daemon=True)
             self.worker.start()
         return self.snapshot()
@@ -556,7 +557,8 @@ class AutoTuner:
                 raise TrialError("The applied engine differs from the measured choice.")
 
     def _run(self, runtime, model: str, contexts: list[int], placement: str, hybrid: bool,
-             metadata: dict, previous: dict | None, cache: str, goal: str = "balanced") -> None:
+             metadata: dict, previous: dict | None, cache: str, goal: str = "balanced",
+             standard_only: bool = False) -> None:
         original_budget = runtime.hybrid_context
         selected = None
         remembered = False
@@ -604,7 +606,8 @@ class AutoTuner:
                         break
                 if best_hybrid is not None and self._better(best_hybrid, selected, goal):
                     selected = best_hybrid
-            remembered = self._remember(model, selected, standard, goal)
+            if not standard_only:
+                remembered = self._remember(model, selected, standard, goal)
         except Cancelled as exc:
             final_state, error = "cancelled", str(exc)
             selected = None
