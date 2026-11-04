@@ -276,6 +276,43 @@ class LocalAppTests(unittest.TestCase):
         for path in ("/../app.py", "/%2e%2e/app.py", "/api/v2/status"):
             self.assertEqual(self.request("GET", path)[0], 404)
 
+    def test_successful_poll_logs_use_debug_but_errors_and_actions_remain_visible(self):
+        self.load()
+        for path in ("/api/v1/status", "/api/v1/monitor?after=0", "/v1/models"):
+            with self.subTest(path=path), self.assertLogs("synapse", level="DEBUG") as logs:
+                self.assertEqual(self.request("GET", path)[0], 200)
+            requests = [record for record in logs.records if f"GET {path} HTTP" in record.getMessage()]
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].levelname, "DEBUG")
+        for method, path, data, headers, expected in (
+                ("GET", "/api/v1/status", None, {"Origin": "https://invalid.example"}, 403),
+                ("GET", "/api/v1/not-found", None, None, 404),
+                ("POST", "/api/v1/model/unload", {}, None, 200)):
+            with self.subTest(path=path, expected=expected), self.assertLogs("synapse", level="INFO") as logs:
+                self.assertEqual(self.request(method, path, data, headers)[0], expected)
+            self.assertTrue(any(f"{method} {path} HTTP" in record.getMessage() for record in logs.records))
+
+    def test_process_telemetry_is_sampled_once_per_second_without_slowing_lifecycle_checks(self):
+        clock, sampled = [0.0], []
+        process = mock.Mock()
+        process.poll.side_effect = lambda: None if clock[0] < 2.2 else 0
+        self.runtime.process, self.runtime.state = process, "ready"
+
+        def advance(seconds):
+            clock[0] = round(clock[0] + seconds, 2)
+
+        try:
+            with mock.patch.object(app.time, "monotonic", side_effect=lambda: clock[0]), \
+                    mock.patch.object(app.time, "sleep", side_effect=advance), \
+                    mock.patch.object(self.runtime, "_sample_resources", side_effect=lambda _: sampled.append(clock[0])), \
+                    self.assertLogs("synapse", level="ERROR"):
+                self.runtime._watch(process)
+            self.assertEqual(sampled, [0.0, 1.0, 2.0])
+            self.assertEqual(process.poll.call_count, 12)
+            self.assertEqual(self.runtime.state, "error")
+        finally:
+            self.runtime.process = None
+
     def test_loopback_startup_does_not_require_reverse_dns(self):
         runtime = app.Runtime(str(self.backend))
         with mock.patch.object(app.socket, "getfqdn", side_effect=AssertionError("Unexpected DNS lookup")):

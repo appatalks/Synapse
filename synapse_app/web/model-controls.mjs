@@ -65,13 +65,18 @@ export function bindEngineSelection(toggle, select, changed) {
 }
 
 export function engineSettingsText(status, mode, context) {
+  const running = status?.model && status.state === "ready"
+    ? `Running now: ${status.hybrid_active ? "Hybrid" : "Standard (Hybrid is not active)"} at ${status.context.toLocaleString()} context tokens. ` : "";
+  const maximum = status?.engine_source === "measured" && status.tuning?.goal === "maximum" &&
+    status.tuning.model === status.model && status.tuning.recommendation?.settings.context === status.context
+    ? "Maximum Context tuning prioritizes capacity and long-prompt time, not fastest generation. " : "";
   const reload = status?.model && ["loading", "ready", "stopping"].includes(status.state)
     ? " Unload the active model before changing this setting; changes apply on the next load." : "";
   if (mode === "standard") {
-    return `Hybrid is off. Loading and Auto Tune use Standard only. Context and run settings are editable below; Standard is an engine choice, not a general manual-settings switch.${reload}`;
+    return `${running}${maximum}Hybrid is off. Loading and Auto Tune use Standard only. Context and run settings are editable below; Standard is an engine choice, not a general manual-settings switch.${reload}`;
   }
   if (mode === "hybrid") {
-    return `Advanced override: Hybrid is required, not selected automatically. Context follows the installed profile; a failed Hybrid load is reported instead of retrying as Standard.${reload}`;
+    return `${running}${maximum}Advanced override: Hybrid is required, not selected automatically. Context follows the installed profile; a failed Hybrid load is reported instead of retrying as Standard.${reload}`;
   }
   const policy = status?.hybrid_available
     ? "Hybrid is allowed, not forced. Automatic reuses Auto Tune's measured winner for this model and backend; otherwise it uses installation defaults. Hybrid is not always faster."
@@ -82,7 +87,13 @@ export function engineSettingsText(status, mode, context) {
   const manual = Number(context);
   const warning = Number.isInteger(manual) && manual >= 512
     ? ` The displayed ${manual.toLocaleString()}-token context is not requested manually in Automatic; switching modes may change it.` : "";
-  return `${policy} Automatic manages context and run settings.${profile}${warning} Use Auto Tune to measure supported contexts, or uncheck Hybrid for editable Standard-only settings.${reload}`;
+  return `${running}${maximum}${policy} Automatic manages context and run settings.${profile}${warning} Use Auto Tune to measure supported contexts, or uncheck Hybrid for editable Standard-only settings.${reload}`;
+}
+
+export function statusPollDelay(status, hidden) {
+  if (hidden) return 30000;
+  return status?.tuning?.active || status?.chat_busy || status?.chat_queued ||
+    ["loading", "stopping"].includes(status?.state) ? 1500 : 5000;
 }
 
 export function restoreModelControls(status, initialized, control) {

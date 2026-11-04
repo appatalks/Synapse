@@ -1288,6 +1288,7 @@ class Runtime:
 
     def _watch(self, process: subprocess.Popen[str]) -> None:
         deadline = time.monotonic() + self.load_timeout
+        next_resources = 0.0
         while True:
             with self.lock:
                 if self.process is not process or self.state in ("stopping", "error"):
@@ -1301,7 +1302,10 @@ class Runtime:
                 loading = self.state == "loading"
                 port, key = self.port, self.key
                 verify_speculation = self.draft_model is not None and self.backend_kind == "llama.cpp"
-            self._sample_resources(process)
+            now = time.monotonic()
+            if now >= next_resources:
+                self._sample_resources(process)
+                next_resources = now + 1
             if loading:
                 connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
                 try:
@@ -1579,6 +1583,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         LOG.info("%s %s", self.client_address[0], format % args)
+
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        if self.command == "GET" and str(code) == "200" and urlsplit(self.path).path in (
+                "/api/v1/status", "/api/v1/monitor", "/v1/models"):
+            LOG.debug('%s "%s" %s %s', self.client_address[0], self.requestline, code, size)
+        else:
+            super().log_request(code, size)
 
     def _guard(self) -> None:
         port = self.server.server_address[1]

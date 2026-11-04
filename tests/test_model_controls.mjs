@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, tuningPayload } from "../synapse_app/web/model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
@@ -49,8 +49,34 @@ test("engine guidance distinguishes measured defaults, manual context and unavai
   assert.match(engineSettingsText({}, "standard", "142128"), /Auto Tune use Standard only/);
   assert.match(engineSettingsText({}, "hybrid", "16384"), /failed Hybrid load is reported instead of retrying/);
   for (const mode of ["auto", "standard", "hybrid"]) {
-    assert.match(engineSettingsText({ model: "/models/target.gguf", state: "ready" }, mode, "16384"),
+    assert.match(engineSettingsText({ model: "/models/target.gguf", state: "ready", context: 16384 }, mode, "16384"),
       /Unload the active model.*next load/);
+  }
+});
+
+test("Hybrid permission cannot be mistaken for the actual active engine or tuning objective", () => {
+  const status = { model: "/models/target.gguf", state: "ready", context: 262144,
+    hybrid_active: false, hybrid_available: true, engine_source: "measured",
+    tuning: { model: "/models/target.gguf", goal: "maximum", recommendation: { settings: { context: 262144 } } } };
+  const text = engineSettingsText(status, "auto", "262144");
+  assert.match(text, /^Running now: Standard \(Hybrid is not active\) at 262.?144 context tokens/);
+  assert.match(text, /Maximum Context tuning prioritizes capacity and long-prompt time, not fastest generation/);
+  assert.match(engineSettingsText({ ...status, hybrid_active: true }, "auto", "262144"), /^Running now: Hybrid/);
+  assert.doesNotMatch(engineSettingsText({ ...status, state: "loading" }, "auto", "262144"), /Running now/);
+  for (const changes of [{ engine_source: "manual" }, { context: 16384 }, { model: "/models/another.gguf" }]) {
+    assert.doesNotMatch(engineSettingsText({ ...status, ...changes }, "auto", "262144"), /Maximum Context tuning prioritizes/);
+  }
+});
+
+test("status polling backs off while idle or hidden and stays responsive during work", () => {
+  for (const status of [null, { state: "stopped" }, { state: "ready", chat_busy: false }, { state: "error" }]) {
+    assert.equal(statusPollDelay(status, false), 5000);
+    assert.equal(statusPollDelay(status, true), 30000);
+  }
+  for (const status of [{ state: "loading" }, { state: "stopping" }, { state: "ready", chat_busy: true },
+    { state: "ready", chat_queued: 1 }, { state: "stopped", tuning: { active: true } }]) {
+    assert.equal(statusPollDelay(status, false), 1500);
+    assert.equal(statusPollDelay(status, true), 30000);
   }
 });
 

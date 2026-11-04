@@ -56,7 +56,9 @@ Model Controls. Checked keeps **Automatic**: it permits GPU + CPU expert
 sharing when compatible and reuses a matching Auto Tune winner, rather than
 assuming Hybrid is always faster. Unchecked selects **Standard only** for
 loading and Auto Tune. Advanced performance retains explicit engine overrides
-for troubleshooting.
+for troubleshooting. The explanation identifies the currently running engine
+and actual context independently of the checkbox; checked can still mean
+Standard is active.
 
 Automatic manages context and run settings from the installation policy or
 matching measured choice; manually displayed values are not submitted.
@@ -79,6 +81,11 @@ the faster long-prompt run; Automatic then reuses that choice on this machine
 general answer-quality check or an exhaustive speed search. With Hybrid off,
 only Standard is tested and applied; that restricted run does not replace an
 existing Automatic engine winner or turn Hybrid back on.
+
+Maximum Context prioritizes verified capacity and long-prompt request time,
+not fastest generation. Its saved winner may use a much larger context and
+decode more slowly than a previous manual run. The checkbox does not establish
+a matched engine benchmark or preserve a previous manual context.
 
 [Tuning scope, saved results and client settings](installing.md#auto-tune) ·
 [Optional Q8 attention cache](installing.md#optional-q8-attention-cache).

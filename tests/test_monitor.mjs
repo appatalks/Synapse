@@ -174,3 +174,122 @@ test("Windows RAM shows used percentage while preserving the OS-unavailable defi
   assert.equal(ram.scale.lastChild.textContent, "25.0% used");
   assert.match(ram.description.textContent, /OS available 96.0 GiB/);
 });
+
+async function pollingFixture(run) {
+  const previous = { document: globalThis.document, window: globalThis.window };
+  const timers = new Map(), calls = [];
+  let serial = 0, now = 0;
+  globalThis.document = { hidden: false };
+  globalThis.window = {
+    location: { hash: "#chat" },
+    clearTimeout(id) { timers.delete(id); },
+    setTimeout(callback, delay) {
+      timers.set(++serial, { callback, due: now + delay });
+      return serial;
+    },
+  };
+  const monitor = Object.assign(Object.create(MonitorView.prototype), {
+    polling: false, timer: null, paused: false, cursor: 0, history: [],
+    status: {}, error: {}, render() {},
+    request: async (path) => { calls.push({ path, time: now }); return { samples: [] }; },
+  });
+  async function advance(milliseconds) {
+    const end = now + milliseconds;
+    while (true) {
+      const next = [...timers.entries()].sort((a, b) => a[1].due - b[1].due)[0];
+      if (!next || next[1].due > end) break;
+      timers.delete(next[0]);
+      now = next[1].due;
+      await next[1].callback();
+    }
+    now = end;
+  }
+  try {
+    await run({ monitor, calls, timers, advance, document: globalThis.document, window: globalThis.window });
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[name];
+      else globalThis[name] = value;
+    }
+  }
+}
+
+test("monitor makes no requests in Chat, Connect, hidden tabs or paused charts", async () => {
+  await pollingFixture(async ({ monitor, calls, timers, document, window }) => {
+    for (const hash of ["#chat", "#connect", ""]) {
+      window.location.hash = hash;
+      await monitor.poll();
+    }
+    window.location.hash = "#monitor";
+    document.hidden = true;
+    await monitor.poll();
+    document.hidden = false;
+    monitor.paused = true;
+    await monitor.poll();
+    assert.equal(calls.length, 0);
+    assert.equal(timers.size, 0);
+  });
+});
+
+test("visible Monitor fetches exactly 30 batches per minute rather than 60", async () => {
+  await pollingFixture(async ({ monitor, calls, timers, advance, window }) => {
+    window.location.hash = "#monitor";
+    await monitor.poll();
+    await advance(59999);
+    assert.equal(calls.length, 30);
+    assert.deepEqual(calls.slice(0, 3).map((call) => call.time), [0, 2000, 4000]);
+    assert.equal(timers.size, 1);
+    assert.equal(monitor.polling, false);
+  });
+});
+
+test("leaving Monitor cancels its timer and returning fetches from the retained cursor", async () => {
+  await pollingFixture(async ({ monitor, calls, timers, advance, document, window }) => {
+    window.location.hash = "#monitor";
+    await monitor.poll();
+    monitor.cursor = 23;
+    document.hidden = true;
+    await monitor.poll();
+    await advance(60000);
+    assert.equal(calls.length, 1);
+    assert.equal(timers.size, 0);
+    document.hidden = false;
+    await monitor.poll();
+    assert.equal(calls[1].path, "/api/v1/monitor?after=23");
+    window.location.hash = "#chat";
+    await monitor.poll();
+    await advance(60000);
+    assert.equal(calls.length, 2);
+    assert.equal(timers.size, 0);
+  });
+});
+
+test("navigation during an in-flight monitor request cannot create overlapping polls", async () => {
+  await pollingFixture(async ({ monitor, timers, document, window }) => {
+    let resolve, requests = 0;
+    monitor.request = () => { requests += 1; return new Promise((done) => { resolve = done; }); };
+    window.location.hash = "#monitor";
+    const pending = monitor.poll();
+    await monitor.poll();
+    assert.equal(requests, 1);
+    document.hidden = true;
+    resolve({ samples: [] });
+    await pending;
+    assert.equal(timers.size, 0);
+    assert.equal(monitor.polling, false);
+  });
+});
+
+test("monitor failures stay explicit and are retried only while the view is visible", async () => {
+  await pollingFixture(async ({ monitor, timers, window }) => {
+    window.location.hash = "#monitor";
+    monitor.request = async () => { throw new Error("backend unavailable"); };
+    await monitor.poll();
+    assert.equal(monitor.error.hidden, false);
+    assert.match(monitor.error.textContent, /backend unavailable/);
+    assert.equal(timers.size, 1);
+    window.location.hash = "#chat";
+    await monitor.poll();
+    assert.equal(timers.size, 0);
+  });
+});

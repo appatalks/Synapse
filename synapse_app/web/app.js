@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, tuningPayload } from "./model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -17,6 +17,8 @@ let hybridVariant = "auto";
 let browserLocation = null;
 let browserBusy = false;
 let appliedTuningAt = null;
+let statusTimer = null;
+let statusPolling = false;
 let standardSettings = null;
 const manualFields = ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll",
   "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target"];
@@ -424,6 +426,9 @@ el("draft-type").addEventListener("change", () => {
 });
 
 async function poll() {
+  window.clearTimeout(statusTimer);
+  if (statusPolling) return;
+  statusPolling = true;
   try {
     const next = await request("/api/v1/status");
     const recovered = !status;
@@ -438,9 +443,18 @@ async function poll() {
     notice(`Cannot reach the local service: ${error.message}`);
     controls();
   } finally {
-    window.setTimeout(poll, 1500);
+    statusPolling = false;
+    statusTimer = window.setTimeout(poll, statusPollDelay(status, document.hidden));
   }
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) poll();
+  else {
+    window.clearTimeout(statusTimer);
+    if (!statusPolling) statusTimer = window.setTimeout(poll, statusPollDelay(status, true));
+  }
+});
 
 el("endpoint").value = `${window.location.origin}/v1`;
 el("connect-example").textContent = `import json
