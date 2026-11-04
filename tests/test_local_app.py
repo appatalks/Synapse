@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import struct
 import sys
@@ -2288,6 +2289,40 @@ class LocalAppTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertFalse(self.runtime.chat_lock.locked())
         self.wait_queued(0)
+
+    def test_client_reset_during_prefill_shuts_down_the_upstream_socket(self):
+        self.load()
+        backend_waiting, cancelled = threading.Event(), threading.Event()
+        client = mock.Mock()
+        upstream = mock.Mock()
+        upstream.shutdown.side_effect = lambda _: cancelled.set()
+        connection = mock.Mock(sock=upstream)
+
+        def reset(*args):
+            self.assertTrue(backend_waiting.wait(2))
+            raise ConnectionResetError("simulated Windows client reset")
+
+        def getresponse():
+            backend_waiting.set()
+            self.assertTrue(cancelled.wait(2), "Client reset did not interrupt the upstream response wait.")
+            raise http.client.RemoteDisconnected("cancelled")
+
+        client.recv.side_effect = reset
+        connection.getresponse.side_effect = getresponse
+        handler = app.Handler.__new__(app.Handler)
+        handler.server, handler.connection = self.server, client
+        original_select = app.select.select
+
+        def readable(readers, writers, errors, timeout):
+            return (readers, [], []) if readers == [client] else original_select(readers, writers, errors, timeout)
+
+        with mock.patch.object(app.select, "select", side_effect=readable), \
+                mock.patch.object(self.runtime, "connection", return_value=(connection, "fixture-key")):
+            handler._proxy("POST", "/v1/chat/completions",
+                           {"messages": [{"role": "user", "content": "prefill-wait"}]})
+        upstream.shutdown.assert_called_once_with(app.socket.SHUT_RDWR)
+        connection.close.assert_called_once()
+        self.assertFalse(self.runtime.chat_lock.locked())
 
     def test_disconnect_cancels_stream(self):
         self.load()

@@ -1825,15 +1825,19 @@ class Handler(BaseHTTPRequestHandler):
             while not finished.wait(0.1):
                 try:
                     readable, _, _ = select.select([self.connection], [], [], 0)
-                    if readable and not self.connection.recv(1, socket.MSG_PEEK):
-                        disconnected.set()
-                        if upstream_socket is not None:
-                            upstream_socket.shutdown(socket.SHUT_RDWR)
+                    if not readable or self.connection.recv(1, socket.MSG_PEEK):
+                        continue
+                except OSError as exc:
+                    if finished.is_set():
                         return
-                except OSError:
-                    if not finished.is_set():
-                        disconnected.set()
-                    return
+                    LOG.debug("Local client connection lost: %s", exc)
+                disconnected.set()
+                if upstream_socket is not None:
+                    try:
+                        upstream_socket.shutdown(socket.SHUT_RDWR)
+                    except OSError as exc:
+                        LOG.debug("Upstream connection already closed during client cancellation: %s", exc)
+                return
 
         def observe(payload: bytes) -> None:
             if serial is None or not payload or payload.strip() == b"[DONE]":
