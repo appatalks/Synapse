@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 import zipfile
 from unittest import mock
@@ -2283,11 +2284,17 @@ class LocalAppTests(unittest.TestCase):
                 self.fail("Backend did not begin processing the prompt.")
             time.sleep(0.01)
         self.assertTrue(self.runtime.chat_lock.locked())
-        client.close()
-        deadline = time.monotonic() + 1
-        while self.runtime.chat_lock.locked() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        self.assertFalse(self.runtime.chat_lock.locked())
+        messages = []
+        with mock.patch.object(app.LOG, "info", side_effect=lambda text, *args: messages.append(text % args)):
+            client.close()
+            deadline = time.monotonic() + 1
+            while self.runtime.chat_lock.locked() and time.monotonic() < deadline:
+                time.sleep(0.01)
+        stacks = [[f"{entry.name}:{entry.lineno}" for entry in traceback.extract_stack(frame)
+                   if entry.name in ("_proxy", "watch_client")]
+                  for frame in sys._current_frames().values()]
+        self.assertFalse(self.runtime.chat_lock.locked(),
+                         f"Cancellation messages: {messages[-6:]}; proxy/watcher stacks: {[s for s in stacks if s]}")
         self.wait_queued(0)
 
     def test_client_reset_during_prefill_shuts_down_the_upstream_socket(self):
