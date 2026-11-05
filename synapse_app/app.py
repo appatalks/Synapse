@@ -1965,8 +1965,8 @@ def stop_server(port: int) -> None:
         except ConnectionRefusedError:
             return
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, TimeoutError,
-                http.client.RemoteDisconnected, http.client.IncompleteRead) as exc:
-            LOG.debug("Local connection closed while waiting for shutdown: %s", exc)
+                http.client.BadStatusLine, http.client.IncompleteRead, json.JSONDecodeError) as exc:
+            LOG.debug("Local response interrupted while waiting for shutdown: %s", exc)
         time.sleep(min(0.1, max(0, deadline - time.monotonic())))
     raise RuntimeError("The app acknowledged shutdown but did not close its listener within 30 seconds.")
 

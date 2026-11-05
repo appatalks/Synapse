@@ -251,20 +251,34 @@ class LocalAppTests(unittest.TestCase):
             app.stop_server(8080)
 
     def test_cli_stop_handles_shutdown_socket_races_with_time_for_connection_refusal(self):
+        for interrupted in (BrokenPipeError("app exiting"), b"", b"{", http.client.BadStatusLine("HTTP/")):
+            with self.subTest(interrupted=interrupted):
+                response = mock.Mock(status=200)
+                response.read.side_effect = [
+                    b'{"app_name": "SYNAPSE", "api_version": 1}',
+                    b'{"app_name": "SYNAPSE", "state": "stopping"}',
+                    interrupted,
+                ]
+                connection = mock.Mock()
+                connection.getresponse.return_value = response
+                connection.request.side_effect = [None, None, None, ConnectionRefusedError()]
+                with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection) as connect, \
+                        mock.patch.object(app.time, "sleep"):
+                    app.stop_server(8080)
+                self.assertEqual(connect.call_count, 4)
+                self.assertTrue(all(call.kwargs["timeout"] == 5 for call in connect.call_args_list))
+                self.assertEqual(connection.close.call_count, 4)
+
+    def test_cli_stop_rejects_malformed_identity_before_requesting_shutdown(self):
         response = mock.Mock(status=200)
-        response.read.side_effect = [
-            b'{"app_name": "SYNAPSE", "api_version": 1}',
-            b'{"app_name": "SYNAPSE", "state": "stopping"}',
-        ]
+        response.read.return_value = b""
         connection = mock.Mock()
         connection.getresponse.return_value = response
-        connection.request.side_effect = [None, None, BrokenPipeError("app exiting"), ConnectionRefusedError()]
-        with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection) as connect, \
-                mock.patch.object(app.time, "sleep"):
+        with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection), \
+                self.assertRaises(json.JSONDecodeError):
             app.stop_server(8080)
-        self.assertEqual(connect.call_count, 4)
-        self.assertTrue(all(call.kwargs["timeout"] == 5 for call in connect.call_args_list))
-        self.assertEqual(connection.close.call_count, 4)
+        self.assertEqual(connection.request.call_count, 1)
+        self.assertEqual(connection.request.call_args.args[:2], ("GET", "/api/v1/status"))
 
     def wait_tuning(self, wanted):
         deadline = time.monotonic() + 20
