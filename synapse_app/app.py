@@ -1933,7 +1933,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def stop_server(port: int) -> None:
-    def request(method: str, path: str, data: dict | None = None, *, timeout: float = 2) -> dict:
+    def request(method: str, path: str, data: dict | None = None, *, timeout: float = 5) -> dict:
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
         try:
             connection.request(method, path, json.dumps(data) if data is not None else None,
@@ -1961,10 +1961,10 @@ def stop_server(port: int) -> None:
     deadline = time.monotonic() + 30
     while (remaining := deadline - time.monotonic()) > 0:
         try:
-            request("GET", "/api/v1/status", timeout=min(2, remaining))
+            request("GET", "/api/v1/status", timeout=min(5, remaining))
         except ConnectionRefusedError:
             return
-        except (ConnectionResetError, ConnectionAbortedError, TimeoutError,
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, TimeoutError,
                 http.client.RemoteDisconnected, http.client.IncompleteRead) as exc:
             LOG.debug("Local connection closed while waiting for shutdown: %s", exc)
         time.sleep(min(0.1, max(0, deadline - time.monotonic())))

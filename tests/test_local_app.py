@@ -202,7 +202,8 @@ class LocalAppTests(unittest.TestCase):
                 [sys.executable, str(APP_PATH), "--stop", "--port", str(port),
                  "--hybrid-profile", str(self.root / "missing-profile.json")],
                 capture_output=True, text=True, timeout=40)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0,
+                             f"{result.stdout}{result.stderr}\nApp exit status: {process.poll()}")
             self.assertIn("Stopped SYNAPSE", result.stdout)
             stdout, stderr = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, stdout + stderr)
@@ -248,6 +249,22 @@ class LocalAppTests(unittest.TestCase):
                 mock.patch.object(app.time, "monotonic", side_effect=[0, 31]), \
                 self.assertRaisesRegex(RuntimeError, "did not close its listener"):
             app.stop_server(8080)
+
+    def test_cli_stop_handles_shutdown_socket_races_with_time_for_connection_refusal(self):
+        response = mock.Mock(status=200)
+        response.read.side_effect = [
+            b'{"app_name": "SYNAPSE", "api_version": 1}',
+            b'{"app_name": "SYNAPSE", "state": "stopping"}',
+        ]
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        connection.request.side_effect = [None, None, BrokenPipeError("app exiting"), ConnectionRefusedError()]
+        with mock.patch.object(app.http.client, "HTTPConnection", return_value=connection) as connect, \
+                mock.patch.object(app.time, "sleep"):
+            app.stop_server(8080)
+        self.assertEqual(connect.call_count, 4)
+        self.assertTrue(all(call.kwargs["timeout"] == 5 for call in connect.call_args_list))
+        self.assertEqual(connection.close.call_count, 4)
 
     def wait_tuning(self, wanted):
         deadline = time.monotonic() + 20

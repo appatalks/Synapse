@@ -57,7 +57,8 @@ class ReleaseTests(unittest.TestCase):
                     connection.close()
             result = subprocess.run([sys.executable, str(ARCHIVE), "--stop", "--port", str(port)],
                                     capture_output=True, text=True, timeout=40)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0,
+                             f"{result.stdout}{result.stderr}\nApp exit status: {process.poll()}")
             self.assertIn("Stopped SYNAPSE", result.stdout)
             stdout, stderr = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, stdout + stderr)
