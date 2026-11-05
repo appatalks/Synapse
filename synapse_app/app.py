@@ -1864,6 +1864,19 @@ class Handler(BaseHTTPRequestHandler):
             connection.request(method, path, body=json.dumps(data) if data is not None else None,
                                headers={"Content-Type": "application/json",
                                         "Authorization": f"Bearer {key}"})
+            if chat:
+                # Windows socket shutdown may not wake another thread's blocking header read.
+                header_deadline = time.monotonic() + connection.timeout
+                while not disconnected.is_set():
+                    remaining = header_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Backend response headers timed out.")
+                    readable, _, _ = select.select([upstream_socket], [], [], min(0.1, remaining))
+                    if readable:
+                        break
+                if disconnected.is_set():
+                    LOG.info("Chat cancelled before backend response headers.")
+                    return
             response = connection.getresponse()
             streaming = data is not None and data.get("stream") is True and response.status == 200
             if not streaming:
