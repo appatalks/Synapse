@@ -29,8 +29,15 @@ fill use live doughnut pie charts, not historical line charts.
 Missing capacity or usage leaves an explicitly unavailable ring.
 Experimental-engine details and warnings live on this tab.
 The System RAM value, filled arc, center caption and percentage footer all
-describe **used** memory. Free/OS-available memory remains separate supporting
-information; the footer does not substitute the free percentage for used RAM.
+describe **used** memory. Below the ring, separately colored bars show used,
+free, shared, buff/cache and OS-available RAM, each as a fraction of total
+RAM. These are independent, overlapping measurements, **not** slices that
+can be added together: used includes cache and shared memory, and OS available
+includes free and potentially reclaimable memory. Available is an OS estimate,
+not an allocation guarantee. On Linux buff/cache means file cache and buffers
+excluding shared memory (not reclaimable slab). Unsupported counters are
+shown as unavailable; Windows does not provide free, shared or buff/cache
+through this monitor, and macOS does not provide shared or buff/cache.
 
 | Counter | Scope and source |
 | --- | --- |

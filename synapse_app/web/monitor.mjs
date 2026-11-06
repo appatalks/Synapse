@@ -38,13 +38,16 @@ export function readings(sample, selection = "all") {
     ram: { value: valid(s.ram_used_bytes) ? s.ram_used_bytes / gib : null,
       max: valid(s.ram_total_bytes) ? s.ram_total_bytes / gib : null,
       usedLabel: s.ram_basis === "physical_occupied" ? "Used incl. cache" : "Used (OS-unavailable)",
-      freeLabel: s.ram_basis === "physical_occupied" ? "free" : "OS available",
+      breakdown: [
+        ["used", s.ram_basis === "physical_occupied" ? "Used incl. cache" : "Used (OS-unavailable)", s.ram_used_bytes],
+        ["free", "Free", s.ram_free_bytes],
+        ["shared", "Shared", s.ram_shared_bytes],
+        ["cache", "Buff/cache (file-backed)", s.ram_cache_bytes],
+        ["available", "OS available", s.ram_available_bytes],
+      ].map(([key, label, value]) => ({ key, label, value: valid(value) ? value / gib : null })),
       note: [
         valid(s.ram_total_bytes) ? `${(s.ram_total_bytes / gib).toFixed(1)} GiB total` : "System memory",
-        valid(s.ram_cache_bytes) ? `file cache/buffers ${(s.ram_cache_bytes / gib).toFixed(1)} GiB` : null,
-        valid(s.ram_shared_bytes) && s.ram_shared_bytes >= gib ? `shared ${(s.ram_shared_bytes / gib).toFixed(1)} GiB` : null,
         valid(b.rss_bytes) ? `backend RSS ${(b.rss_bytes / gib).toFixed(1)} GiB (overlaps)` : null,
-        valid(s.ram_available_bytes) ? `OS available ${(s.ram_available_bytes / gib).toFixed(1)} GiB` : null,
       ].filter(Boolean).join(" · ") },
     disk: { value: valid(s.disk_read_bytes_s) ? s.disk_read_bytes_s / mib : null, note: "Backend read I/O · see platform notes" },
     context: { value: context, max: 100, note: valid(b.context_used)
@@ -110,8 +113,13 @@ export class MonitorView {
       const scale = element("div", "chart-scale");
       scale.append(element("span", "", "0"), element("span", "", unit));
       card.append(element("h3", "", title), value, description, chart, scale);
+      let breakdown = null;
+      if (key === "ram") {
+        breakdown = element("div", "ram-breakdown");
+        card.append(breakdown);
+      }
       document.getElementById("monitor-cards").append(card);
-      this.cards[key] = { card, value, description, chart, scale, title, unit, pie };
+      this.cards[key] = { card, value, description, chart, scale, title, unit, pie, breakdown };
     }
     this.gpu.addEventListener("change", () => this.render());
     document.getElementById("monitor-pause").addEventListener("click", (event) => {
@@ -224,6 +232,29 @@ export class MonitorView {
         view.scale.firstChild.textContent = reading.usedLabel || "Used";
         view.scale.lastChild.textContent = key === "ram" ? part === null ? "Used: unknown" : `${label} used`
           : part === null ? "Remaining: unknown" : `${((1 - part) * 100).toFixed(1)}% ${reading.freeLabel || "available"}`;
+        if (key === "ram") {
+          view.breakdown.replaceChildren();
+          for (const item of reading.breakdown) {
+            const row = element("div", "ram-row");
+            const heading = element("div", "ram-row-heading");
+            const exceedsTotal = valid(item.value) && valid(reading.max) && item.value > reading.max;
+            const share = exceedsTotal ? null : fraction(item.value, reading.max);
+            const text = !valid(item.value) ? "Unavailable"
+              : `${item.value.toFixed(1)} GiB · ${exceedsTotal ? "exceeds total" : share === null ? "% unavailable" : `${(share * 100).toFixed(1)}%`}`;
+            heading.append(element("span", "", item.label), element("span", "", text));
+            const track = element("div", "ram-bar");
+            track.setAttribute("aria-hidden", "true");
+            if (share !== null) {
+              const fill = element("div", `ram-bar-fill ram-${item.key}`);
+              fill.style.width = `${share * 100}%`;
+              track.append(fill);
+            }
+            row.append(heading, track);
+            view.breakdown.append(row);
+          }
+          view.breakdown.append(element("p", "ram-breakdown-note",
+            "Each bar is a share of total RAM. Values overlap and must not be added; OS available is an estimate."));
+        }
         continue;
       }
       const all = this.history.map((sample) => readings(sample, this.gpu.value)[key]);
