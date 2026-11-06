@@ -85,24 +85,20 @@ test("combined load keeps CPU when GPU sensors are unavailable", () => {
   assert.equal(gpuOnly.secondary, 30);
 });
 
-test("RAM pie separates occupied cache from pressure and never adds overlapping RSS", () => {
+test("RAM used excludes displayed cache and does not add overlapping RSS", () => {
   const ram = readings({
     system: {ram_total_bytes: 128 * 1024 ** 3, ram_used_bytes: 80 * 1024 ** 3,
+      ram_free_bytes: 48 * 1024 ** 3,
       ram_available_bytes: 110 * 1024 ** 3, ram_cache_bytes: 64 * 1024 ** 3,
       ram_pressure_bytes: 18 * 1024 ** 3, ram_basis: "physical_occupied"},
     backend: {rss_bytes: 62 * 1024 ** 3}
   }).ram;
-  assert.equal(ram.value, 80);
+  assert.equal(ram.value, 16);
   assert.equal(ram.max, 128);
-  assert.equal(ram.freeLabel, "free");
-  assert.match(ram.note, /cache\/buffers 64.0 GiB/);
+  assert.deepEqual(ram.breakdown.map((item) => item.value), [16, 48, null, 64, 110]);
+  assert.deepEqual(ram.ring.map((item) => item.value), [16, 64, 48]);
   assert.match(ram.note, /RSS 62.0 GiB \(overlaps\)/);
-  assert.match(ram.note, /OS available 110.0 GiB/);
-  assert.equal(fraction(ram.value, ram.max), 0.625);
-});
-
-test("Windows RAM remainder is labeled OS available, not cache-free physical RAM", () => {
-  assert.equal(readings({system: {ram_basis: "os_unavailable"}}).ram.freeLabel, "OS available");
+  assert.equal(fraction(ram.value, ram.max), 0.125);
 });
 
 function renderRam(system) {
@@ -110,6 +106,7 @@ function renderRam(system) {
     constructor() {
       this.children = [];
       this.attributes = {};
+      this.style = {};
       this.text = "";
       this.classList = { toggle() {} };
     }
@@ -129,7 +126,7 @@ function renderRam(system) {
   };
   try {
     const ram = { card: new Node(), value: new Node(), description: new Node(), chart: new Node(),
-      scale: new Node(), title: "System RAM", unit: "GiB", pie: true };
+      scale: new Node(), breakdown: new Node(), title: "System RAM", unit: "GiB", pie: true };
     ram.scale.append(new Node(), new Node());
     const monitor = Object.create(MonitorView.prototype);
     Object.assign(monitor, {
@@ -144,35 +141,133 @@ function renderRam(system) {
   }
 }
 
-test("RAM ring, caption and footer consistently show used rather than the free complement", () => {
+test("RAM ring, caption and footer consistently show used excluding buff/cache", () => {
   for (const [used, percent] of [[0, 0], [32, 25], [128, 100]]) {
     const ram = renderRam({ ram_used_bytes: used * 1024 ** 3, ram_total_bytes: 128 * 1024 ** 3,
-      ram_free_bytes: (128 - used) * 1024 ** 3, ram_basis: "physical_occupied" });
+      ram_free_bytes: (128 - used) * 1024 ** 3, ram_cache_bytes: 0, ram_basis: "physical_occupied" });
     assert.equal(ram.value.textContent, `${used.toFixed(1)}GiB`);
     assert.equal(ram.chart.children.find((node) => node.attributes.class === "pie-used")
       .attributes["stroke-dasharray"], `${percent} 100`);
     assert.equal(ram.chart.children.find((node) => node.attributes.class === "pie-caption").textContent, "used");
-    assert.equal(ram.scale.firstChild.textContent, "Used incl. cache");
+    assert.equal(ram.scale.firstChild.textContent, "Used excl. buff/cache");
     assert.equal(ram.scale.lastChild.textContent, `${percent.toFixed(1)}% used`);
-    assert.match(ram.chart.attributes["aria-label"], new RegExp(`${percent.toFixed(1)}% Used incl. cache`));
+    assert.match(ram.chart.attributes["aria-label"], new RegExp(`Used excl. buff/cache ${used.toFixed(1)} GiB \\(${percent.toFixed(1)}%\\)`));
   }
 });
 
 test("RAM usage remains unavailable when its capacity or used counter is missing", () => {
   for (const values of [{ ram_used_bytes: 32 * 1024 ** 3 }, { ram_total_bytes: 128 * 1024 ** 3 }]) {
     const ram = renderRam(values);
-    assert.equal(ram.scale.lastChild.textContent, "Used: unknown");
+    assert.equal(ram.scale.lastChild.textContent, "Breakdown: unavailable");
     assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-used"), false);
     assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-caption"), false);
   }
 });
 
-test("Windows RAM shows used percentage while preserving the OS-unavailable definition", () => {
+test("Windows RAM retains its explicitly labeled OS-unavailable ring", () => {
   const ram = renderRam({ ram_used_bytes: 32 * 1024 ** 3, ram_total_bytes: 128 * 1024 ** 3,
     ram_available_bytes: 96 * 1024 ** 3, ram_basis: "os_unavailable" });
-  assert.equal(ram.scale.firstChild.textContent, "Used (OS-unavailable)");
-  assert.equal(ram.scale.lastChild.textContent, "25.0% used");
-  assert.match(ram.description.textContent, /OS available 96.0 GiB/);
+  assert.equal(ram.scale.firstChild.textContent, "OS-unavailable");
+  assert.equal(ram.scale.lastChild.textContent, "25.0% OS-unavail.");
+  assert.equal(ram.chart.children.find((node) => node.attributes.class === "pie-caption").textContent, "OS-unavail.");
+  assert.equal(ram.chart.children.filter((node) => node.attributes.class?.startsWith("pie-") &&
+    ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class)).length, 1);
+  const rows = ram.breakdown.children;
+  assert.equal(rows[0].children[0].textContent, "OS-unavailable32.0 GiB · 25.0%");
+  for (const index of [1, 2, 3]) {
+    assert.match(rows[index].children[0].textContent, /Unavailable/);
+    assert.equal(rows[index].children[1].children.length, 0);
+  }
+  assert.equal(rows[4].children[0].textContent, "OS available96.0 GiB · 75.0%");
+});
+
+test("RAM bars independently show all overlapping Linux counters as shares of total", () => {
+  const gb = 1024 ** 3;
+  const ram = renderRam({ ram_total_bytes: 128 * gb, ram_used_bytes: 80 * gb,
+    ram_free_bytes: 48 * gb, ram_shared_bytes: 0.5 * gb, ram_cache_bytes: 64 * gb,
+    ram_available_bytes: 110 * gb, ram_basis: "physical_occupied" });
+  const rows = ram.breakdown.children;
+  const expected = [
+    ["Used excl. buff/cache", "16.0 GiB · 12.5%", "ram-used", "12.5"],
+    ["Free", "48.0 GiB · 37.5%", "ram-free", "37.5"],
+    ["Shared", "0.5 GiB · 0.4%", "ram-shared", "0.390625"],
+    ["Buff/cache (file-backed)", "64.0 GiB · 50.0%", "ram-cache", "50"],
+    ["OS available", "110.0 GiB · 85.9%", "ram-available", "85.9375"],
+  ];
+  expected.forEach(([label, text, color, width], index) => {
+    const [heading, bar] = rows[index].children;
+    assert.equal(heading.children[0].textContent, label);
+    assert.equal(heading.children[1].textContent, text);
+    assert.equal(bar.attributes["aria-hidden"], "true");
+    assert.equal(bar.children[0].className, `ram-bar-fill ${color}`);
+    assert.equal(bar.children[0].style.width, `${width}%`);
+  });
+  assert.match(rows[5].textContent, /unfilled track is free/);
+  assert.match(rows[5].textContent, /Shared overlaps used/);
+  assert.match(rows[5].textContent, /OS available overlaps other values and is an estimate/);
+  const circles = ram.chart.children.filter((node) => ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class));
+  assert.deepEqual(circles.map((node) => [node.attributes.class, node.attributes["stroke-dasharray"],
+    node.attributes["stroke-dashoffset"]]), [
+    ["pie-used", "12.5 100", "0"], ["pie-cache", "50 100", "-12.5"],
+  ]);
+  assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-track"), true);
+  assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-free"), false);
+  assert.match(ram.chart.attributes["aria-label"], /Buff\/cache \(file-backed\) 64.0 GiB \(50.0%\)/);
+  assert.match(ram.chart.attributes["aria-label"], /Free 48.0 GiB \(37.5%\)/);
+});
+
+test("RAM bars preserve zero, missing capacity and invalid counters without inventing shares", () => {
+  const gb = 1024 ** 3;
+  const mac = renderRam({ram_total_bytes: 8 * gb, ram_used_bytes: 8 * gb,
+    ram_free_bytes: 0, ram_available_bytes: 2 * gb, ram_basis: "physical_occupied"});
+  assert.equal(mac.scale.firstChild.textContent, "Occupied incl. cache");
+  assert.equal(mac.scale.lastChild.textContent, "100.0% occupied");
+  assert.match(mac.description.textContent, /Cache breakdown unavailable/);
+  assert.equal(mac.breakdown.children[1].children[0].textContent, "Free0.0 GiB · 0.0%");
+  assert.equal(mac.breakdown.children[1].children[1].children[0].style.width, "0%");
+  for (const index of [2, 3]) assert.match(mac.breakdown.children[index].textContent, /Unavailable/);
+
+  const incomplete = renderRam({ram_used_bytes: 2 * gb, ram_cache_bytes: gb, ram_free_bytes: -1,
+    ram_basis: "physical_occupied"});
+  assert.equal(incomplete.breakdown.children[0].children[0].textContent, "Used excl. buff/cache1.0 GiB · % unavailable");
+  assert.equal(incomplete.breakdown.children[0].children[1].children.length, 0);
+  assert.match(incomplete.breakdown.children[1].textContent, /Unavailable/);
+  assert.match(incomplete.description.textContent, /missing counters/);
+  assert.equal(incomplete.chart.children.some((node) => node.attributes.class === "pie-used"), false);
+
+  const inconsistent = renderRam({ram_total_bytes: 8 * gb, ram_shared_bytes: 9 * gb});
+  assert.equal(inconsistent.breakdown.children[2].children[0].textContent, "Shared9.0 GiB · exceeds total");
+  assert.equal(inconsistent.breakdown.children[2].children[1].children.length, 0);
+});
+
+test("RAM ring rejects inconsistent cache or occupied/free counters without clamping", () => {
+  const gb = 1024 ** 3;
+  for (const system of [
+    {ram_total_bytes: 8 * gb, ram_used_bytes: 4 * gb, ram_free_bytes: 4 * gb, ram_cache_bytes: 5 * gb},
+    {ram_total_bytes: 8 * gb, ram_used_bytes: 4 * gb, ram_free_bytes: 5 * gb, ram_cache_bytes: gb},
+    {ram_total_bytes: 8 * gb, ram_used_bytes: 9 * gb, ram_free_bytes: 0, ram_cache_bytes: gb},
+    {ram_total_bytes: 8 * gb, ram_free_bytes: 0, ram_cache_bytes: 9 * gb},
+  ]) {
+    const ram = renderRam({...system, ram_basis: "physical_occupied"});
+    assert.equal(ram.value.textContent, "Unavailable");
+    assert.equal(ram.scale.lastChild.textContent, "Breakdown: unavailable");
+    assert.match(ram.description.textContent, /inconsistent counters/);
+    assert.equal(ram.chart.children.some((node) => ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class)), false);
+  }
+});
+
+test("RAM ring handles all-cache and all-free systems", () => {
+  const gb = 1024 ** 3;
+  for (const [occupied, cache, free, expected] of [
+    [8, 8, 0, [0, 100]], [0, 0, 8, [0, 0]],
+  ]) {
+    const ram = renderRam({ram_total_bytes: 8 * gb, ram_used_bytes: occupied * gb,
+      ram_cache_bytes: cache * gb, ram_free_bytes: free * gb, ram_basis: "physical_occupied"});
+    const rings = ram.chart.children.filter((node) => ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class));
+    assert.deepEqual(rings.map((node) => node.attributes["stroke-dasharray"]), expected.map((value) => `${value} 100`));
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-free"), false);
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-track"), true);
+  }
 });
 
 async function pollingFixture(run) {

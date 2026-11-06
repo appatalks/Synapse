@@ -12,6 +12,45 @@ export const metrics = [
   ["disk", "Disk read", "MiB/s"], ["context", "Context fill", "%"],
 ];
 
+function ramReading(system, backend) {
+  const { ram_total_bytes: total, ram_used_bytes: occupied, ram_free_bytes: free,
+    ram_cache_bytes: cache, ram_shared_bytes: shared, ram_available_bytes: available } = system;
+  const physical = system.ram_basis === "physical_occupied";
+  const split = physical && valid(cache);
+  const inconsistent = valid(total) && (
+    valid(occupied) && occupied > total || valid(free) && free > total ||
+    valid(cache) && cache > total ||
+    physical && valid(occupied) && valid(free) && occupied !== total - free
+  ) || split && valid(occupied) && cache > occupied;
+  const used = inconsistent ? null : valid(occupied) ? split ? occupied - cache : occupied : null;
+  const usedLabel = split ? "Used excl. buff/cache" : physical ? "Occupied incl. cache"
+    : system.ram_basis === "os_unavailable" ? "OS-unavailable" : "RAM usage";
+  const centerLabel = split ? "used" : physical ? "occupied"
+    : system.ram_basis === "os_unavailable" ? "OS-unavail." : "usage";
+  const fullSplit = split && !inconsistent && valid(total) && total > 0 && valid(used) && valid(free);
+  return {
+    value: valid(used) ? used / gib : null,
+    max: valid(total) ? total / gib : null,
+    usedLabel, centerLabel, split,
+    ring: fullSplit ? [
+      { key: "used", label: usedLabel, value: used / gib },
+      { key: "cache", label: "Buff/cache (file-backed)", value: cache / gib },
+      { key: "free", label: "Free", value: free / gib },
+    ] : null,
+    breakdown: [
+      ["used", usedLabel, used], ["free", "Free", free], ["shared", "Shared", shared],
+      ["cache", "Buff/cache (file-backed)", cache], ["available", "OS available", available],
+    ].map(([key, label, value]) => ({ key, label, value: valid(value) ? value / gib : null })),
+    note: [
+      valid(total) ? `${(total / gib).toFixed(1)} GiB total` : "System memory",
+      valid(backend.rss_bytes) ? `backend RSS ${(backend.rss_bytes / gib).toFixed(1)} GiB (overlaps)` : null,
+      inconsistent ? "RAM breakdown unavailable: inconsistent counters"
+        : split && !fullSplit ? "RAM breakdown unavailable: missing counters"
+          : !split ? "Cache breakdown unavailable; showing OS-specific usage" : null,
+    ].filter(Boolean).join(" · "),
+  };
+}
+
 export function readings(sample, selection = "all") {
   const devices = (sample.gpus || []).filter((d) => selection === "all" || String(d.index) === selection);
   const b = sample.backend || {}, s = sample.system || {};
@@ -35,17 +74,7 @@ export function readings(sample, selection = "all") {
     pcie: { value: rx === null ? null : rx / mib, secondary: tx === null ? null : tx / mib,
       note: rx === null || tx === null ? "Driver PCIe counters" : `RX ${(rx / mib).toFixed(1)} · TX ${(tx / mib).toFixed(1)} MiB/s` },
     cpu: { value: s.cpu_percent, max: 100, note: valid(b.cpu_logical_cores) ? `System · backend ${b.cpu_logical_cores.toFixed(1)} logical cores` : "Whole-machine CPU usage" },
-    ram: { value: valid(s.ram_used_bytes) ? s.ram_used_bytes / gib : null,
-      max: valid(s.ram_total_bytes) ? s.ram_total_bytes / gib : null,
-      usedLabel: s.ram_basis === "physical_occupied" ? "Used incl. cache" : "Used (OS-unavailable)",
-      freeLabel: s.ram_basis === "physical_occupied" ? "free" : "OS available",
-      note: [
-        valid(s.ram_total_bytes) ? `${(s.ram_total_bytes / gib).toFixed(1)} GiB total` : "System memory",
-        valid(s.ram_cache_bytes) ? `file cache/buffers ${(s.ram_cache_bytes / gib).toFixed(1)} GiB` : null,
-        valid(s.ram_shared_bytes) && s.ram_shared_bytes >= gib ? `shared ${(s.ram_shared_bytes / gib).toFixed(1)} GiB` : null,
-        valid(b.rss_bytes) ? `backend RSS ${(b.rss_bytes / gib).toFixed(1)} GiB (overlaps)` : null,
-        valid(s.ram_available_bytes) ? `OS available ${(s.ram_available_bytes / gib).toFixed(1)} GiB` : null,
-      ].filter(Boolean).join(" · ") },
+    ram: ramReading(s, b),
     disk: { value: valid(s.disk_read_bytes_s) ? s.disk_read_bytes_s / mib : null, note: "Backend read I/O · see platform notes" },
     context: { value: context, max: 100, note: valid(b.context_used)
       ? `${Math.round(b.context_used).toLocaleString()} / ${b.context_total?.toLocaleString()} tokens · ${b.context_source === "backend_slot" ? "slot occupancy" : "usage estimate"}` : "Waiting for backend context counters" },
@@ -110,8 +139,13 @@ export class MonitorView {
       const scale = element("div", "chart-scale");
       scale.append(element("span", "", "0"), element("span", "", unit));
       card.append(element("h3", "", title), value, description, chart, scale);
+      let breakdown = null;
+      if (key === "ram") {
+        breakdown = element("div", "ram-breakdown");
+        card.append(breakdown);
+      }
       document.getElementById("monitor-cards").append(card);
-      this.cards[key] = { card, value, description, chart, scale, title, unit, pie };
+      this.cards[key] = { card, value, description, chart, scale, title, unit, pie, breakdown };
     }
     this.gpu.addEventListener("change", () => this.render());
     document.getElementById("monitor-pause").addEventListener("click", (event) => {
@@ -207,23 +241,64 @@ export class MonitorView {
       }
       view.description.textContent = reading.note;
       if (view.pie) {
-        const part = fraction(value, reading.max);
+        const part = key === "ram" && (reading.split && !reading.ring || valid(value) && valid(reading.max) && value > reading.max)
+          ? null : fraction(value, reading.max);
         const label = part === null ? "Unavailable" : `${(part * 100).toFixed(1)}%`;
         view.chart.replaceChildren(svg("circle", { cx: 60, cy: 60, r: 44, class: "pie-track" }));
-        if (part !== null) view.chart.append(svg("circle", { cx: 60, cy: 60, r: 44, pathLength: 100,
-          "stroke-dasharray": `${part * 100} 100`, transform: "rotate(-90 60 60)", class: "pie-used" }));
+        if (part !== null && key === "ram" && reading.ring) {
+          let offset = 0;
+          for (const item of reading.ring) {
+            if (item.key === "free") continue;
+            const percentage = 100 * item.value / reading.max;
+            view.chart.append(svg("circle", { cx: 60, cy: 60, r: 44, pathLength: 100,
+              "stroke-dasharray": `${percentage} 100`, "stroke-dashoffset": `${-offset}`,
+              transform: "rotate(-90 60 60)", class: `pie-${item.key}` }));
+            offset += percentage;
+          }
+        } else if (part !== null) {
+          view.chart.append(svg("circle", { cx: 60, cy: 60, r: 44, pathLength: 100,
+            "stroke-dasharray": `${part * 100} 100`, transform: "rotate(-90 60 60)", class: "pie-used" }));
+        }
         const text = svg("text", { x: 60, y: 64, "text-anchor": "middle", class: "pie-label" });
         text.textContent = label;
         view.chart.append(text);
         if (key === "ram" && part !== null) {
           const caption = svg("text", { x: 60, y: 80, "text-anchor": "middle", class: "pie-caption" });
-          caption.textContent = "used";
+          caption.textContent = reading.centerLabel;
           view.chart.append(caption);
         }
-        view.chart.setAttribute("aria-label", `${view.title}: ${label} ${reading.usedLabel || "used"}; ${reading.note}`);
+        const ringSummary = key === "ram" && reading.ring
+          ? reading.ring.map((item) => `${item.label} ${item.value.toFixed(1)} GiB (${(100 * item.value / reading.max).toFixed(1)}%)`).join(", ")
+          : `${label} ${reading.usedLabel || "used"}`;
+        view.chart.setAttribute("aria-label", `${view.title}: ${ringSummary}; ${reading.note}`);
         view.scale.firstChild.textContent = reading.usedLabel || "Used";
-        view.scale.lastChild.textContent = key === "ram" ? part === null ? "Used: unknown" : `${label} used`
+        view.scale.lastChild.textContent = key === "ram" ? part === null ? "Breakdown: unavailable" : `${label} ${reading.centerLabel}`
           : part === null ? "Remaining: unknown" : `${((1 - part) * 100).toFixed(1)}% ${reading.freeLabel || "available"}`;
+        if (key === "ram") {
+          view.breakdown.replaceChildren();
+          for (const item of reading.breakdown) {
+            const row = element("div", "ram-row");
+            const heading = element("div", "ram-row-heading");
+            const exceedsTotal = valid(item.value) && valid(reading.max) && item.value > reading.max;
+            const share = exceedsTotal ? null : fraction(item.value, reading.max);
+            const text = !valid(item.value) ? "Unavailable"
+              : `${item.value.toFixed(1)} GiB · ${exceedsTotal ? "exceeds total" : share === null ? "% unavailable" : `${(share * 100).toFixed(1)}%`}`;
+            heading.append(element("span", "", item.label), element("span", "", text));
+            const track = element("div", "ram-bar");
+            track.setAttribute("aria-hidden", "true");
+            if (share !== null) {
+              const fill = element("div", `ram-bar-fill ram-${item.key}`);
+              fill.style.width = `${share * 100}%`;
+              track.append(fill);
+            }
+            row.append(heading, track);
+            view.breakdown.append(row);
+          }
+          view.breakdown.append(element("p", "ram-breakdown-note",
+            reading.ring
+              ? "The ring shows used and buff/cache; its unfilled track is free. Shared overlaps used; OS available overlaps other values and is an estimate."
+              : "Each bar is a share of total RAM. Values may overlap; OS available is an estimate."));
+        }
         continue;
       }
       const all = this.history.map((sample) => readings(sample, this.gpu.value)[key]);
