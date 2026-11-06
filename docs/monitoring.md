@@ -28,16 +28,21 @@ are not added into a misleading utilization total. System RAM and context
 fill use live doughnut pie charts, not historical line charts.
 Missing capacity or usage leaves an explicitly unavailable ring.
 Experimental-engine details and warnings live on this tab.
-The System RAM value, filled arc, center caption and percentage footer all
-describe **used** memory. Below the ring, separately colored bars show used,
-free, shared, buff/cache and OS-available RAM, each as a fraction of total
-RAM. These are independent, overlapping measurements, **not** slices that
-can be added together: used includes cache and shared memory, and OS available
-includes free and potentially reclaimable memory. Available is an OS estimate,
-not an allocation guarantee. On Linux buff/cache means file cache and buffers
-excluding shared memory (not reclaimable slab). Unsupported counters are
-shown as unavailable; Windows does not provide free, shared or buff/cache
-through this monitor, and macOS does not provide shared or buff/cache.
+On Linux, the System RAM ring partitions total memory into used excluding the
+displayed buff/cache, buff/cache, and free. The large value, ring center and
+footer show used excluding buff/cache. Buff/cache is file cache and buffers
+excluding shared memory (not reclaimable slab); used still includes shared
+memory and other allocations, including reclaimable slab. This is not
+necessarily the same accounting as the `free` command.
+
+The colored bars also show shared and OS-available memory as fractions of
+total. These overlap other values and must not be added to the ring segments.
+OS available is an estimate, not an allocation guarantee. Backend RSS overlaps
+used and cache. Unsupported counters are shown as unavailable. Windows does not
+provide free, shared or buff/cache through this monitor and shows an explicitly
+labeled OS-unavailable ring instead; macOS does not provide shared or buff/cache
+and shows occupied memory including cache. If Linux counters are inconsistent
+or the split is incomplete, the breakdown ring is unavailable.
 
 | Counter | Scope and source |
 | --- | --- |
@@ -45,7 +50,7 @@ through this monitor, and macOS does not provide shared or buff/cache.
 | GPU load / VRAM / temperature / power | Installed NVIDIA driver's NVML, per GPU or aggregated. Device-wide, including other apps. Missing individual counters remain unavailable. |
 | PCIe | NVML RX/TX snapshots, converted from driver KB/s counters with a 1024-byte unit. RX is into the GPU; TX is out. Short driver measurement windows can miss bursts; this is not a transfer integral or bus utilization percentage. |
 | CPU | Whole-machine OS CPU-time deltas. Backend logical-core use is shown separately. Windows systems with more than 64 processors may report the calling processor group's load. |
-| System RAM | Linux/macOS physical occupancy (total minus free), including cache. Windows uses OS-unavailable RAM (total minus OS availability). Cache/buffers, backend RSS and OS availability are separate values and overlap. |
+| System RAM | Linux: used (physical occupancy minus file cache/buffers), cache/buffers and free. macOS: physical occupancy including cache. Windows: OS-unavailable RAM (total minus OS availability). Shared, backend RSS and OS availability overlap other values. |
 | Disk read | Backend process read-counter deltas. Linux uses physical `read_bytes`; macOS uses `ri_diskio_bytesread`. Windows counts process read transfers, which can include cached/non-disk I/O. |
 | Context fill | Backend slot-token occupancy divided by actual context size. When slots are unsupported, reported input + output usage is labeled as an estimate. It is not the physical KV-cache byte allocation. |
 
@@ -53,8 +58,8 @@ through this monitor, and macOS does not provide shared or buff/cache.
 
 File-backed model weights are resident RAM even when Linux counts them in its
 reclaimable page cache. A low `total - MemAvailable` value does not mean the
-model is not using RAM. The RAM pie therefore shows physical occupancy where
-the OS provides a separate free-page counter, while keeping the original
+model is not using RAM. The Linux RAM ring shows cached file pages separately
+from other occupied memory, while keeping the original physical occupancy,
 OS-available value and pressure estimate separate in the API. macOS availability
 is estimated as free plus inactive pages. Driver-pinned pages can make
 OS-reported availability optimistic; it is not a safe-allocation guarantee.
