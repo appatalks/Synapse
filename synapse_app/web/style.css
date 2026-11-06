@@ -129,11 +129,10 @@ code { overflow-wrap: anywhere; font-size: .83rem; }
 .pie-metric .metric-description { margin-top: 12px; }
 .metric.pie-metric svg { width: 120px; height: 120px; grid-column: 2; grid-row: 1 / 4; margin: 0; align-self: center; }
 .pie-metric .chart-scale { grid-column: 1 / 3; margin-top: 14px; }
-.pie-track, .pie-used, .pie-cache, .pie-free { fill: none; stroke-width: 10px; }
+.pie-track, .pie-used, .pie-cache { fill: none; stroke-width: 10px; }
 .pie-track { stroke: #24333c; }
 .pie-used { stroke: var(--accent); }
 .pie-cache { stroke: #edbd6f; }
-.pie-free { stroke: #75a7fb; }
 .pie-label { fill: #d3e9e2; font: 550 14px system-ui, sans-serif; }
 .pie-caption { fill: var(--muted); font: 500 10px system-ui, sans-serif; }
 .ram-breakdown { grid-column: 1 / 3; margin-top: 16px; }
@@ -222,7 +221,6 @@ html[data-theme="light"] .chart-grid { stroke: #d4dde6; }
 html[data-theme="light"] .pie-track { stroke: #dbe4ec; }
 html[data-theme="light"] .pie-label { fill: #254d43; }
 html[data-theme="light"] .pie-cache { stroke: #a46106; }
-html[data-theme="light"] .pie-free { stroke: #245ac4; }
 html[data-theme="light"] .ram-row-heading { color: #364e65; }
 html[data-theme="light"] .ram-bar { background: #dbe4ec; }
 html[data-theme="light"] .ram-used { background: #087a60; }

@@ -248,6 +248,7 @@ export class MonitorView {
         if (part !== null && key === "ram" && reading.ring) {
           let offset = 0;
           for (const item of reading.ring) {
+            if (item.key === "free") continue;
             const percentage = 100 * item.value / reading.max;
             view.chart.append(svg("circle", { cx: 60, cy: 60, r: 44, pathLength: 100,
               "stroke-dasharray": `${percentage} 100`, "stroke-dashoffset": `${-offset}`,
@@ -295,7 +296,7 @@ export class MonitorView {
           }
           view.breakdown.append(element("p", "ram-breakdown-note",
             reading.ring
-              ? "The ring adds used, buff/cache and free. Shared overlaps used; OS available overlaps other values and is an estimate."
+              ? "The ring shows used and buff/cache; its unfilled track is free. Shared overlaps used; OS available overlaps other values and is an estimate."
               : "Each bar is a share of total RAM. Values may overlap; OS available is an estimate."));
         }
         continue;

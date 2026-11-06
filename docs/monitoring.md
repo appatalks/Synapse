@@ -28,9 +28,10 @@ are not added into a misleading utilization total. System RAM and context
 fill use live doughnut pie charts, not historical line charts.
 Missing capacity or usage leaves an explicitly unavailable ring.
 Experimental-engine details and warnings live on this tab.
-On Linux, the System RAM ring partitions total memory into used excluding the
-displayed buff/cache, buff/cache, and free. The large value, ring center and
-footer show used excluding buff/cache. Buff/cache is file cache and buffers
+On Linux, the System RAM ring shows used excluding the displayed buff/cache
+and buff/cache as colored arcs; the unfilled track represents free memory,
+which is also shown in the statistics. The large value, ring center and footer
+show used excluding buff/cache. Buff/cache is file cache and buffers
 excluding shared memory (not reclaimable slab); used still includes shared
 memory and other allocations, including reclaimable slab. This is not
 necessarily the same accounting as the `free` command.

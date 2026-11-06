@@ -202,14 +202,16 @@ test("RAM bars independently show all overlapping Linux counters as shares of to
     assert.equal(bar.children[0].className, `ram-bar-fill ${color}`);
     assert.equal(bar.children[0].style.width, `${width}%`);
   });
-  assert.match(rows[5].textContent, /ring adds used, buff\/cache and free/);
+  assert.match(rows[5].textContent, /unfilled track is free/);
   assert.match(rows[5].textContent, /Shared overlaps used/);
   assert.match(rows[5].textContent, /OS available overlaps other values and is an estimate/);
   const circles = ram.chart.children.filter((node) => ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class));
   assert.deepEqual(circles.map((node) => [node.attributes.class, node.attributes["stroke-dasharray"],
     node.attributes["stroke-dashoffset"]]), [
-    ["pie-used", "12.5 100", "0"], ["pie-cache", "50 100", "-12.5"], ["pie-free", "37.5 100", "-62.5"],
+    ["pie-used", "12.5 100", "0"], ["pie-cache", "50 100", "-12.5"],
   ]);
+  assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-track"), true);
+  assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-free"), false);
   assert.match(ram.chart.attributes["aria-label"], /Buff\/cache \(file-backed\) 64.0 GiB \(50.0%\)/);
   assert.match(ram.chart.attributes["aria-label"], /Free 48.0 GiB \(37.5%\)/);
 });
@@ -257,12 +259,14 @@ test("RAM ring rejects inconsistent cache or occupied/free counters without clam
 test("RAM ring handles all-cache and all-free systems", () => {
   const gb = 1024 ** 3;
   for (const [occupied, cache, free, expected] of [
-    [8, 8, 0, [0, 100, 0]], [0, 0, 8, [0, 0, 100]],
+    [8, 8, 0, [0, 100]], [0, 0, 8, [0, 0]],
   ]) {
     const ram = renderRam({ram_total_bytes: 8 * gb, ram_used_bytes: occupied * gb,
       ram_cache_bytes: cache * gb, ram_free_bytes: free * gb, ram_basis: "physical_occupied"});
     const rings = ram.chart.children.filter((node) => ["pie-used", "pie-cache", "pie-free"].includes(node.attributes.class));
     assert.deepEqual(rings.map((node) => node.attributes["stroke-dasharray"]), expected.map((value) => `${value} 100`));
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-free"), false);
+    assert.equal(ram.chart.children.some((node) => node.attributes.class === "pie-track"), true);
   }
 });
 
