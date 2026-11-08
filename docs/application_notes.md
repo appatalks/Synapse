@@ -10,6 +10,23 @@ The app needs only Python and a browser; models and an appropriate
 The reference backend revision is b11669.
 [Platform and sensor limits](monitoring.md).
 
+## Tested model library
+
+Open **Model Controls → Model library** to browse the curated GGUFs,
+their download sizes, licenses, and test limitations. Select a local file
+or explicitly confirm a download to the chosen directory. Downloads use
+revision-pinned HTTPS URLs and verify the complete size and SHA-256 before
+publishing the file. Cancelled or failed partial downloads are removed;
+existing files are never overwritten. A file found by name and size is
+identified as local, but is not automatically re-hashed.
+
+Speed percentages are historical measurements for the exact file and
+specified hardware/context, not guaranteed predictions or quality
+rankings. Where no comparable acceleration measurement exists, the
+library says so. Auto Tune measures supported paths on your machine.
+Model downloads require substantial disk space and may have separate
+license terms; no model is downloaded without confirmation.
+
 ## Hybrid eligibility pre-check
 
 In **Chat → Model Controls**, select a local GGUF in the browser or enter its

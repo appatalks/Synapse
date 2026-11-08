@@ -44,6 +44,7 @@ _tuning = import_module(f"{APP_PACKAGE}.tuning")
 _settings = import_module(f"{APP_PACKAGE}.settings")
 _profiles = import_module(f"{APP_PACKAGE}.profiles")
 _strata = import_module(f"{APP_PACKAGE}.strata_profile")
+_model_library = import_module(f"{APP_PACKAGE}.model_library")
 
 LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
@@ -1673,7 +1674,7 @@ class AppServer(ThreadingHTTPServer):
     block_on_close = False
 
     def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True,
-                 tuning_store: Path | None = None):
+                 tuning_store: Path | None = None, model_library_dir: str | None = None):
         self.choices = _tuning.EngineChoices(tuning_store.parent / "engine-choices.json" if tuning_store else None)
         self._gpus: list[dict] | None = None
         self.runtime = runtime
@@ -1688,6 +1689,7 @@ class AppServer(ThreadingHTTPServer):
             choices=self.choices, machine=self._machine)
         archive = Path(sys.argv[0]).resolve() if sys.argv[0].endswith(".pyz") else None
         self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
+        self.model_library = _model_library.ModelLibrary(model_library_dir)
         self.restart_requested = False
         self.stop_requested = False
         super().__init__(address, Handler)
@@ -1695,6 +1697,7 @@ class AppServer(ThreadingHTTPServer):
     def shutdown_app(self) -> None:
         self.stop_requested = True
         self.closing.set()
+        self.model_library.close()
         self.runtime.stop(closing=True)
         self.tuner.close()
         self.shutdown()
@@ -1794,6 +1797,7 @@ class AppServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.closing.set()
+        self.model_library.close()
         self.tuner.close()
         self.runtime.monitor.close()
         super().server_close()
@@ -1882,6 +1886,26 @@ class Handler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if method == "GET" and path == "/api/v1/status":
                 self._json(200, self.server.status())
+            elif method == "GET" and path == "/api/v1/models/library":
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(query) - {"directory"} or any(len(values) != 1 for values in query.values()):
+                    raise AppError(400, "Provide one model library directory.")
+                self._json(200, self.server.model_library.listing(query.get("directory", [None])[0]))
+            elif method == "POST" and path == "/api/v1/models/download":
+                data = self._body()
+                if set(data) != {"model", "directory", "confirm"}:
+                    raise AppError(400, "Provide model, directory and download confirmation.")
+                try:
+                    result = self.server.model_library.start(data["model"], data["directory"], data["confirm"])
+                except ValueError as exc:
+                    raise AppError(400, str(exc)) from exc
+                except RuntimeError as exc:
+                    raise AppError(409, str(exc)) from exc
+                self._json(202, result)
+            elif method == "POST" and path == "/api/v1/models/download/cancel":
+                if self._body():
+                    raise AppError(400, "Cancel download accepts an empty JSON object.")
+                self._json(202, self.server.model_library.cancel())
             elif method == "POST" and path == "/api/v1/shutdown":
                 if self._body():
                     raise AppError(400, "Shutdown accepts an empty JSON object.")
@@ -2254,9 +2278,18 @@ def main() -> None:
     if runtime.hybrid_plan is not None:
         LOG.warning("%s", HYBRID_WARNING)
     try:
+        library_file = user_config_dir() / "model-library.json"
+        library_dir = None
+        if library_file.exists():
+            if library_file.stat().st_size > 4096:
+                raise ValueError("Model library configuration exceeds 4 KiB.")
+            library_config = json.loads(library_file.read_text())
+            library_dir = library_config.get("directory") if isinstance(library_config, dict) else None
+            if not isinstance(library_dir, str) or not Path(library_dir).expanduser().is_absolute():
+                raise ValueError("Model library directory must be an absolute path.")
         server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check,
-                           tuning_store=user_config_dir() / "tuning.json")
-    except OSError as exc:
+                           tuning_store=user_config_dir() / "tuning.json", model_library_dir=library_dir)
+    except (OSError, ValueError) as exc:
         parser.exit(1, f"Cannot start local app: {exc}\n")
     url = f"http://127.0.0.1:{server.server_address[1]}"
 

@@ -1,11 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
   choose(value) { this.value = value; this.dispatchEvent(new Event("change")); }
 }
+
+test("settings tabs switch panels and support keyboard navigation", () => {
+  class Tab extends EventTarget {
+    constructor() { super(); this.attrs = {}; this.focused = false; }
+    setAttribute(key, value) { this.attrs[key] = value; }
+    focus() { this.focused = true; }
+  }
+  const tabs = [new Tab(), new Tab(), new Tab()];
+  const panels = new Map(tabs.map((tab) => [tab, { hidden: true }]));
+  const select = bindSettingsTabs(tabs, (tab) => panels.get(tab));
+  select(tabs[0]);
+  assert.equal(panels.get(tabs[0]).hidden, false);
+  tabs[1].dispatchEvent(new Event("click"));
+  assert.equal(tabs[1].attrs["aria-selected"], "true");
+  assert.equal(panels.get(tabs[0]).hidden, true);
+  const right = new Event("keydown", { cancelable: true });
+  Object.defineProperty(right, "key", { value: "ArrowRight" });
+  tabs[1].dispatchEvent(right);
+  assert.equal(right.defaultPrevented, true);
+  assert.equal(tabs[2].attrs["aria-selected"], "true");
+  assert.equal(tabs[2].focused, true);
+  assert.equal(panels.get(tabs[2]).hidden, false);
+});
 
 test("Hybrid checkbox allows Automatic and disables Hybrid through Standard without forcing it", () => {
   const toggle = new Select(""), select = new Select("auto"), changes = [];

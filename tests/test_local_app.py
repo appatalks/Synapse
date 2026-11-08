@@ -97,6 +97,40 @@ class LocalAppTests(unittest.TestCase):
         self.runtime.strata = app._strata.Installation(profile)
         self.runtime.native_cache_available = False
 
+    def test_model_library_catalog_requires_explicit_curated_download(self):
+        code, _, body = self.request("GET", "/api/v1/models/library")
+        self.assertEqual(code, 200)
+        catalog = json.loads(body)
+        self.assertTrue(catalog["models"])
+        self.assertTrue(all(model["size"] > 0 and len(model["sha256"]) == 64 for model in catalog["models"]))
+        for data in ({"model": "not-listed", "directory": str(self.root), "confirm": True},
+                     {"model": catalog["models"][0]["id"], "directory": str(self.root), "confirm": False}):
+            code, _, _ = self.request("POST", "/api/v1/models/download", data)
+            self.assertEqual(code, 400)
+        self.assertFalse(self.server.model_library.snapshot()["active"])
+
+    def test_model_library_download_and_picker_through_api(self):
+        content = b"GGUF fixture"
+        model = {"id": "test", "name": "Fixture", "repo": "publisher/repo", "revision": "a" * 40,
+                 "filename": "test.gguf", "size": len(content), "sha256": hashlib.sha256(content).hexdigest(),
+                 "license": "MIT", "gain": None, "evidence": "fixture"}
+        self.server.model_library.catalog = {"test": model}
+        opener = mock.Mock()
+        opener.open.return_value = io.BytesIO(content)
+        with mock.patch("synapse_app.model_library.urllib.request.build_opener", return_value=opener), \
+                mock.patch("synapse_app.model_library.shutil.disk_usage") as disk:
+            disk.return_value.free = 2 * 1024**3
+            code, _, body = self.request("POST", "/api/v1/models/download",
+                                         {"model": "test", "directory": str(self.root), "confirm": True})
+            self.assertEqual(code, 202, body)
+            self.server.model_library.worker.join(timeout=5)
+        code, _, body = self.request("GET", "/api/v1/models/library?directory=" + str(self.root))
+        self.assertEqual(code, 200)
+        listing = json.loads(body)
+        self.assertEqual(listing["download"]["state"], "completed")
+        self.assertTrue(listing["models"][0]["installed"])
+        self.assertEqual(Path(listing["models"][0]["path"]).read_bytes(), content)
+
     def test_shared_context_default_applies_to_each_model_and_respects_limits(self):
         self.runtime.preferred_context = 131072
         write_metadata(self.model, {**HYBRID_METADATA, "gpt-oss.context_length": 262144})

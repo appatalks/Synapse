@@ -18,13 +18,14 @@ class ReleaseTests(unittest.TestCase):
     def test_version_and_public_payload(self):
         result = subprocess.run([sys.executable, str(ARCHIVE), "--version"],
                                 capture_output=True, text=True, check=True, timeout=10)
-        self.assertIn("SYNAPSE 0.2.1rc1", result.stdout)
+        self.assertIn("SYNAPSE 0.2.2rc1", result.stdout)
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
         self.assertIn("synapse_app/tuning.py", names)
         self.assertIn("synapse_app/settings.py", names)
         self.assertIn("synapse_app/profiles.py", names)
+        self.assertIn("synapse_app/model_library.py", names)
         self.assertIn("synapse_app/execution-profiles.json", names)
         self.assertIn("synapse_app/web/model-controls.mjs", names)
         self.assertFalse(any(name.endswith((".gguf", ".bin", ".log")) or

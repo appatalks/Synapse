@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -20,6 +20,8 @@ let appliedTuningAt = null;
 let statusTimer = null;
 let statusPolling = false;
 let standardSettings = null;
+let libraryTimer = null;
+let libraryBusy = false;
 const manualFields = ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll",
   "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target"];
 const syncEngineSelection = bindEngineSelection(el("allow-hybrid"), el("execution-mode"), engineChanged);
@@ -317,6 +319,82 @@ el("model-controls").addEventListener("keydown", (event) => {
     event.preventDefault();
     el("model-controls").close();
   }
+});
+
+const tabs = Array.from(el("model-controls").querySelectorAll('[role="tab"]'));
+const selectTab = bindSettingsTabs(tabs, (tab) => el(tab.getAttribute("aria-controls")), (tab) => {
+  if (tab.id === "tab-library") refreshLibrary();
+});
+
+async function refreshLibrary() {
+  if (libraryBusy) return;
+  libraryBusy = true;
+  try {
+    const directory = el("library-directory").value.trim();
+    const data = await request(`/api/v1/models/library${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`);
+    if (!directory) el("library-directory").value = data.directory;
+    el("library-models").replaceChildren();
+    for (const model of data.models) {
+      const card = document.createElement("article");
+      card.className = "library-card";
+      const heading = document.createElement("h4");
+      heading.textContent = model.name;
+      const details = document.createElement("p");
+      details.textContent = `${(model.size / 1024 ** 3).toFixed(2)} GiB download · ${model.license} · ${model.installed ? "Local file found (not reverified)" : "Not downloaded"}`;
+      const evidence = document.createElement("p");
+      evidence.className = "hint";
+      evidence.textContent = model.evidence;
+      const source = document.createElement("a");
+      source.href = `https://huggingface.co/${model.repo}`;
+      source.target = "_blank";
+      source.rel = "noopener noreferrer";
+      source.textContent = "Model card and license";
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "secondary";
+      action.textContent = model.installed ? "Use this model" : "Download model";
+      action.disabled = data.download.active || (model.installed &&
+        (status?.state === "ready" || status?.state === "loading" || status?.tuning?.active));
+      action.addEventListener("click", async () => {
+        if (model.installed) {
+          el("model").value = model.path;
+          modelPrecheck.invalidate();
+          selectTab(el("tab-model"));
+          el("model").focus();
+          return;
+        }
+        const destination = el("library-directory").value.trim();
+        if (!window.confirm(`Download ${model.name} (${(model.size / 1024 ** 3).toFixed(2)} GiB) to ${destination}?\n\nReview the ${model.license} model license before continuing.`)) return;
+        try {
+          await request("/api/v1/models/download", { model: model.id, directory: destination, confirm: true });
+          refreshLibrary();
+        } catch (error) {
+          el("library-status").textContent = error.message;
+        }
+      });
+      card.append(heading, details, evidence, source, document.createElement("br"), action);
+      el("library-models").append(card);
+    }
+    const download = data.download;
+    el("library-download").hidden = !download.active;
+    if (download.active) {
+      el("library-progress").value = download.total ? download.downloaded / download.total : 0;
+      el("library-download-text").textContent = `${(download.downloaded / 1024 ** 3).toFixed(2)} / ${(download.total / 1024 ** 3).toFixed(2)} GiB · verifying SHA-256 when complete`;
+      libraryTimer = setTimeout(refreshLibrary, 1000);
+    }
+    el("library-status").textContent = download.state === "completed" ? "Download verified. Choose the model below." :
+      download.state === "error" ? `Download failed: ${download.error}` :
+      download.state === "cancelled" ? "Download cancelled; partial file removed." : "";
+  } catch (error) {
+    el("library-status").textContent = `Model library unavailable: ${error.message}`;
+  } finally {
+    libraryBusy = false;
+  }
+}
+el("library-refresh").addEventListener("click", () => { clearTimeout(libraryTimer); refreshLibrary(); });
+el("library-cancel").addEventListener("click", async () => {
+  try { await request("/api/v1/models/download/cancel", {}); }
+  catch (error) { el("library-status").textContent = error.message; }
 });
 
 async function browseModels(path) {
