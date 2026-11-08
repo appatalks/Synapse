@@ -24,6 +24,8 @@ parser.add_argument("--fit-margin")
 parser.add_argument("--no-mmap", action="store_true")
 parser.add_argument("--threads")
 parser.add_argument("--threads-batch")
+parser.add_argument("--ubatch-size")
+parser.add_argument("--no-warmup", action="store_true")
 parser.add_argument("--load-mode", default="auto")
 parser.add_argument("--moe-cache-mib", default="0")
 parser.add_argument("--cpu-moe", action="store_true")
@@ -49,6 +51,10 @@ if Path(args.model).stem in ("not-a-server", "old-server"):
 stats = {"tokens": 0, "decoded": 0, "requests": 0}
 if Path(args.model).stem == "fail":
     print("Unsupported model architecture (test fixture).", flush=True)
+    sys.exit(7)
+if (Path(args.model).stem == "causal-tuning" and
+        os.getenv("VRAMBRIDGE_EXPERIMENT_CAUSAL_SINGLE_TOKEN") != "1"):
+    print("unknown model architecture: test fixture", flush=True)
     sys.exit(7)
 if (Path(args.model).stem == "tuning-native-cache-limit" and int(args.moe_cache_mib) > 4096):
     print("CUDA native expert-cache allocation failed: out of memory (test fixture).", flush=True)
@@ -124,7 +130,18 @@ if os.getenv("VRAMBRIDGE_STRATA_CONFIG") and Path(args.model).stem != "strata-no
     print("SYNAPSE_STRATA_VERIFIED " + json.dumps({
         "context": int(args.ctx_size), "kv": "fp16", "mtp": True, "full_routing": True,
         "cache_mib": 4096, "cache_slots": 128, "pid": os.getpid()}), flush=True)
-cache = "f16" if Path(args.model).stem == "q8-cache-fallback" else args.cache_type_k or "f16"
+if os.getenv("VRAMBRIDGE_EXPERIMENT_CAUSAL_SINGLE_TOKEN") == "1":
+    ubatch = "512" if Path(args.model).stem == "causal-wrong-microbatch" else args.ubatch_size
+    print(f"llama_context: n_ubatch = {ubatch}", flush=True)
+    print("llama_context: causal_attn = 1", flush=True)
+    allocation = "0.00" if Path(args.model).stem == "causal-no-gpu" else "100.00"
+    print(f"load_tensors: CUDA0 model buffer size = {allocation} MiB", flush=True)
+    context = "2048" if Path(args.model).stem == "causal-wrong-context" else args.ctx_size
+    print(f"srv: initializing, n_slots = 1, n_ctx_slot = {context}, kv_unified = 'false'", flush=True)
+    if Path(args.model).stem == "causal-early-marker":
+        print("EXPERIMENT_CAUSAL_SINGLE_TOKEN prefill executed", flush=True)
+cache = ("q8_0" if Path(args.model).stem == "causal-wrong-cache" else
+         "f16" if Path(args.model).stem == "q8-cache-fallback" else args.cache_type_k or "f16")
 if args.log_verbosity == "4":
     print(f"llama_kv_cache_unified: size = 1 MiB, K ({cache}): 1 MiB, V ({cache}): 1 MiB", flush=True)
     print(f"llama_context: flash_attn = {'enabled' if args.flash_attn == 'on' else 'disabled'}", flush=True)
@@ -214,6 +231,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"content": bytes(data["tokens"]).decode()})
             return
         if self.path == "/completion":
+            if (os.getenv("VRAMBRIDGE_EXPERIMENT_CAUSAL_SINGLE_TOKEN") == "1" and
+                    Path(args.model).stem not in ("causal-no-markers", "causal-early-marker")):
+                print("EXPERIMENT_CAUSAL_SINGLE_TOKEN prefill executed", flush=True)
             if Path(args.model).stem == "tuning-no-decode":
                 self.send_json(200, {"content": "", "timings": {}})
                 return

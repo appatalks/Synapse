@@ -45,10 +45,12 @@ class Cancelled(Exception):
 
 
 class ModelLibrary:
-    def __init__(self, default_directory=None, catalog=CATALOG, *, search_roots=None, metadata=None):
+    def __init__(self, default_directory=None, catalog=CATALOG, *, search_roots=None, metadata=None,
+                 registered_provider=None):
         self.default_directory = str(default_directory or Path.home() / "Synapse Models")
         self.search_roots = list(search_roots or [])
         self.metadata = metadata
+        self.registered_provider = registered_provider
         self.catalog = {item["id"]: dict(item) for item in catalog}
         self.lock = threading.Lock()
         self.cancelled = threading.Event()
@@ -145,9 +147,12 @@ class ModelLibrary:
                         architecture = self.metadata(path).get("general.architecture")
                     except (OSError, ValueError, UnicodeError):
                         pass
-                note = ("Clover architecture needs a compatible backend; the default installer backend cannot load it."
-                        if architecture == "clover_moe" else
-                        "Local file discovered; backend compatibility and quality are not verified.")
+                if self.registered_provider is not None and self.registered_provider(path):
+                    note = "A provider is registered for this file; integrity and runtime verification are required."
+                else:
+                    note = ("Clover architecture needs a compatible backend; the default installer backend cannot load it."
+                            if architecture == "clover_moe" else
+                            "Local file discovered; backend compatibility and quality are not verified.")
                 models.append({"name": path.name, "path": str(path), "size": size,
                                "architecture": architecture, "missing_shards": missing, "note": note})
                 with self.lock:

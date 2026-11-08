@@ -26,7 +26,9 @@ Split files appear once under their first shard; missing shards are reported.
 The scan is bounded and does not upload, move or modify models. A discovered
 file is not automatically validated for quality or compatibility. Clover's
 architecture is listed with a warning because the default installed backend
-does not yet support it.
+does not support it. If a separate matching provider is registered, the
+library identifies that binding; integrity and runtime checks still occur
+before the model can load.
 
 Speed percentages are historical measurements for the exact file and
 specified hardware/context, not guaranteed predictions or quality
@@ -135,6 +137,13 @@ its winner side-store leaves legacy native choices readable by older
 apps. Balanced can recommend a faster supported context; Maximum keeps
 the selected capacity. Installer/backend upgrades and registration still
 require consent, and the native backend remains available.
+
+A separately registered causal provider is available only for its exact
+qualified model, build, machine and driver. Automatic uses it when the
+identified native backend cannot load that model; Auto Tune can measure
+and remember it. Loading verifies the model and component hashes, actual
+context, F16 cache, GPU placement, execution and library bindings. An
+unsupported or unverified configuration fails rather than falling back.
 
 A shared local context preference can be registered in
 `~/.config/synapse/context-policy.json` (or the platform/XDG configuration

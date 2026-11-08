@@ -57,7 +57,7 @@ class Cancelled(RuntimeError):
 
 def _valid_settings(settings: object) -> bool:
     return (isinstance(settings, dict) and type(settings.get("context")) is int and
-            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid", "strata") and
+            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid", "strata", "causal") and
             settings.get("draft_type", "none") in ("none", "dflash", "mtp") and
             settings.get("hybrid_variant", "classic") in ("auto", "classic", "hosted") and
             settings.get("kv_cache_type", "f16") in ("f16", "q8_0"))
@@ -118,7 +118,7 @@ class EngineChoices:
                 if (saved.get("schema_version") != 1 or not isinstance(saved.get("entries"), dict) or
                         len(saved["entries"]) > MAX_CHOICES or not all(
                             isinstance(key, str) and _valid_choice(entry) and
-                            entry["settings"]["execution_mode"] == "strata"
+                            entry["settings"]["execution_mode"] in ("strata", "causal")
                             for key, entry in saved["entries"].items())):
                     raise ValueError("Unsupported optional provider choices.")
                 self.provider_entries = saved["entries"]
@@ -146,6 +146,13 @@ class EngineChoices:
                 compatible = False
             if not compatible:
                 machine.pop("strata")
+        if "causal" in machine:
+            try:
+                compatible = os.path.samefile(model, machine["causal"]["model"])
+            except (OSError, KeyError, TypeError):
+                compatible = False
+            if not compatible:
+                machine.pop("causal")
         identity = {"model": str(model.resolve()), "size": info.st_size, "mtime_ns": info.st_mtime_ns,
                     "kv_cache_type": kv_cache_type, "machine": machine}
         return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
@@ -166,7 +173,7 @@ class EngineChoices:
             raise ValueError("Refusing to save an invalid engine choice.")
         key = self.key(model, entry["settings"]["kv_cache_type"], machine)
         with self.lock:
-            provider = entry["settings"]["execution_mode"] == "strata"
+            provider = entry["settings"]["execution_mode"] in ("strata", "causal")
             target = self.provider_store if provider else self.store
             entries = {**(self.provider_entries if provider else self.legacy_entries), key: deepcopy(entry)}
             while len(entries) > MAX_CHOICES:
@@ -319,6 +326,11 @@ class AutoTuner:
             contexts.append(maximum)
         if target_context is not None:
             contexts = [target_context]
+        causal = False
+        if (runtime.causal.data is not None and data.get("include_hybrid") is not False and
+                placement == "auto" and cache == "f16"):
+            machine = self.machine() if self.machine is not None else None
+            causal = runtime.causal.eligible(model, metadata, machine, min(contexts[-1], 131072))
         previous = {key: current[key] for key in LOAD_FIELDS} if current["state"] == "ready" else None
         with self.lock:
             self.cancelled.clear()
@@ -328,6 +340,7 @@ class AutoTuner:
                 "include_hybrid": hybrid, "phase": "Preparing local trials", "detail": "",
                 "native_cache_banks_mib": cache_banks,
                 "strata_candidate": strata,
+                "causal_candidate": causal,
                 "target_context": target_context,
                 "kv_cache_type": cache,
                 "progress": None, "trials": [], "recommendation": None, "error": None,
@@ -338,7 +351,7 @@ class AutoTuner:
             }
             self.worker = threading.Thread(
                 target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal,
-                                       data.get("include_hybrid") is False, cache_banks, strata),
+                                       data.get("include_hybrid") is False, cache_banks, strata, causal),
                 daemon=True)
             self.worker.start()
         return self.snapshot()
@@ -650,10 +663,13 @@ class AutoTuner:
                 raise TrialError("The applied engine differs from the measured choice.")
             if measured and loaded["strata_active"] != (expected["execution_mode"] == "strata"):
                 raise TrialError("The applied provider differs from the measured choice.")
+            if measured and loaded["causal_active"] != (expected["execution_mode"] == "causal"):
+                raise TrialError("The applied provider differs from the measured choice.")
 
     def _run(self, runtime, model: str, contexts: list[int], placement: str, hybrid: bool,
              metadata: dict, previous: dict | None, cache: str, goal: str = "balanced",
-             standard_only: bool = False, cache_banks: list[int] | None = None, strata: bool = False) -> None:
+             standard_only: bool = False, cache_banks: list[int] | None = None, strata: bool = False,
+             causal: bool = False) -> None:
         original_budget = runtime.hybrid_context
         selected = None
         remembered = False
@@ -666,12 +682,16 @@ class AutoTuner:
                             "batch_threads": min(16, self.cpu_count()), "fit_target_mib": 1024,
                             "kv_cache_type": cache, "expert_cache_mib": 0}
                 trial = self._trial(runtime, settings)
+                if not trial["capacity_passed"] and causal and context <= 131072:
+                    trial = self._trial(runtime, {**settings, **profiles.settings("causal-single-token")})
                 if not trial["capacity_passed"]:
                     break
                 selected = trial
             if selected is None:
                 raise TrialError("No context passed. Review the failed trials; no app settings were recommended.")
             standard = selected
+            if standard["settings"]["execution_mode"] == "causal":
+                cache_banks, hybrid, strata = [], False, False
             failed_bank = None
             fitting_bank = 0
             cache_contract_ok = True
@@ -711,6 +731,11 @@ class AutoTuner:
             if strata and (goal == "balanced" or strata_context == standard["settings"]["context"]):
                 trial = self._trial(runtime, {**standard["settings"], **profiles.settings("strata-mtp"),
                                               "context": strata_context, "expert_cache_mib": 0})
+                if trial["capacity_passed"] and self._better(trial, selected, goal):
+                    selected = trial
+            if causal and standard["settings"]["execution_mode"] != "causal" and standard["settings"]["context"] <= 131072:
+                trial = self._trial(runtime, {**standard["settings"], **profiles.settings("causal-single-token"),
+                                              "expert_cache_mib": 0})
                 if trial["capacity_passed"] and self._better(trial, selected, goal):
                     selected = trial
             if hybrid:

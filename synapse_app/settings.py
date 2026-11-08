@@ -31,7 +31,7 @@ INTEGER_LIMITS = {
     "op_offload_min_batch": (1, 8192), "draft_tokens": (1, 32),
 }
 CHOICES = {
-    "execution_mode": ("auto", "standard", "hybrid", "strata"), "placement": ("auto", "cpu"),
+    "execution_mode": ("auto", "standard", "hybrid", "strata", "causal"), "placement": ("auto", "cpu"),
     "load_mode": ("auto", "none"), "kv_cache_type": ("f16", "q8_0"),
     "draft_type": ("none", "dflash", "mtp"), "hybrid_variant": ("auto", "classic", "hosted"),
 }

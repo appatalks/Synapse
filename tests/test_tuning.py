@@ -120,14 +120,14 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(staged["hybrid-classic"]["eligibility"], "candidate")
         self.assertEqual(staged["hybrid-hosted"]["missing_requirements"], ["direct"])
         direct = profiles.assess({"moe": True, "hybrid": True, "hosted": True, "direct": True,
-                                 "native_cache": True, "strata": True})
+                                 "native_cache": True, "strata": True, "causal": True})
         self.assertTrue(all(item["eligibility"] == "candidate" for item in direct))
         self.assertTrue(all(item["requires_runtime_verification"] for item in direct))
 
     def test_catalog_rejects_unguarded_engines_and_claimed_qualification(self):
         base = {"schema_version": 1, "profiles": [
             profiles.definition(name) for name in ("standard-auto", "standard-cpu", "hybrid-classic", "hybrid-hosted",
-                                                  "standard-native-cache", "strata-mtp")]}
+                                                  "standard-native-cache", "strata-mtp", "causal-single-token")]}
         for field, value in (("requires", []), ("qualification", "qualified"),
                              ("components", ["expert-sharing", "skip-experts"]),
                              ("settings", {"execution_mode": "hybrid", "placement": "auto",

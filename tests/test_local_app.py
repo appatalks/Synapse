@@ -97,6 +97,136 @@ class LocalAppTests(unittest.TestCase):
         self.runtime.strata = app._strata.Installation(profile)
         self.runtime.native_cache_available = False
 
+    def configure_causal(self, model):
+        write_metadata(model, {"general.architecture": app._causal.ARCHITECTURE,
+                               f"{app._causal.ARCHITECTURE}.context_length": 131072})
+        directory = self.root / "causal-bin"
+        directory.mkdir()
+        shutil.copyfile(self.backend, directory / "llama-server")
+        (directory / "llama-server").chmod(0o755)
+        components = {}
+        for name in app._causal.COMPONENTS:
+            path = directory / name
+            if name != "llama-server":
+                path.write_bytes(name.encode())
+            components[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        profile = self.root / "causal-profile.json"
+        profile.write_text(json.dumps({"schema_version": 1, "backend_dir": str(directory), "model": str(model)}))
+        patches = (
+            mock.patch.object(app._causal, "COMPONENTS", components),
+            mock.patch.object(app._causal, "MODEL_SHA256", hashlib.sha256(model.read_bytes()).hexdigest()),
+            mock.patch.object(app._causal, "cpu_model", return_value=app._causal.CPU_MODEL),
+            mock.patch.object(app._causal, "driver_version", return_value=app._causal.DRIVER_VERSION),
+            mock.patch.object(app._causal.platform, "machine", return_value="x86_64"),
+            mock.patch.object(app._causal, "native_cannot_load", return_value=True),
+        )
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.runtime.causal = app._causal.Installation(profile)
+        self.runtime.causal.verify_mappings = mock.Mock()
+        self.runtime.machine = lambda: {"platform": "Linux", "gpus": [
+            {"name": app._causal.GPU_MODEL, "vram_total_bytes": 16 * 1024**3}]}
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_automatic_causal_provider_requires_execution_and_restores_standard(self):
+        model = self.root / "causal.gguf"
+        self.configure_causal(model)
+        state = self.load(model=str(model), execution_mode="auto", context=16384)
+        self.assertTrue(state["causal_verified"])
+        self.assertEqual(state["execution_profile_id"], "causal-single-token")
+        self.assertEqual(state["context"], 16384)
+        self.assertEqual((state["cpu_threads"], state["batch_threads"]), (8, 16))
+        self.assertGreaterEqual(self.runtime.causal.verify_mappings.call_count, 2)
+        self.runtime.stop()
+        self.assertFalse(self.runtime.status()["causal_active"])
+        self.assertEqual(self.runtime.executable, str(self.backend))
+        self.assertFalse(self.load()["causal_active"])
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_causal_missing_or_early_execution_marker_fails_closed(self):
+        for name in ("causal-no-markers", "causal-early-marker"):
+            with self.subTest(name=name):
+                model = self.root / f"{name}.gguf"
+                if self.runtime.causal.data is None:
+                    self.configure_causal(model)
+                else:
+                    write_metadata(model, {"general.architecture": app._causal.ARCHITECTURE,
+                                           f"{app._causal.ARCHITECTURE}.context_length": 131072})
+                    self.runtime.causal.data["model"] = str(model)
+                with mock.patch.object(app, "SPECULATION_VERIFICATION_TIMEOUT", 0.3):
+                    code, _, _ = self.request("POST", "/api/v1/model/load",
+                                              {"model": str(model), "execution_mode": "causal", "context": 4096})
+                    self.assertEqual(code, 202)
+                    state = self.wait_state("error")
+                    self.assertFalse(state["causal_verified"])
+                    self.runtime.stop()
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_causal_rejects_wrong_runtime_context_cache_microbatch_and_placement(self):
+        names = ("causal-wrong-microbatch", "causal-wrong-context", "causal-wrong-cache", "causal-no-gpu")
+        for name in names:
+            with self.subTest(name=name):
+                model = self.root / f"{name}.gguf"
+                if self.runtime.causal.data is None:
+                    self.configure_causal(model)
+                else:
+                    write_metadata(model, {"general.architecture": app._causal.ARCHITECTURE,
+                                           f"{app._causal.ARCHITECTURE}.context_length": 131072})
+                    self.runtime.causal.data["model"] = str(model)
+                with mock.patch.object(app, "SPECULATION_VERIFICATION_TIMEOUT", 0.3):
+                    code, _, _ = self.request("POST", "/api/v1/model/load",
+                                              {"model": str(model), "execution_mode": "causal", "context": 4096})
+                    self.assertEqual(code, 202)
+                    state = self.wait_state("error")
+                    self.assertFalse(state["causal_verified"])
+                    self.assertIsNotNone(self.runtime.process.poll())
+                    self.runtime.stop()
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_causal_rejects_wrong_library_mappings_without_fallback(self):
+        model = self.root / "causal-bad-mapping.gguf"
+        self.configure_causal(model)
+        self.runtime.causal.verify_mappings.side_effect = ValueError("unbound library")
+        code, _, _ = self.request("POST", "/api/v1/model/load",
+                                  {"model": str(model), "execution_mode": "causal", "context": 4096})
+        self.assertEqual(code, 202)
+        state = self.wait_state("error")
+        self.assertIn("library verification failed", state["error"])
+        self.assertIsNotNone(self.runtime.process.poll())
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_causal_rejects_unqualified_overrides_before_starting(self):
+        model = self.root / "causal-overrides.gguf"
+        self.configure_causal(model)
+        for override in ({"kv_cache_type": "q8_0"}, {"placement": "cpu"}, {"expert_cache_mib": 1024},
+                         {"cpu_threads": 4}, {"context": 131073}):
+            with self.subTest(override=override):
+                code, _, _ = self.request("POST", "/api/v1/model/load",
+                                          {"model": str(model), "execution_mode": "causal", **override})
+                self.assertEqual(code, 400)
+                self.assertEqual(self.runtime.status()["state"], "stopped")
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_auto_tune_measures_remembers_and_reloads_when_native_cannot_load(self):
+        model = self.root / "causal-tuning.gguf"
+        self.configure_causal(model)
+        self.runtime.native_cache_available = False
+        self.runtime.preferred_context = 4096
+        self.server._gpu_identity = lambda: [{"name": app._causal.GPU_MODEL,
+                                               "vram_total_bytes": 16 * 1024**3}]
+        self.runtime.machine = self.server._machine
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "context": 4096, "confirm": True})
+        self.assertEqual(code, 202, body)
+        report = self.wait_tuning("completed")
+        self.assertEqual(report["recommendation"]["settings"]["execution_mode"], "causal")
+        self.assertFalse(report["trials"][0]["capacity_passed"])
+        self.assertTrue(report["trials"][1]["capacity_passed"])
+        choice = self.server.choices.lookup(model, "f16", self.server._machine())
+        self.assertEqual(choice["profile_id"], "causal-single-token")
+        self.assertTrue(self.runtime.status()["causal_verified"])
+
     def test_model_library_catalog_requires_explicit_curated_download(self):
         code, _, body = self.request("GET", "/api/v1/models/library")
         self.assertEqual(code, 200)
@@ -126,6 +256,17 @@ class LocalAppTests(unittest.TestCase):
         self.assertIn("default installer backend", row["note"])
         self.assertEqual(row["missing_shards"], [])
         self.assertFalse(any(item["name"].endswith("-00002-of-00002.gguf") for item in state["models"]))
+
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_model_library_reports_bound_provider_without_claiming_runtime_verification(self):
+        model = self.root / "locally-bound.gguf"
+        self.configure_causal(model)
+        code, _, _ = self.request("POST", "/api/v1/models/discover", {"directory": str(self.root)})
+        self.assertEqual(code, 202)
+        self.server.model_library.scan_worker.join(timeout=5)
+        row = next(item for item in self.server.model_library.discovery()["models"] if item["path"] == str(model))
+        self.assertIn("provider is registered", row["note"])
+        self.assertIn("runtime verification", row["note"])
 
     def test_model_library_download_and_picker_through_api(self):
         content = b"GGUF fixture"

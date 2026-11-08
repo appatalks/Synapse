@@ -44,6 +44,7 @@ _tuning = import_module(f"{APP_PACKAGE}.tuning")
 _settings = import_module(f"{APP_PACKAGE}.settings")
 _profiles = import_module(f"{APP_PACKAGE}.profiles")
 _strata = import_module(f"{APP_PACKAGE}.strata_profile")
+_causal = import_module(f"{APP_PACKAGE}.causal_profile")
 _model_library = import_module(f"{APP_PACKAGE}.model_library")
 
 LOG = logging.getLogger("synapse")
@@ -471,7 +472,8 @@ class Runtime:
                  hybrid_decode_pipeline: bool = False, hybrid_async_ids: bool = False,
                  hybrid_generic_cache_mib: int | None = None, hybrid_generic_transfer: str | None = None,
                  hybrid_hosted: bool = False, settings_store: Path | None = None,
-                 strata_profile: Path | None = None, default_context: int | None = None):
+                 strata_profile: Path | None = None, causal_profile: Path | None = None,
+                 default_context: int | None = None):
         if backend_kind not in ("llama.cpp", "ik_llama.cpp"):
             raise ValueError("Unsupported backend kind.")
         if (hybrid_plan is None) != (hybrid_cuda_plugin is None):
@@ -527,6 +529,11 @@ class Runtime:
         self.strata_verified = False
         self.strata_cache_mib = 0.0
         self.strata_backend_pid = None
+        self.causal = _causal.Installation(causal_profile)
+        self.causal_active = False
+        self.causal_markers: set[str] = set()
+        self.causal_warmup_started = False
+        self.causal_mappings_verified = False
         self.active_hybrid_transfer = self.hybrid_generic_transfer if hybrid_plan == "auto" else hybrid_transfer
         self.required_hybrid_markers = {"hybrid", "context", "coverage", "direct", "registered"} if self.active_hybrid_transfer == "direct" else {"hybrid", "context", "coverage", "staged"}
         self.hybrid_cuda_plugin = hybrid_cuda_plugin.resolve(strict=True) if hybrid_cuda_plugin is not None else None
@@ -726,6 +733,11 @@ class Runtime:
                 waiting.append("Native GPU expert-cache allocation")
             if self.draft_model is not None and self.backend_kind == "llama.cpp" and not self.speculation_verified:
                 waiting.append(f"{self.draft_type.upper()} speculative decoder activation")
+            if self.causal_active:
+                waiting.extend(sorted({"context", "microbatch", "causal", "kv", "gpu", "execution"} -
+                                      self.causal_markers))
+                if not self.causal_mappings_verified:
+                    waiting.append("qualified backend library bindings")
             loading = None
             if self.state == "loading" and self.load_started is not None:
                 loading = {
@@ -761,10 +773,12 @@ class Runtime:
                 "hybrid_generic": self.hybrid_generic,
                 "hybrid_initialization": "auto" if self.hybrid_plan == "auto" else "trained",
                 "selection_reason": self.selection_reason,
-                "execution_profile": ("experimental-strata-mtp" if self.strata_active else
+                "execution_profile": ("experimental-causal-single-token" if self.causal_active else
+                                      "experimental-strata-mtp" if self.strata_active else
                                       f"experimental-hybrid-{self.active_hybrid_transfer}" if self.hybrid_active else "standard"),
                 "execution_profile_id": _profiles.identify({
-                    "execution_mode": "strata" if self.strata_active else "hybrid" if self.hybrid_active else "standard",
+                    "execution_mode": ("causal" if self.causal_active else "strata" if self.strata_active else
+                                       "hybrid" if self.hybrid_active else "standard"),
                     "placement": self.placement, "hybrid_variant": "hosted" if self.active_hosted else "classic",
                     "expert_cache_mib": self.expert_cache_mib if self.native_cache_requested else 0}),
                 "hybrid_transfer": self.active_hybrid_transfer if self.hybrid_active else None,
@@ -776,7 +790,12 @@ class Runtime:
                 "hybrid_active": self.hybrid_active,
                 "engine_capabilities": {"standard": True, "hybrid": self.hybrid_plan is not None,
                                         "hosted": self.hybrid_plan is not None and self.hosted_capable,
-                                        "native_cache": self.native_cache_available, "strata": self.strata.available()},
+                                        "native_cache": self.native_cache_available, "strata": self.strata.available(),
+                                        "causal": self.causal.available()},
+                "causal_active": self.causal_active,
+                "causal_verified": (self.causal_active and self.causal_mappings_verified and
+                                    {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers),
+                "causal_error": self.causal.error,
                 "strata_available": self.strata.available(),
                 "strata_active": self.strata_active,
                 "strata_verified": self.strata_verified,
@@ -835,6 +854,8 @@ class Runtime:
             return None
         settings = entry["settings"]
         if settings["execution_mode"] == "strata" and not self.strata.available(model):
+            return None
+        if settings["execution_mode"] == "causal" and not self.causal.available(model):
             return None
         if (settings["execution_mode"] == "hybrid" and self.hybrid_plan is None) or any(
                 key in data and data[key] != settings[key] and not (key == "hybrid_variant" and data[key] == "auto")
@@ -931,7 +952,8 @@ class Runtime:
             "profiles": _profiles.assess({
                 "moe": required["layout"] is not None, "hybrid": required["hybrid"],
                 "hosted": self.hosted_capable, "direct": required["transfer"] == "direct",
-                "native_cache": self.native_cache_available, "strata": self.strata.available(model)}),
+                "native_cache": self.native_cache_available, "strata": self.strata.available(model),
+                "causal": self.causal.bound_model(model)}),
             "automatic": summary(automatic), "required_hybrid": summary(required),
             "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
             "limitations": [
@@ -957,8 +979,8 @@ class Runtime:
         model_value = data.get("model")
         model = readable_gguf(model_value, "Model")
         mode = data.get("execution_mode", self.default_execution_mode)
-        if mode not in ("auto", "standard", "hybrid", "strata"):
-            raise AppError(400, "Execution mode must be auto, standard, hybrid, or an installed Strata provider.")
+        if mode not in ("auto", "standard", "hybrid", "strata", "causal"):
+            raise AppError(400, "Execution mode must be auto, standard, hybrid, or an installed provider.")
         variant = data.get("hybrid_variant", "auto")
         if variant not in ("auto", "classic", "hosted"):
             raise AppError(400, "Hybrid variant must be auto, classic, or hosted.")
@@ -984,6 +1006,13 @@ class Runtime:
                 raise AppError(400, f"Cannot apply shared context: {exc}") from exc
         learned = self._learned_choice(model, mode, data)
         strata = (learned["execution_mode"] if learned else mode) == "strata"
+        causal = ((learned["execution_mode"] if learned else mode) == "causal" or
+                  (mode == "auto" and learned is None and self.causal.available(model) and
+                   _causal.native_cannot_load(self.standard_executable)))
+        if causal:
+            if not self.causal.available(model):
+                raise AppError(400, "No current qualified causal provider binding exists for this model.")
+            metadata = metadata or model_metadata(model)
         if strata:
             if not self.strata.available(model):
                 raise AppError(400, "No current qualified Strata pack/component binding exists for this model.")
@@ -991,7 +1020,7 @@ class Runtime:
             if moe_layout(metadata) is None:
                 raise AppError(400, "Strata requires a complete routed-MoE descriptor.")
         selection = self._select_execution(metadata, model.stat().st_size,
-                                           "standard" if strata else learned["execution_mode"] if learned else mode, learned)
+                                           "standard" if strata or causal else learned["execution_mode"] if learned else mode, learned)
         if learned is not None and selection["hybrid"] != (learned["execution_mode"] == "hybrid"):
             learned = None
             selection = self._select_execution(metadata, model.stat().st_size, mode)
@@ -1009,16 +1038,18 @@ class Runtime:
             raise AppError(400, "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor. "
                            + reason)
         selected_executable = (self.hybrid_executable if hybrid else
-                               self.standard_executable if self.hybrid_plan is not None or self.strata_active else
+                               self.standard_executable if self.hybrid_plan is not None or self.strata_active or self.causal_active else
                                self.executable)
         if strata:
             selected_executable = backend_executable(self.strata.data["executable"])
+        if causal:
+            selected_executable = backend_executable(self.causal.executable())
         context = data.get("context", planned_context)
         placement = data.get("placement", learned["placement"] if learned else "auto")
         cpu_threads = data.get("cpu_threads", learned["cpu_threads"] if learned else
-                               min(8, len(available_cpus())) if hybrid else default_cpu_threads())
+                               min(8, len(available_cpus())) if hybrid or causal else default_cpu_threads())
         batch_threads = data.get("batch_threads", learned["batch_threads"] if learned else
-                                 min(16, len(available_cpus())) if hybrid else cpu_threads)
+                                 min(16, len(available_cpus())) if hybrid or causal else cpu_threads)
         load_mode = data.get("load_mode", "auto")
         expert_cache_mib = data.get("expert_cache_mib", learned["expert_cache_mib"] if learned else
                                    selected_cache_mib if hybrid else 0)
@@ -1034,6 +1065,16 @@ class Runtime:
                        draft_type != "none" or load_mode != "auto" or context > self.strata.data["maximum_context"]):
             raise AppError(400, "Strata uses its verified F16/MTP/cache profile, automatic placement and qualified context; "
                            "native cache/draft overrides are not compatible.")
+        if causal:
+            machine = self.machine() if self.machine is not None else None
+            if not self.causal.eligible(model, metadata, machine, context):
+                raise AppError(400, "The installed causal provider does not match this model, machine or context.")
+            if (self.backend_kind != "llama.cpp" or placement != "auto" or kv_cache_type != "f16" or
+                    expert_cache_mib != 0 or draft_type != "none" or draft_value not in (None, "") or
+                    load_mode != "auto" or cpu_threads != 8 or batch_threads != 16 or fit_target_mib != 1024 or
+                    host_op_offload is not True or cpu_poll != 50 or op_offload_min_batch != 32):
+                raise AppError(400, "The qualified provider requires automatic placement, F16 cache, 8/16 threads, "
+                               "a 1024 MiB fit target and no drafts or expert-cache overrides.")
         if draft_type not in ("none", "dflash", "mtp"):
             raise AppError(400, "Draft type must be none, dflash, or mtp.")
         if draft_type == "none" and draft_value not in (None, ""):
@@ -1070,7 +1111,7 @@ class Runtime:
             selected_cache_mib = expert_cache_mib
         if expert_cache_mib and placement != "auto":
             raise AppError(400, "The experimental GPU expert cache requires automatic placement.")
-        native_cache = not hybrid and not strata and expert_cache_mib > 0 and self.backend_kind == "llama.cpp"
+        native_cache = not hybrid and not strata and not causal and expert_cache_mib > 0 and self.backend_kind == "llama.cpp"
         if native_cache:
             if not self.native_cache_available:
                 raise AppError(400, "This native backend does not declare GPU expert-cache support.")
@@ -1189,6 +1230,9 @@ class Runtime:
                 command += ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--log-verbosity", "4"]
             elif native_cache:
                 command += ["--cache-type-k", "f16", "--cache-type-v", "f16", "--log-verbosity", "4"]
+            if causal:
+                command += ["--ubatch-size", "1", "--spec-type", "none", "--cache-type-k", "f16",
+                            "--cache-type-v", "f16", "--no-warmup", "--log-verbosity", "4"]
             if draft_type == "dflash" or kv_cache_type == "q8_0":
                 command += ["--flash-attn", "on"]
             # Do not inherit placement overrides or credentials from a developer's shell.
@@ -1205,6 +1249,11 @@ class Runtime:
                 environment = {key: value for key, value in environment.items()
                                if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
                 environment["VRAMBRIDGE_STRATA_CONFIG"] = self.strata.data["configuration"]
+            if causal:
+                environment = {key: value for key, value in environment.items()
+                               if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_", "LD_")) and
+                               key not in ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")}
+                environment.update(VRAMBRIDGE_EXPERIMENT_CAUSAL_SINGLE_TOKEN="1", GGML_CPU_TILED_MM="1")
             if hybrid:
                 environment.update(
                     GGML_BACKEND_PATH=str(self.hybrid_cuda_plugin),
@@ -1244,6 +1293,10 @@ class Runtime:
             self.strata_verified = False
             self.strata_cache_mib = 0.0
             self.strata_backend_pid = None
+            self.causal_active = causal
+            self.causal_markers.clear()
+            self.causal_warmup_started = False
+            self.causal_mappings_verified = False
             self.executable = selected_executable
             self.hybrid_active = hybrid
             self.hybrid_experts = selected_experts
@@ -1264,7 +1317,7 @@ class Runtime:
             self.execution_mode = mode
             self.active_hosted = hosted
             self.engine_source = "measured" if learned else "manual" if mode != "auto" else "default"
-            label = "Automatic provider" if strata else engine_label(hybrid, hosted, placement)
+            label = "Automatic provider" if strata or causal else engine_label(hybrid, hosted, placement)
             if learned and hybrid:
                 self.engine_summary = (f"{label}: measured fastest on this machine by Auto Tune "
                                        f"({learned['decode_tokens_per_second']:.0f} tok/s vs "
@@ -1278,6 +1331,8 @@ class Runtime:
             else:
                 self.engine_summary = f"{label}: selected manually."
             self.selection_reason = reason
+            if causal and learned is None and mode == "auto":
+                self.selection_reason = "The installed default backend does not support this model; its qualified provider was selected."
             self.error = None
             self.readiness_error = None
             self.model = str(model)
@@ -1351,6 +1406,13 @@ class Runtime:
                         cache = re.search(r"K \(([^)]+)\):.*V \(([^)]+)\):", line)
                         if cache and "kv_cache" in lower:
                             self.kv_cache_verified = cache[1] == cache[2] == self.kv_cache_type
+                            if self.causal_active:
+                                if self.kv_cache_verified:
+                                    self.causal_markers.add("kv")
+                                else:
+                                    self.state = "error"
+                                    self.error = "The qualified provider did not confirm F16 K/V cache precision."
+                                    backend_failed = True
                             if (self.kv_cache_type == "q8_0" or self.native_cache_requested) and not self.kv_cache_verified:
                                 self.state = "error"
                                 self.error = (f"Requested {self.kv_cache_type} attention cache, but backend reported K={cache[1]}, "
@@ -1359,6 +1421,30 @@ class Runtime:
                                     self.error = self.error.replace("Requested q8_0", "Requested Q8")
                                 LOG.error("%s", self.error)
                                 backend_failed = True
+                        if self.causal_active:
+                            microbatch = re.search(r"n_ubatch\s*=\s*(\d+)\b", line)
+                            causal = re.search(r"causal_attn\s*=\s*(\d+)\b", line)
+                            slots = re.search(r"n_slots\s*=\s*(\d+),\s*n_ctx_slot\s*=\s*(\d+)\b", line)
+                            for label, match, expected in (
+                                    ("microbatch", microbatch, (1,)), ("causal", causal, (1,)),
+                                    ("context", slots, (1, self.requested_context))):
+                                if match:
+                                    if tuple(int(value) for value in match.groups()) == expected:
+                                        self.causal_markers.add(label)
+                                    else:
+                                        self.state = "error"
+                                        self.error = f"The qualified provider reported an incompatible {label}."
+                                        backend_failed = True
+                            allocation = re.search(r"CUDA\d+ model buffer size\s*=\s*(\d+(?:\.\d+)?)\s+MiB", line)
+                            if allocation and float(allocation[1]) > 0:
+                                self.causal_markers.add("gpu")
+                            if "EXPERIMENT_CAUSAL_SINGLE_TOKEN prefill executed" in line:
+                                if self.causal_warmup_started:
+                                    self.causal_markers.add("execution")
+                                else:
+                                    self.state = "error"
+                                    self.error = "The provider execution marker appeared before its verification request."
+                                    backend_failed = True
                         if self.native_cache_requested:
                             counters = re.search(
                                 r"\bllama_moe_cache: (ubatch\s*[<>]=?\s*8): hits = (\d+), misses = (\d+), "
@@ -1436,7 +1522,12 @@ class Runtime:
                         reported_context = re.search(r"n_ctx_slot\s*=\s*'?(\d+)", line)
                         if reported_context:
                             actual = int(reported_context[1])
-                            if actual != self.requested_context and self.hybrid_active:
+                            if actual != self.requested_context and self.causal_active:
+                                self.state = "error"
+                                self.error = (f"Backend context {actual} does not match the qualified provider context "
+                                              f"{self.requested_context}. No context fallback was accepted.")
+                                backend_failed = True
+                            elif actual != self.requested_context and self.hybrid_active:
                                 self.state = "error"
                                 self.error = (f"Backend context {actual} does not match planned hybrid context "
                                               f"{self.requested_context}. Check the model limit and installation policy.")
@@ -1464,11 +1555,43 @@ class Runtime:
                                           "or explicitly select CPU-only mode. See backend output.")
                             LOG.error("%s", self.error)
                             backend_failed = True
+                        if backend_failed:
+                            self.state = "stopping"
                 if backend_failed:
                     self._terminate(process)
+                    with self.lock:
+                        if self.process is process and self.state == "stopping":
+                            self.state = "error"
                     return
         finally:
             process.stdout.close()
+
+    def _verify_causal_request(self, process, port, key):
+        if not self.causal.available(self.model):
+            raise ValueError("The qualified model or backend changed before verification.")
+        self.causal.verify_mappings(process.pid)
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        try:
+            connection.request("POST", "/completion", json.dumps({
+                "prompt": "Verify this local model using a short, ordinary causal prefill request.",
+                "n_predict": 1, "temperature": 0, "cache_prompt": False,
+            }), {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+            response = connection.getresponse()
+            body = response.read(1024 * 1024 + 1)
+            if response.status != 200 or len(body) > 1024 * 1024:
+                raise ValueError("The provider verification request failed.")
+            result = json.loads(body)
+            if (not isinstance(result, dict) or not isinstance(result.get("timings"), dict) or
+                    type(result["timings"].get("prompt_n")) is not int or result["timings"]["prompt_n"] < 10):
+                raise ValueError("The provider verification request did not process enough prompt tokens.")
+            self.causal.verify_mappings(process.pid)
+            if not self.causal.available(self.model):
+                raise ValueError("The qualified model or backend changed during verification.")
+            with self.lock:
+                if self.process is process and self.state == "loading":
+                    self.causal_mappings_verified = True
+        finally:
+            connection.close()
 
     def _watch(self, process: subprocess.Popen[str]) -> None:
         deadline = time.monotonic() + self.load_timeout
@@ -1507,6 +1630,8 @@ class Runtime:
                                     self.loading_phase = "Verifying native GPU expert cache"
                                 if self.strata_active and not self.strata_verified:
                                     self.loading_phase = "Verifying measured provider"
+                                if self.causal_active:
+                                    self.loading_phase = "Verifying measured provider"
                                 if self.kv_cache_type == "q8_0" and (
                                         not self.kv_cache_verified or self.flash_attention_verified is not True):
                                     self.loading_phase = "Verifying Q8 cache and Flash Attention"
@@ -1520,12 +1645,33 @@ class Runtime:
                                 if self.process is process and self.state == "loading":
                                     self.speculation_verified = True
                         with self.lock:
+                            verify_causal = (self.process is process and self.state == "loading" and
+                                             self.causal_active and not self.causal_warmup_started)
+                            if verify_causal:
+                                self.causal_warmup_started = True
+                        if verify_causal:
+                            try:
+                                self._verify_causal_request(process, port, key)
+                            except (OSError, ValueError, http.client.HTTPException) as exc:
+                                with self.lock:
+                                    if self.process is process and self.state == "loading":
+                                        self.state = "stopping"
+                                        self.error = f"Provider execution or library verification failed: {exc}"
+                                self._terminate(process)
+                                with self.lock:
+                                    if self.process is process and self.state == "stopping":
+                                        self.state = "error"
+                                return
+                        with self.lock:
                             if (self.process is process and self.state == "loading" and
                                     (not self.hybrid_active or
                                      self.required_hybrid_markers <= self.hybrid_markers) and
                                     (not self.native_cache_requested or
                                      (self.native_cache_mib > 0 and self.kv_cache_verified)) and
                                     (not self.strata_active or self.strata_verified) and
+                                    (not self.causal_active or (
+                                        self.causal_mappings_verified and
+                                        {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers)) and
                                     (self.kv_cache_type != "q8_0" or
                                      (self.kv_cache_verified and self.flash_attention_verified is True)) and
                                     (not verify_speculation or self.speculation_verified)):
@@ -1556,9 +1702,13 @@ class Runtime:
                                             not (self.native_cache_mib > 0 and self.kv_cache_verified))
                     strata_expired = (self.strata_active and not self.strata_verified and self.backend_ready_at is not None and
                                       time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT)
+                    causal_expired = (self.causal_active and self.backend_ready_at is not None and
+                                      time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT and
+                                      not (self.causal_mappings_verified and
+                                           {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers))
                     if (self.process is process and self.state == "loading"
                             and (time.monotonic() >= deadline or verification_expired or cache_expired or
-                                 speculation_expired or native_cache_expired or strata_expired)):
+                                 speculation_expired or native_cache_expired or strata_expired or causal_expired)):
                         self._terminate(process)
                         self.state = "error"
                         missing = ", ".join(sorted(self.required_hybrid_markers - self.hybrid_markers))
@@ -1582,6 +1732,8 @@ class Runtime:
                                           "requested KV precision must be confirmed. No uncached fallback was accepted.")
                         if self.strata_active and not self.strata_verified:
                             self.error = "Strata provider verification timed out. No native or target-only fallback was accepted."
+                        if self.causal_active:
+                            self.error = "Provider verification timed out. No unverified execution fallback was accepted."
                         LOG.error("%s", self.error)
                         return
             time.sleep(0.2)
@@ -1651,12 +1803,16 @@ class Runtime:
                 self.native_cache_requested = False
                 self.native_cache_mib = 0.0
                 self.native_cache_allocations.clear()
-                if self.strata_active:
+                if self.strata_active or self.causal_active:
                     self.executable = self.standard_executable
                 self.strata_active = False
                 self.strata_verified = False
                 self.strata_cache_mib = 0.0
                 self.strata_backend_pid = None
+                self.causal_active = False
+                self.causal_markers.clear()
+                self.causal_warmup_started = False
+                self.causal_mappings_verified = False
                 self.speculation_verified = False
                 self.generation_serial += 1
                 self.generation = {}
@@ -1694,7 +1850,8 @@ class AppServer(ThreadingHTTPServer):
         self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
         self.model_library = _model_library.ModelLibrary(
             model_library_dir, search_roots=model_search_roots,
-            metadata=lambda path: model_metadata(path, architecture_only=True))
+            metadata=lambda path: model_metadata(path, architecture_only=True),
+            registered_provider=lambda path: self.runtime.causal.bound_model(path))
         self.restart_requested = False
         self.stop_requested = False
         super().__init__(address, Handler)
@@ -1787,6 +1944,8 @@ class AppServer(ThreadingHTTPServer):
                 "hosted": runtime.hosted_capable}
         if runtime.strata.data is not None:
             identity["strata"] = runtime.strata.identity()
+        if runtime.causal.data is not None:
+            identity["causal"] = runtime.causal.identity()
         return identity
 
     def status(self) -> dict:
@@ -2296,6 +2455,7 @@ def main() -> None:
                           enable_speculation=args.experimental_speculation,
                           execution_mode=mode, settings_store=user_config_dir() / "model-settings.json",
                           strata_profile=user_config_dir() / "strata-profile.json",
+                          causal_profile=user_config_dir() / "causal-profile.json",
                           default_context=_settings.read_context_policy(user_config_dir() / "context-policy.json"), **profile)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))

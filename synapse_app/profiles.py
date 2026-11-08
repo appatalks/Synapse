@@ -18,9 +18,11 @@ CONTRACTS = {
         {"moe", "native_cache"}, {"native-fitting", "gpu-expert-cache"}, "existing-experimental"),
     ("strata", "auto", "classic", False): (
         {"moe", "strata"}, {"expert-sharing", "native-mtp"}, "existing-experimental"),
+    ("causal", "auto", "classic", False): (
+        {"moe", "causal"}, {"native-fitting", "serialized-causal"}, "existing-experimental"),
 }
 IDENTIFIERS = dict(zip(CONTRACTS, ("standard-auto", "standard-cpu", "hybrid-classic", "hybrid-hosted",
-                                 "standard-native-cache", "strata-mtp")))
+                                 "standard-native-cache", "strata-mtp", "causal-single-token")))
 
 
 def validate(data: object) -> dict:

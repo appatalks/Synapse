@@ -43,6 +43,13 @@
       "requires": ["moe", "strata"],
       "components": ["expert-sharing", "native-mtp"],
       "qualification": "existing-experimental"
+    },
+    {
+      "id": "causal-single-token",
+      "settings": {"execution_mode": "causal", "placement": "auto", "hybrid_variant": "classic"},
+      "requires": ["moe", "causal"],
+      "components": ["native-fitting", "serialized-causal"],
+      "qualification": "existing-experimental"
     }
   ]
 }

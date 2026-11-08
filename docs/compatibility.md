@@ -46,9 +46,9 @@ Profiles do not relabel GGUF architectures, change model weights, skip
 experts, add arbitrary environment flags or introduce user-facing engine
 switches. The catalog preserves the existing engine contracts and their
 runtime guards. Existing accelerated paths remain explicitly experimental,
-not newly quality-qualified by this catalog. No tandem/Clover research
-backend, concurrent-agent optimization or unqualified speed preset is
-bundled. New optimized components require research qualification and a
+not newly quality-qualified by this catalog. No tandem/Clover backend,
+concurrent-agent optimization or unqualified speed preset is bundled.
+New optimized components require research qualification and a
 reviewed contract before becoming production profiles.
 
 The native-cache tuning adaptation uses existing backend operations:
@@ -60,7 +60,7 @@ Coder's 16K near-capacity tuning and Automatic reload select a passing
 8 GiB cache; GPT retains uncached fitting where cache trials do not win.
 These are scoped engineering checks, not a new intelligence/agentic
 leaderboard or an assertion that every MoE layout is qualified.
-CPU/GPU overlap, MTP and Clover backend deployment remain separate gates.
+CPU/GPU overlap, MTP and diffusion remain separate gates.
 The optional Strata provider is now part of Automatic/Auto Tune when a
 locally qualified installation profile is present. It is bound to the
 actual model file, component/controller files, cache residency and F16/MTP
@@ -79,6 +79,32 @@ provider's supported context with updated client limits; Maximum never
 reduces capacity just to select it. This is not a native llama.cpp MTP
 port, Clover/diffusion support or a general intelligence qualification.
 See the sister repository's `docs/research/strata-upstream-reuse.md`.
+
+## Optional serialized causal provider
+
+The separately installed provider is pinned to one verified Clover GGUF,
+the measured binary components, Ryzen 9 9950X, one RTX 5070 Ti and NVIDIA
+driver 595.58.03. It is not a general Clover, diffusion, concurrent-slot,
+speculative-decoding, Q8-KV or cross-platform implementation. Different
+model files, packages or machines remain unavailable until qualified.
+
+On that host, a single isolated 131,072-token slot retrieved anchors from
+122,878 input tokens in 2,035 seconds. Short-generation screens measured
+57.49–57.89 tokens/s in that load; this shared-host result is not a general
+speed guarantee or broad quality assessment. Bounded same-placement
+full-vocabulary and prefix-reuse controls passed. Loading also requires
+actual execution and package-local library bindings; a missing marker or
+changed precision, context or package is an error.
+The packaged app also loaded the separately staged provider at 128K through
+Automatic and returned a chat completion in an isolated configuration.
+
+The application does not bundle or install the backend. A separately
+prepared exact package can be registered only with explicit confirmation;
+see [installation](installing.md#optional-qualified-causal-provider).
+The [research patch and evidence](https://github.com/appatalks/unified-memory-scheduler/blob/2dab9aff90631a3e1094f60eea7e69a76a1a3063/docs/research/clover-diffusion.md)
+are pinned to research commit `2dab9aff90631a3e1094f60eea7e69a76a1a3063`.
+The execution-marker patch SHA-256 is
+`c7a5b362ceb26f585859febb78fa9b2eda06ec00913dfabcde7ad071aee7b7f3`.
 
 ## Tested hybrid configurations
 
