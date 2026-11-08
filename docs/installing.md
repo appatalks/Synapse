@@ -102,6 +102,25 @@ weights, or target-only fallback is silently substituted.
 
 [Draft compatibility, API fields and qualification limits](application_notes.md#experimental-speculative-decoding).
 
+## Optional qualified causal provider
+
+The application does not download this backend. With a separately prepared
+package matching the [qualification](compatibility.md#optional-serialized-causal-provider),
+explicitly install it from a source checkout:
+
+```sh
+python3 scripts/setup_causal_provider.py \
+  --source-bin /path/to/qualified/package/bin \
+  --model /path/to/qualified/model.gguf \
+  --destination /path/to/new/provider/bin --confirm
+```
+
+The command refuses an existing destination or profile, checks the exact
+model and component hashes and the qualified machine/driver, and registers
+the provider only after verifying the copied files. Restart SYNAPSE to
+discover it. The model weights are read for a full SHA-256 verification.
+Keep Engine: Automatic; no new user-facing engine switch is required.
+
 ## Auto Tune
 
 Open **Model Controls -> Auto Tune for this system**, choose a goal and explicitly
@@ -129,6 +148,8 @@ tried at that context. Unbound causal layouts may try progressively smaller
 expert banks; bound training plans retain their budget. An allocation/headroom
 failure is preserved even when the backend later emits generic loader errors,
 so those trailing messages do not prevent the existing smaller-bank retries.
+If Standard cannot load a model but a matching qualified causal provider is
+available, Auto Tune records the failed Standard trial and tests that provider.
 Failed trials remain visible; context and KV precision are not silently reduced.
 If the GPU backend
 supports in-graph expert calls, that method is tried with the same bank and

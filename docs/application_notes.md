@@ -10,6 +10,33 @@ The app needs only Python and a browser; models and an appropriate
 The reference backend revision is b11669.
 [Platform and sensor limits](monitoring.md).
 
+## Tested model library
+
+Open **Model Controls → Model library** to browse the curated GGUFs,
+their download sizes, licenses, and test limitations. Select a local file
+or explicitly confirm a download to the chosen directory. Downloads use
+revision-pinned HTTPS URLs and verify the complete size and SHA-256 before
+publishing the file. Cancelled or failed partial downloads are removed;
+existing files are never overwritten. A file found by name and size is
+identified as local, but is not automatically re-hashed.
+
+The library also scans the chosen library folder, configured local search
+roots, and the last-used model for GGUF files without reading model weights.
+Split files appear once under their first shard; missing shards are reported.
+The scan is bounded and does not upload, move or modify models. A discovered
+file is not automatically validated for quality or compatibility. Clover's
+architecture is listed with a warning because the default installed backend
+does not support it. If a separate matching provider is registered, the
+library identifies that binding; integrity and runtime checks still occur
+before the model can load.
+
+Speed percentages are historical measurements for the exact file and
+specified hardware/context, not guaranteed predictions or quality
+rankings. Where no comparable acceleration measurement exists, the
+library says so. Auto Tune measures supported paths on your machine.
+Model downloads require substantial disk space and may have separate
+license terms; no model is downloaded without confirmation.
+
 ## Hybrid eligibility pre-check
 
 In **Chat → Model Controls**, select a local GGUF in the browser or enter its
@@ -81,6 +108,58 @@ the faster long-prompt run; Automatic then reuses that choice on this machine
 general answer-quality check or an exhaustive speed search. With Hybrid off,
 only Standard is tested and applied; that restricted run does not replace an
 existing Automatic engine winner or turn Hybrid back on.
+
+On a declared-capable native llama.cpp backend, Linux/NVIDIA MoE tuning
+with F16 KV also compares native GPU expert-cache budgets. These are
+Standard-backend trials, not experimental CPU-expert sharing or drafting.
+Only configurations that pass the input/answer/generation checks can win,
+and the same 5% selection margin applies. GPU cache allocation and KV
+precision must appear in backend output; an ignored/disabled cache is
+an error, not an uncached fallback. Allocation failures try a smaller
+budget; missing activation stops cache trials. CPU-only, non-qualified
+platforms, dense models and unsupported backends keep ordinary trials.
+Cache budgets, context and thread counts remain internal measured settings,
+not new engine switches.
+
+Native cache budgets now scale with detected NVIDIA VRAM rather than
+stopping at 12 GiB. The backend must still pass actual allocation,
+precision and input checks. Auto Tune can test two intermediate budgets
+between observed fitting/OOM sizes, preserving the 5% selection margin.
+Completed native cache trials retain the backend's cumulative hit/miss
+and upload counters; these are load-level diagnostics, not pure per-token
+decode counters or a reason to choose a slower configuration.
+
+When a qualified optional Strata component/profile is installed, Auto
+Tune also compares that model-bound provider without another user switch.
+It must confirm full routing, the bound cache, F16 and MTP before ready.
+Its controller/library/Python dependency identity is recorded separately;
+its winner side-store leaves legacy native choices readable by older
+apps. Balanced can recommend a faster supported context; Maximum keeps
+the selected capacity. Installer/backend upgrades and registration still
+require consent, and the native backend remains available.
+
+A separately registered causal provider is available only for its exact
+qualified model, build, machine and driver. Automatic uses it when the
+identified native backend cannot load that model; Auto Tune can measure
+and remember it. Loading verifies the model and component hashes, actual
+context, F16 cache, GPU placement, execution and library bindings. An
+unsupported or unverified configuration fails rather than falling back.
+
+A shared local context preference can be registered in
+`~/.config/synapse/context-policy.json` (or the platform/XDG configuration
+directory) as `{"schema_version":1,"default_context":131072}`. It applies
+to new model loads and Auto Tune, not just the last model's saved settings.
+Automatic measures that exact capacity rather than reusing a shorter
+winner; models with a smaller advertised limit use that limit with an
+explanation. Manual explicit context overrides remain available. Without
+the preference, existing defaults and saved controls are unchanged.
+
+The capacity probe requests low reasoning effort on native llama.cpp as
+well as disabling thinking where supported, so models that do not
+understand `/no_think` can return the bounded JSON answer. This does not
+change reasoning preferences for normal chats. Backend identity also
+includes matching native shared libraries; changing those invalidates
+older measured choices without rewriting saved files.
 
 Maximum Context prioritizes verified capacity and long-prompt request time,
 not fastest generation. Its saved winner may use a much larger context and

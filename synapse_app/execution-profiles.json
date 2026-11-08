@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "standard-auto",
+      "settings": {"execution_mode": "standard", "placement": "auto", "hybrid_variant": "classic"},
+      "requires": [],
+      "components": ["native-fitting"],
+      "qualification": "baseline"
+    },
+    {
+      "id": "standard-cpu",
+      "settings": {"execution_mode": "standard", "placement": "cpu", "hybrid_variant": "classic"},
+      "requires": [],
+      "components": ["native-cpu"],
+      "qualification": "baseline"
+    },
+    {
+      "id": "hybrid-classic",
+      "settings": {"execution_mode": "hybrid", "placement": "auto", "hybrid_variant": "classic"},
+      "requires": ["moe", "hybrid"],
+      "components": ["expert-sharing"],
+      "qualification": "existing-experimental"
+    },
+    {
+      "id": "hybrid-hosted",
+      "settings": {"execution_mode": "hybrid", "placement": "auto", "hybrid_variant": "hosted"},
+      "requires": ["moe", "hybrid", "hosted", "direct"],
+      "components": ["expert-sharing", "hosted-experts"],
+      "qualification": "existing-experimental"
+    },
+    {
+      "id": "standard-native-cache",
+      "settings": {"execution_mode": "standard", "placement": "auto", "hybrid_variant": "classic"},
+      "native_cache": true,
+      "requires": ["moe", "native_cache"],
+      "components": ["native-fitting", "gpu-expert-cache"],
+      "qualification": "existing-experimental"
+    },
+    {
+      "id": "strata-mtp",
+      "settings": {"execution_mode": "strata", "placement": "auto", "hybrid_variant": "classic"},
+      "requires": ["moe", "strata"],
+      "components": ["expert-sharing", "native-mtp"],
+      "qualification": "existing-experimental"
+    },
+    {
+      "id": "causal-single-token",
+      "settings": {"execution_mode": "causal", "placement": "auto", "hybrid_variant": "classic"},
+      "requires": ["moe", "causal"],
+      "components": ["native-fitting", "serialized-causal"],
+      "qualification": "existing-experimental"
+    }
+  ]
+}

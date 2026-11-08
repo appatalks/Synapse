@@ -16,6 +16,8 @@ import threading
 import time
 from typing import Callable
 
+from . import profiles
+
 
 LOG = logging.getLogger("synapse.tuning")
 LOAD_FIELDS = ("model", "execution_mode", "context", "placement", "cpu_threads", "batch_threads",
@@ -31,6 +33,20 @@ DECODE_CHUNK_TOKENS = 128
 DECODE_MAX_CHUNKS = 6
 
 
+def native_cache_banks(hardware: dict, *, supported: bool, compatible: bool,
+                       placement: str, kv_cache_type: str) -> list[int]:
+    if (not supported or not compatible or placement != "auto" or kv_cache_type != "f16" or
+            str(hardware.get("platform", "")).lower() != "linux"):
+        return []
+    capacities = [device.get("vram_total_bytes") for device in hardware.get("gpus", [])
+                  if isinstance(device, dict) and "nvidia" in str(device.get("name", "")).lower()]
+    capacities = [value for value in capacities if type(value) is int and value > 0]
+    budget = min(65536, sum(max(0, value // 1024**2 - 1024) for value in capacities))
+    largest = budget // 1024 * 1024
+    return sorted({size for size in (largest, 49152, 32768, 24576, 16384, 12288, 8192, 4096, 2048, 1024)
+                   if 1024 <= size <= budget}, reverse=True)
+
+
 class TrialError(RuntimeError):
     pass
 
@@ -41,7 +57,7 @@ class Cancelled(RuntimeError):
 
 def _valid_settings(settings: object) -> bool:
     return (isinstance(settings, dict) and type(settings.get("context")) is int and
-            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid") and
+            512 <= settings["context"] <= 262144 and settings.get("execution_mode") in ("standard", "hybrid", "strata", "causal") and
             settings.get("draft_type", "none") in ("none", "dflash", "mtp") and
             settings.get("hybrid_variant", "classic") in ("auto", "classic", "hosted") and
             settings.get("kv_cache_type", "f16") in ("f16", "q8_0"))
@@ -64,7 +80,8 @@ def _valid_choice(entry: object) -> bool:
                 for key in ("cpu_threads", "batch_threads", "expert_cache_mib")) and
             type(entry.get("decode_tokens_per_second")) in (int, float) and
             type(entry.get("standard_decode_tokens_per_second")) in (int, float) and
-            type(entry.get("measured_at")) in (int, float) and entry.get("goal") in ("balanced", "maximum"))
+            type(entry.get("measured_at")) in (int, float) and entry.get("goal") in ("balanced", "maximum") and
+            profiles.measured_profile_valid(entry))
 
 
 class EngineChoices:
@@ -74,6 +91,9 @@ class EngineChoices:
         self.store = store
         self.lock = threading.Lock()
         self.entries: dict[str, dict] = {}
+        self.legacy_entries: dict[str, dict] = {}
+        self.provider_entries: dict[str, dict] = {}
+        self.provider_store = store.with_name(store.stem + "-providers" + store.suffix) if store is not None else None
         self.error: str | None = None
         if store is not None and store.exists():
             try:
@@ -89,10 +109,50 @@ class EngineChoices:
             except (OSError, ValueError) as exc:
                 LOG.error("Saved engine choices unavailable: %s", exc)
                 self.error = f"Saved engine choices unavailable: {exc}"
+        self.legacy_entries = dict(self.entries)
+        if self.provider_store is not None and self.provider_store.exists():
+            try:
+                if self.provider_store.stat().st_size > 1024 * 1024:
+                    raise ValueError("Optional provider choices exceed 1 MiB.")
+                saved = json.loads(self.provider_store.read_text())
+                if (saved.get("schema_version") != 1 or not isinstance(saved.get("entries"), dict) or
+                        len(saved["entries"]) > MAX_CHOICES or not all(
+                            isinstance(key, str) and _valid_choice(entry) and
+                            entry["settings"]["execution_mode"] in ("strata", "causal")
+                            for key, entry in saved["entries"].items())):
+                    raise ValueError("Unsupported optional provider choices.")
+                self.provider_entries = saved["entries"]
+                self.entries = self._combined()
+            except (OSError, ValueError, AttributeError) as exc:
+                LOG.error("Saved optional provider choices unavailable: %s", exc)
+
+    def _combined(self):
+        entries = dict(self.legacy_entries)
+        for key, entry in self.provider_entries.items():
+            if key not in entries or entry["measured_at"] >= entries[key]["measured_at"]:
+                entries[key] = entry
+        while len(entries) > MAX_CHOICES:
+            del entries[min(entries, key=lambda name: entries[name]["measured_at"])]
+        return entries
 
     @staticmethod
     def key(model: Path, kv_cache_type: str, machine: dict) -> str:
         info = model.stat()
+        machine = dict(machine)
+        if "strata" in machine:
+            try:
+                compatible = os.path.samefile(model, machine["strata"]["model"]["path"])
+            except (OSError, KeyError, TypeError):
+                compatible = False
+            if not compatible:
+                machine.pop("strata")
+        if "causal" in machine:
+            try:
+                compatible = os.path.samefile(model, machine["causal"]["model"])
+            except (OSError, KeyError, TypeError):
+                compatible = False
+            if not compatible:
+                machine.pop("causal")
         identity = {"model": str(model.resolve()), "size": info.st_size, "mtime_ns": info.st_mtime_ns,
                     "kv_cache_type": kv_cache_type, "machine": machine}
         return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
@@ -106,31 +166,37 @@ class EngineChoices:
             return None
         with self.lock:
             entry = self.entries.get(key)
-            return deepcopy(entry) if entry is not None else None
+            return deepcopy(entry) if entry is not None and profiles.measured_profile_current(entry) else None
 
     def remember(self, model: Path, machine: dict, entry: dict) -> None:
         if not _valid_choice(entry):
             raise ValueError("Refusing to save an invalid engine choice.")
         key = self.key(model, entry["settings"]["kv_cache_type"], machine)
         with self.lock:
-            entries = {**self.entries, key: deepcopy(entry)}
+            provider = entry["settings"]["execution_mode"] in ("strata", "causal")
+            target = self.provider_store if provider else self.store
+            entries = {**(self.provider_entries if provider else self.legacy_entries), key: deepcopy(entry)}
             while len(entries) > MAX_CHOICES:
                 del entries[min(entries, key=lambda name: entries[name]["measured_at"])]
-            if self.store is not None:
-                self.store.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if target is not None:
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 temporary = None
                 try:
-                    with tempfile.NamedTemporaryFile(mode="w", dir=self.store.parent, prefix=".choices-",
+                    with tempfile.NamedTemporaryFile(mode="w", dir=target.parent, prefix=".choices-",
                                                      encoding="utf-8", delete=False) as output:
                         temporary = Path(output.name)
                         json.dump({"schema_version": 1, "entries": entries}, output, indent=2)
                         output.flush()
                         os.fsync(output.fileno())
-                    temporary.replace(self.store)
+                    temporary.replace(target)
                 finally:
                     if temporary is not None:
                         temporary.unlink(missing_ok=True)
-            self.entries = entries
+            if provider:
+                self.provider_entries = entries
+            else:
+                self.legacy_entries = entries
+            self.entries = self._combined()
 
 
 class AutoTuner:
@@ -207,8 +273,8 @@ class AutoTuner:
             self.report.update(fields)
 
     def start(self, data: dict) -> dict:
-        if set(data) - {"model", "goal", "include_hybrid", "placement", "kv_cache_type", "confirm"}:
-            raise ValueError("Auto Tune accepts model, goal, include_hybrid, placement, kv_cache_type and confirm.")
+        if set(data) - {"model", "goal", "include_hybrid", "placement", "kv_cache_type", "confirm", "context"}:
+            raise ValueError("Auto Tune accepts model, goal, include_hybrid, placement, kv_cache_type, context and confirm.")
         if data.get("confirm") is not True:
             raise ValueError("Confirm that Auto Tune may unload the model and run local benchmarks.")
         goal = data.get("goal", "balanced")
@@ -231,6 +297,14 @@ class AutoTuner:
         limit = metadata.get(f"{architecture}.context_length", self.maximum)
         if type(limit) is not int or limit < 512:
             raise ValueError("The model has no usable context limit.")
+        target_context = data.get("context", getattr(runtime, "preferred_context", None))
+        if target_context is not None:
+            if type(target_context) is not int or not 512 <= target_context <= self.maximum:
+                raise ValueError("Requested tuning context is outside the supported range.")
+            if target_context > limit:
+                if "context" in data:
+                    raise ValueError("Requested tuning context exceeds the advertised model limit.")
+                target_context = limit
         hybrid_possible = current["hybrid_available"] and placement == "auto" and self.compatible(metadata)
         if hybrid and not hybrid_possible:
             raise ValueError("Hybrid trials require an installed compatible MoE profile and automatic placement.")
@@ -240,10 +314,23 @@ class AutoTuner:
         if available < min(4 * 1024 ** 3, total // 10):
             raise RuntimeError("Insufficient available RAM safety reserve. Free memory before starting Auto Tune.")
         hardware = self.hardware()
+        cache_banks = native_cache_banks(
+            hardware, supported=current.get("native_cache_available", False),
+            compatible=self.compatible(metadata), placement=placement, kv_cache_type=cache)
+        strata = (data.get("include_hybrid") is not False and self.compatible(metadata) and
+                  runtime.strata.eligible(model, hardware, placement, cache) and
+                  (target_context is None or target_context <= runtime.strata.data["maximum_context"]))
         maximum = min(limit, self.maximum, 32768 if goal == "balanced" else self.maximum)
         contexts = [size for size in (8192, 16384, 32768, 65536, 131072, 262144) if size <= maximum]
         if not contexts or contexts[-1] != maximum:
             contexts.append(maximum)
+        if target_context is not None:
+            contexts = [target_context]
+        causal = False
+        if (runtime.causal.data is not None and data.get("include_hybrid") is not False and
+                placement == "auto" and cache == "f16"):
+            machine = self.machine() if self.machine is not None else None
+            causal = runtime.causal.eligible(model, metadata, machine, min(contexts[-1], 131072))
         previous = {key: current[key] for key in LOAD_FIELDS} if current["state"] == "ready" else None
         with self.lock:
             self.cancelled.clear()
@@ -251,6 +338,10 @@ class AutoTuner:
             self.report = {
                 "schema_version": 1, "state": "running", "active": True, "model": model, "goal": goal,
                 "include_hybrid": hybrid, "phase": "Preparing local trials", "detail": "",
+                "native_cache_banks_mib": cache_banks,
+                "strata_candidate": strata,
+                "causal_candidate": causal,
+                "target_context": target_context,
                 "kv_cache_type": cache,
                 "progress": None, "trials": [], "recommendation": None, "error": None,
                 "hardware": {**hardware, "logical_cpus": self.cpu_count(), "ram_total_bytes": total,
@@ -260,7 +351,7 @@ class AutoTuner:
             }
             self.worker = threading.Thread(
                 target=self._run, args=(runtime, model, contexts, placement, hybrid, metadata, previous, cache, goal,
-                                       data.get("include_hybrid") is False),
+                                       data.get("include_hybrid") is False, cache_banks, strata, causal),
                 daemon=True)
             self.worker.start()
         return self.snapshot()
@@ -404,6 +495,7 @@ class AutoTuner:
                 "model": "local-model", "messages": [{"role": "user", "content": prompt}],
                 "stream": True, "max_tokens": 128, "temperature": 0, "seed": 42, "cache_prompt": False,
                 "chat_template_kwargs": {"enable_thinking": False}, "stream_options": {"include_usage": True},
+                **({"reasoning_effort": "low"} if runtime.backend_kind == "llama.cpp" else {}),
             }), {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
             response = connection.getresponse()
             if response.status != 200:
@@ -493,6 +585,7 @@ class AutoTuner:
             runtime.stop()
             runtime.load(settings, remember=False)
             loaded = self._wait_ready(runtime)
+            trial["expert_cache_allocated_mib"] = loaded["strata_cache_mib"] or loaded["native_cache_mib"]
             if loaded["context"] != settings["context"]:
                 raise TrialError(f"Backend loaded {loaded['context']} rather than {settings['context']} tokens.")
             self._update(phase=f"Testing near-capacity input: {label}", detail="", progress=None)
@@ -510,6 +603,9 @@ class AutoTuner:
                 trial.update(probe)
             finally:
                 runtime.chat_lock.release()
+            if runtime.native_cache_requested:
+                runtime.stop()
+                trial["cache_statistics"] = runtime.status()["native_cache_statistics"]
         except (self.runtime_error, TrialError, OSError, ValueError, http.client.HTTPException) as exc:
             if isinstance(exc, Cancelled) or self.cancelled.is_set():
                 raise Cancelled("Auto Tune was cancelled.") from exc
@@ -531,9 +627,14 @@ class AutoTuner:
         if self.choices is None or machine is None:
             return False
         settings = {key: selected["settings"][key] for key in CHOICE_FIELDS}
+        identifier = profiles.identify(settings)
+        if identifier is None:
+            LOG.error("Could not identify the measured execution profile.")
+            return False
         try:
             self.choices.remember(Path(model), machine, {
                 "settings": settings, "goal": goal, "measured_at": time.time(),
+                "profile_id": identifier, "profile_revision": profiles.revision(identifier),
                 "decode_tokens_per_second": selected["decode_tokens_per_second"],
                 "standard_decode_tokens_per_second": standard["decode_tokens_per_second"]})
         except (OSError, ValueError) as exc:
@@ -560,10 +661,15 @@ class AutoTuner:
                                                  (loaded["hybrid_active"] and
                                                   loaded["hybrid_variant"] != expected["hybrid_variant"])):
                 raise TrialError("The applied engine differs from the measured choice.")
+            if measured and loaded["strata_active"] != (expected["execution_mode"] == "strata"):
+                raise TrialError("The applied provider differs from the measured choice.")
+            if measured and loaded["causal_active"] != (expected["execution_mode"] == "causal"):
+                raise TrialError("The applied provider differs from the measured choice.")
 
     def _run(self, runtime, model: str, contexts: list[int], placement: str, hybrid: bool,
              metadata: dict, previous: dict | None, cache: str, goal: str = "balanced",
-             standard_only: bool = False) -> None:
+             standard_only: bool = False, cache_banks: list[int] | None = None, strata: bool = False,
+             causal: bool = False) -> None:
         original_budget = runtime.hybrid_context
         selected = None
         remembered = False
@@ -571,17 +677,67 @@ class AutoTuner:
         error = None
         try:
             for context in contexts:
-                settings = {"model": model, "execution_mode": "standard", "context": context,
-                            "placement": placement, "cpu_threads": min(8, self.cpu_threads()),
+                settings = {**profiles.settings("standard-cpu" if placement == "cpu" else "standard-auto"),
+                            "model": model, "context": context, "cpu_threads": min(8, self.cpu_threads()),
                             "batch_threads": min(16, self.cpu_count()), "fit_target_mib": 1024,
-                            "kv_cache_type": cache, "expert_cache_mib": 0, "hybrid_variant": "classic"}
+                            "kv_cache_type": cache, "expert_cache_mib": 0}
                 trial = self._trial(runtime, settings)
+                if not trial["capacity_passed"] and causal and context <= 131072:
+                    trial = self._trial(runtime, {**settings, **profiles.settings("causal-single-token")})
                 if not trial["capacity_passed"]:
                     break
                 selected = trial
             if selected is None:
                 raise TrialError("No context passed. Review the failed trials; no app settings were recommended.")
             standard = selected
+            if standard["settings"]["execution_mode"] == "causal":
+                cache_banks, hybrid, strata = [], False, False
+            failed_bank = None
+            fitting_bank = 0
+            cache_contract_ok = True
+            for bank in cache_banks or []:
+                settings = {**standard["settings"], **profiles.settings("standard-native-cache"),
+                            "expert_cache_mib": bank}
+                trial = self._trial(runtime, settings)
+                if trial["capacity_passed"]:
+                    fitting_bank = max(fitting_bank, bank)
+                    if self._better(trial, selected, goal):
+                        selected = trial
+                elif any(term in str(trial.get("error") or "").lower()
+                         for term in ("failed to alloc", "allocation failed", "allocating",
+                                      "out of memory", "insufficient", "residency budget")):
+                    failed_bank = min(failed_bank or bank, bank)
+                else:
+                    cache_contract_ok = False
+                    break
+            # Fill only the measured fit/OOM gap; do not assume the largest bank is faster.
+            for _ in range(2):
+                if not cache_contract_ok or failed_bank is None or not fitting_bank or failed_bank - fitting_bank < 2048:
+                    break
+                bank = ((failed_bank + fitting_bank) // 2048) * 1024
+                trial = self._trial(runtime, {**standard["settings"], **profiles.settings("standard-native-cache"),
+                                              "expert_cache_mib": bank})
+                if trial["capacity_passed"]:
+                    fitting_bank = bank
+                    if self._better(trial, selected, goal):
+                        selected = trial
+                elif any(term in str(trial.get("error") or "").lower()
+                         for term in ("failed to alloc", "allocation failed", "allocating",
+                                      "out of memory", "insufficient", "residency budget")):
+                    failed_bank = bank
+                else:
+                    break
+            strata_context = min(standard["settings"]["context"], runtime.strata.data["maximum_context"]) if strata else 0
+            if strata and (goal == "balanced" or strata_context == standard["settings"]["context"]):
+                trial = self._trial(runtime, {**standard["settings"], **profiles.settings("strata-mtp"),
+                                              "context": strata_context, "expert_cache_mib": 0})
+                if trial["capacity_passed"] and self._better(trial, selected, goal):
+                    selected = trial
+            if causal and standard["settings"]["execution_mode"] != "causal" and standard["settings"]["context"] <= 131072:
+                trial = self._trial(runtime, {**standard["settings"], **profiles.settings("causal-single-token"),
+                                              "expert_cache_mib": 0})
+                if trial["capacity_passed"] and self._better(trial, selected, goal):
+                    selected = trial
             if hybrid:
                 context = selected["settings"]["context"]
                 bound = runtime.hybrid_plan != "auto" and runtime.hybrid_layout == self.layout(metadata)
@@ -593,16 +749,16 @@ class AutoTuner:
                     runtime.hybrid_context = context
                 best_hybrid = None
                 for bank in banks:
-                    settings = {"model": model, "execution_mode": "hybrid", "context": context,
-                                "placement": "auto", "cpu_threads": min(8, self.cpu_threads()),
+                    settings = {**profiles.settings("hybrid-classic"), "model": model, "context": context,
+                                "cpu_threads": min(8, self.cpu_threads()),
                                 "batch_threads": min(16, self.cpu_count()), "expert_cache_mib": bank,
                                 "load_mode": "auto", "host_op_offload": False, "fit_target_mib": 1024,
-                                "kv_cache_type": cache, "hybrid_variant": "classic"}
+                                "kv_cache_type": cache}
                     trial = self._trial(runtime, settings)
                     if trial["capacity_passed"]:
                         best_hybrid = trial
                         if runtime.hosted_capable and transfer == "direct":
-                            hosted = self._trial(runtime, {**settings, "hybrid_variant": "hosted"})
+                            hosted = self._trial(runtime, {**settings, **profiles.settings("hybrid-hosted")})
                             if hosted["capacity_passed"] and self._better(hosted, best_hybrid, goal):
                                 best_hybrid = hosted
                         break

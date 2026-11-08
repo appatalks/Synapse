@@ -16,6 +16,96 @@ The [read-only pre-check](application_notes.md#hybrid-eligibility-pre-check)
 explains metadata/profile eligibility and Automatic selection without loading
 weights. It is not a kernel, fit, performance or quality qualification.
 
+## Modular execution profiles
+
+SYNAPSE bundles a declarative catalog in
+[`execution-profiles.json`](../synapse_app/execution-profiles.json) for the
+existing native Automatic/CPU and Classic/Hosted expert-sharing components.
+It also declares a guarded native GPU expert-cache profile with a
+positive measured cache budget. CLI capability discovery does not load a
+model; actual cache allocation and KV precision are checked at load.
+The read-only pre-check returns each profile's requirements, candidate
+eligibility, missing capabilities and qualification scope. Routed-MoE
+metadata and the installed engine policy gate accelerated candidates;
+Hosted additionally requires its capability and direct transfers.
+A candidate still needs successful backend loading, fit and runtime
+activation checks. It is not a declaration of architecture/kernel support.
+
+Keep **Engine: Automatic**. Auto Tune uses these profile templates with
+the model's measured context, cache size, threads and Balanced/Maximum goal,
+then remembers the winning settings per model, KV precision, machine and
+backend build. New measurements also record the profile ID and definition
+fingerprint. If its definition changes, that measurement is not reused;
+saved files are not rewritten and legacy measurements remain readable.
+The native backend's matching shared-library identities are now included
+in the machine/build key, so earlier weakly keyed measurements may require
+Auto Tune again.
+`execution_profile_id` in status identifies the current existing engine.
+
+Profiles do not relabel GGUF architectures, change model weights, skip
+experts, add arbitrary environment flags or introduce user-facing engine
+switches. The catalog preserves the existing engine contracts and their
+runtime guards. Existing accelerated paths remain explicitly experimental,
+not newly quality-qualified by this catalog. No tandem/Clover backend,
+concurrent-agent optimization or unqualified speed preset is bundled.
+New optimized components require research qualification and a
+reviewed contract before becoming production profiles.
+
+The native-cache tuning adaptation uses existing backend operations:
+all selected experts are retained, F16 is the qualified tuning preset,
+and inherited experimental sharing/routing/default bundles are suppressed
+for the native-cache path. Local hardware validation includes Coder,
+the modified SC117 Qwen3.8 target and GPT-OSS on the pinned b11669 build.
+Coder's 16K near-capacity tuning and Automatic reload select a passing
+8 GiB cache; GPT retains uncached fitting where cache trials do not win.
+These are scoped engineering checks, not a new intelligence/agentic
+leaderboard or an assertion that every MoE layout is qualified.
+CPU/GPU overlap, MTP and diffusion remain separate gates.
+The optional Strata provider is now part of Automatic/Auto Tune when a
+locally qualified installation profile is present. It is bound to the
+actual model file, component/controller files, cache residency and F16/MTP
+activation; another similarly named GGUF cannot reuse its pack.
+The backend component is separate from the application and is not
+installed or selected silently. Users keep Engine: Automatic.
+CPU-only, unsupported platforms/models, or Standard-only tuning retain
+the native paths. Provider winners are saved separately from legacy
+native engine choices, and an unrelated model's native choice key does
+not change merely because Strata is installed.
+
+The reviewed Qwen integration passes same-cache scalar/MTP full-vocabulary
+checks, actual Auto Tune selection/reload, streamed/non-streamed API use,
+and a 14,333-token capacity check at 16K. Balanced may recommend the
+provider's supported context with updated client limits; Maximum never
+reduces capacity just to select it. This is not a native llama.cpp MTP
+port, Clover/diffusion support or a general intelligence qualification.
+See the sister repository's `docs/research/strata-upstream-reuse.md`.
+
+## Optional serialized causal provider
+
+The separately installed provider is pinned to one verified Clover GGUF,
+the measured binary components, Ryzen 9 9950X, one RTX 5070 Ti and NVIDIA
+driver 595.58.03. It is not a general Clover, diffusion, concurrent-slot,
+speculative-decoding, Q8-KV or cross-platform implementation. Different
+model files, packages or machines remain unavailable until qualified.
+
+On that host, a single isolated 131,072-token slot retrieved anchors from
+122,878 input tokens in 2,035 seconds. Short-generation screens measured
+57.49–57.89 tokens/s in that load; this shared-host result is not a general
+speed guarantee or broad quality assessment. Bounded same-placement
+full-vocabulary and prefix-reuse controls passed. Loading also requires
+actual execution and package-local library bindings; a missing marker or
+changed precision, context or package is an error.
+The packaged app also loaded the separately staged provider at 128K through
+Automatic and returned a chat completion in an isolated configuration.
+
+The application does not bundle or install the backend. A separately
+prepared exact package can be registered only with explicit confirmation;
+see [installation](installing.md#optional-qualified-causal-provider).
+The [research patch and evidence](https://github.com/appatalks/unified-memory-scheduler/blob/2dab9aff90631a3e1094f60eea7e69a76a1a3063/docs/research/clover-diffusion.md)
+are pinned to research commit `2dab9aff90631a3e1094f60eea7e69a76a1a3063`.
+The execution-marker patch SHA-256 is
+`c7a5b362ceb26f585859febb78fa9b2eda06ec00913dfabcde7ad071aee7b7f3`.
+
 ## Tested hybrid configurations
 
 | Target (GGUF downloads) | Tested accelerated path | Validation limits |

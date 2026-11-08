@@ -3,6 +3,33 @@ export function elapsed(seconds) {
   return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
+export function bindSettingsTabs(tabs, panelFor, onSelect = () => {}) {
+  const activate = (tab, focus = false) => {
+    for (const item of tabs) {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      panelFor(item).hidden = !selected;
+    }
+    if (focus) tab.focus();
+    onSelect(tab);
+  };
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => activate(tab));
+    tab.addEventListener("keydown", (event) => {
+      let index = tabs.indexOf(tab);
+      if (event.key === "ArrowRight") index = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") index = (index + tabs.length - 1) % tabs.length;
+      else if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(tabs[index], true);
+    });
+  }
+  return activate;
+}
+
 export function loadingText(loading) {
   if (!loading) return "";
   const pending = loading.waiting_for?.length ? ` Waiting for ${loading.waiting_for.join(", ")}.` : "";
@@ -99,7 +126,9 @@ export function statusPollDelay(status, hidden) {
 export function restoreModelControls(status, initialized, control) {
   const active = status.model && ["loading", "ready", "stopping"].includes(status.state);
   if (initialized && !active) return null;
-  const settings = active ? status : status.saved_model_settings || status;
+  const saved = status.saved_model_settings || status;
+  const settings = active ? status : status.default_context
+    ? { ...saved, context: status.default_context } : saved;
   const fields = {
     model: "model", execution_mode: "execution-mode", context: "context", placement: "placement",
     cpu_threads: "cpu-threads", batch_threads: "batch-threads", cpu_poll: "cpu-poll",
@@ -128,10 +157,12 @@ export function bindReasoningEffort(primary, quick, invalid) {
 
 export function precheckText(data) {
   const automatic = data.automatic, hybrid = data.required_hybrid;
+  const defaultLabel = automatic.execution_profile === "standard" ? "Standard backend" :
+    automatic.execution_profile === "provider-candidate" ? "Registered provider (verification required)" : "Hybrid candidate";
   const lines = [
     `Hybrid eligibility: ${data.hybrid_candidate ? "Candidate - runtime unverified" : "Not eligible with this installation"}.`,
     `Architecture: ${data.architecture}${data.layout ? `; ${data.layout.expert_count} experts, ${data.layout.block_count} blocks` : ""}.`,
-    `Automatic defaults: ${automatic.execution_profile === "standard" ? "Standard backend" : "Hybrid candidate"}. ${automatic.reason}`,
+    `Automatic defaults: ${defaultLabel}. ${automatic.reason}`,
     `Require hybrid: ${data.hybrid_candidate ? `${hybrid.initialization} plan, ${hybrid.transfer} transfers, ${hybrid.context.toLocaleString()} context, ${hybrid.cache_mib.toLocaleString()} MiB cache.` : hybrid.reason}`,
     data.scope,
     ...data.limitations,

@@ -10,13 +10,28 @@ from .tuning import LOAD_FIELDS
 
 
 LOG = logging.getLogger("synapse.settings")
+
+
+def read_context_policy(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    if path.stat().st_size > 4096:
+        raise ValueError("Context policy exceeds 4 KiB.")
+    data = json.loads(path.read_text())
+    if (not isinstance(data, dict) or set(data) != {"schema_version", "default_context"} or
+            type(data["schema_version"]) is not int or data["schema_version"] != 1 or
+            type(data["default_context"]) is not int or not 512 <= data["default_context"] <= 262144):
+        raise ValueError("Invalid shared context policy.")
+    return data["default_context"]
+
+
 INTEGER_LIMITS = {
     "context": (512, 262144), "cpu_threads": (1, 65536), "batch_threads": (1, 65536),
     "expert_cache_mib": (0, 65536), "fit_target_mib": (128, 65536), "cpu_poll": (0, 100),
     "op_offload_min_batch": (1, 8192), "draft_tokens": (1, 32),
 }
 CHOICES = {
-    "execution_mode": ("auto", "standard", "hybrid"), "placement": ("auto", "cpu"),
+    "execution_mode": ("auto", "standard", "hybrid", "strata", "causal"), "placement": ("auto", "cpu"),
     "load_mode": ("auto", "none"), "kv_cache_type": ("f16", "q8_0"),
     "draft_type": ("none", "dflash", "mtp"), "hybrid_variant": ("auto", "classic", "hosted"),
 }

@@ -57,7 +57,14 @@
       <div class="dialog-header"><div><p class="eyebrow">YOUR LOCAL SESSION</p><h2 id="model-title">Model Controls</h2></div><button id="close-controls" type="button" class="secondary" aria-label="Close model controls">Close</button></div>
       <div class="dialog-content">
         <div id="controls-notice" class="callout" role="alert" hidden></div>
-        <section aria-labelledby="generation-title" class="settings-section">
+        <div class="settings-tabs" role="tablist" aria-label="Model control sections">
+          <button type="button" role="tab" id="tab-model" aria-controls="panel-model" aria-selected="true">Model</button>
+          <button type="button" role="tab" id="tab-library" aria-controls="panel-library" aria-selected="false" tabindex="-1">Model library</button>
+          <button type="button" role="tab" id="tab-generation" aria-controls="panel-generation" aria-selected="false" tabindex="-1">Generation</button>
+          <button type="button" role="tab" id="tab-tuning" aria-controls="panel-tuning" aria-selected="false" tabindex="-1">Auto Tune</button>
+          <button type="button" role="tab" id="tab-status" aria-controls="panel-status" aria-selected="false" tabindex="-1">Status</button>
+        </div>
+        <section id="panel-generation" role="tabpanel" aria-labelledby="tab-generation" tabindex="0" class="settings-section" hidden>
           <h3 id="generation-title">Generation</h3>
           <div class="settings-grid">
             <div><label for="max-output">Max output tokens</label><input id="max-output" type="number" value="8192" min="1" max="65536" step="1" required></div>
@@ -65,7 +72,22 @@
           </div>
           <p class="hint">Output tokens include reasoning and the final answer. Changes apply to your next message.</p><p id="context-note"></p>
         </section>
-        <section aria-labelledby="load-title" class="settings-section">
+        <section id="panel-library" role="tabpanel" aria-labelledby="tab-library" tabindex="0" class="settings-section" hidden>
+          <h3>Tested model library</h3>
+          <p>Choose an exact tested GGUF or download it from its publisher. Files stay on this computer.</p>
+          <label for="library-directory">Download directory</label>
+          <div class="copy-row"><input id="library-directory" autocomplete="off" spellcheck="false"><button id="library-refresh" type="button" class="secondary">Refresh</button></div>
+          <p class="hint">Sizes are downloads, not total RAM or VRAM required. Speed gains are measured examples on a specific machine, not predictions or guarantees. Auto Tune selects the best supported settings locally.</p>
+          <h4>Downloaded models</h4>
+          <p class="hint">Local discovery does not verify model quality or backend compatibility. Split models list their first shard.</p>
+          <p id="local-model-status" role="status" aria-live="polite"></p>
+          <div id="local-models"></div>
+          <h4>Tested downloads</h4>
+          <div id="library-status" role="status" aria-live="polite"></div>
+          <div id="library-models"></div>
+          <div id="library-download" hidden><progress id="library-progress" max="1" value="0"></progress><p id="library-download-text" role="status"></p><button id="library-cancel" type="button" class="secondary">Cancel download</button></div>
+        </section>
+        <section id="panel-model" role="tabpanel" aria-labelledby="tab-model" tabindex="0" class="settings-section">
           <h3 id="load-title">Model &amp; runtime</h3>
           <p>Select a GGUF already on this computer. Unload the active model before choosing another.</p>
           <form id="load-form">
@@ -132,7 +154,7 @@
           <p>The last successfully loaded model and run settings are remembered. After restarting, click Load model to resume; models are never loaded automatically.</p>
           <p id="backend-help" class="callout" hidden></p>
         </section>
-        <section aria-labelledby="tuning-title" class="settings-section">
+        <section id="panel-tuning" role="tabpanel" aria-labelledby="tab-tuning" tabindex="0" class="settings-section" hidden>
           <h3 id="tuning-title">Auto Tune for this system</h3>
           <p>Measure this model on your hardware, then recommend model and app settings. Trials use synthetic local prompts; nothing is uploaded.</p>
           <label for="tuning-goal">Tuning goal</label>
@@ -150,7 +172,7 @@
             <p class="hint">Update your app's model limits before reconnecting. These recommendations do not change other apps automatically. Input tests and short replies do not establish general answer quality or sustained speed.</p>
           </div>
         </section>
-          <section class="settings-section" aria-labelledby="status-title">
+          <section id="panel-status" role="tabpanel" aria-labelledby="tab-status" tabindex="0" class="settings-section" hidden>
             <p class="eyebrow">RUNTIME</p><h2 id="status-title">Know what is running</h2>
             <p id="model-status">No model loaded.</p><p id="engine-summary"></p><p id="run-status"></p><p id="selection-reason"></p><p id="resources" role="status"></p>
             <details><summary>Backend output</summary><pre id="logs">No output yet.</pre></details>

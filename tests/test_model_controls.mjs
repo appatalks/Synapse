@@ -1,11 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindEngineSelection, bindReasoningEffort, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
   choose(value) { this.value = value; this.dispatchEvent(new Event("change")); }
 }
+
+test("settings tabs switch panels and support keyboard navigation", () => {
+  class Tab extends EventTarget {
+    constructor() { super(); this.attrs = {}; this.focused = false; }
+    setAttribute(key, value) { this.attrs[key] = value; }
+    focus() { this.focused = true; }
+  }
+  const tabs = [new Tab(), new Tab(), new Tab()];
+  const panels = new Map(tabs.map((tab) => [tab, { hidden: true }]));
+  const select = bindSettingsTabs(tabs, (tab) => panels.get(tab));
+  select(tabs[0]);
+  assert.equal(panels.get(tabs[0]).hidden, false);
+  tabs[1].dispatchEvent(new Event("click"));
+  assert.equal(tabs[1].attrs["aria-selected"], "true");
+  assert.equal(panels.get(tabs[0]).hidden, true);
+  const right = new Event("keydown", { cancelable: true });
+  Object.defineProperty(right, "key", { value: "ArrowRight" });
+  tabs[1].dispatchEvent(right);
+  assert.equal(right.defaultPrevented, true);
+  assert.equal(tabs[2].attrs["aria-selected"], "true");
+  assert.equal(tabs[2].focused, true);
+  assert.equal(panels.get(tabs[2]).hidden, false);
+});
 
 test("Hybrid checkbox allows Automatic and disables Hybrid through Standard without forcing it", () => {
   const toggle = new Select(""), select = new Select("auto"), changes = [];
@@ -142,6 +165,10 @@ test("pre-check separates candidate eligibility from Automatic's actual selectio
     required_hybrid: { reason: "No hybrid installation profile found." } });
   assert.match(unavailable, /Not eligible with this installation/);
   assert.match(unavailable, /No hybrid installation profile/);
+  const provider = precheckText({ ...candidate, automatic: {
+    execution_profile: "provider-candidate", reason: "Runtime verification is required." } });
+  assert.match(provider, /Automatic defaults: Registered provider \(verification required\)/);
+  assert.doesNotMatch(provider, /Automatic defaults: Hybrid candidate/);
 });
 
 function precheck(request) {
@@ -259,6 +286,16 @@ test("a stopped service restores every saved manual control without loading or s
   assert.equal(control("context").value, "131072");
   assert.equal(status.model, null);
   assert.equal(status.state, "stopped");
+});
+
+test("shared context preference overrides an idle saved context without changing active runtime context", () => {
+  const { control } = modelControls();
+  restoreModelControls({ state: "stopped", model: null, default_context: 131072,
+    saved_model_settings: savedSettings }, false, control);
+  assert.equal(control("context").value, "131072");
+  restoreModelControls({ ...savedSettings, state: "ready", model: "/models/active.gguf",
+    context: 32768, default_context: 131072 }, true, control);
+  assert.equal(control("context").value, "32768");
 });
 
 test("active runtime settings override older saved controls; idle polling and unload preserve edits", () => {
