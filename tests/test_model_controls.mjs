@@ -261,6 +261,16 @@ test("a stopped service restores every saved manual control without loading or s
   assert.equal(status.state, "stopped");
 });
 
+test("shared context preference overrides an idle saved context without changing active runtime context", () => {
+  const { control } = modelControls();
+  restoreModelControls({ state: "stopped", model: null, default_context: 131072,
+    saved_model_settings: savedSettings }, false, control);
+  assert.equal(control("context").value, "131072");
+  restoreModelControls({ ...savedSettings, state: "ready", model: "/models/active.gguf",
+    context: 32768, default_context: 131072 }, true, control);
+  assert.equal(control("context").value, "32768");
+});
+
 test("active runtime settings override older saved controls; idle polling and unload preserve edits", () => {
   const { control } = modelControls();
   const status = { ...savedSettings, model: "/models/current.gguf", context: 32768,

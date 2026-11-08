@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import signal
 from socketserver import TCPServer
 import time
 
@@ -48,6 +49,12 @@ if Path(args.model).stem in ("not-a-server", "old-server"):
 stats = {"tokens": 0, "decoded": 0, "requests": 0}
 if Path(args.model).stem == "fail":
     print("Unsupported model architecture (test fixture).", flush=True)
+    sys.exit(7)
+if (Path(args.model).stem == "tuning-native-cache-limit" and int(args.moe_cache_mib) > 4096):
+    print("CUDA native expert-cache allocation failed: out of memory (test fixture).", flush=True)
+    sys.exit(7)
+if (Path(args.model).stem == "tuning-native-cache-refine" and int(args.moe_cache_mib) > 10240):
+    print("CUDA native expert-cache allocation failed: out of memory (test fixture).", flush=True)
     sys.exit(7)
 if (Path(args.model).stem in ("tuning-cache-limit", "tuning-cache-limit-tail") and os.getenv("VRAMBRIDGE_HYBRID_PLAN") and
         int(args.moe_cache_mib) > 4096):
@@ -108,12 +115,31 @@ print(json.dumps({
     "cache_type_v": args.cache_type_v,
     "flash_attn": args.flash_attn,
     "jinja": args.jinja,
+    "native_cpu_share": os.getenv("LLAMA_MOE_CPU"),
+    "native_defaults_off": os.getenv("LLAMA_MOE_NO_DEFAULTS"),
+    "native_tail_skip": os.getenv("LLAMA_MOE_TAIL_SKIP"),
+    "native_q8_cache": os.getenv("GGML_CUDA_Q8_CACHE"),
 }), flush=True)
+if os.getenv("VRAMBRIDGE_STRATA_CONFIG") and Path(args.model).stem != "strata-no-markers":
+    print("SYNAPSE_STRATA_VERIFIED " + json.dumps({
+        "context": int(args.ctx_size), "kv": "fp16", "mtp": True, "full_routing": True,
+        "cache_mib": 4096, "cache_slots": 128, "pid": os.getpid()}), flush=True)
 cache = "f16" if Path(args.model).stem == "q8-cache-fallback" else args.cache_type_k or "f16"
 if args.log_verbosity == "4":
     print(f"llama_kv_cache_unified: size = 1 MiB, K ({cache}): 1 MiB, V ({cache}): 1 MiB", flush=True)
     print(f"llama_context: flash_attn = {'enabled' if args.flash_attn == 'on' else 'disabled'}", flush=True)
     print("api_keys: [fixture marker]", flush=True)
+if int(args.moe_cache_mib) > 0 and not os.getenv("VRAMBRIDGE_HYBRID_PLAN"):
+    def shutdown_cache(*_):
+        print("0.123 I llama_moe_cache: ubatch <= 8: hits = 80, misses = 20, hit rate = 80.00%, uploaded = 12.50 MiB",
+              flush=True)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, shutdown_cache)
+    if Path(args.model).stem == "native-cache-disabled":
+        print("impl: no layer has its experts in host memory, MoE cache is disabled", flush=True)
+    elif Path(args.model).stem != "native-cache-no-markers":
+        print(f"impl: CUDA0 MoE cache size = {int(args.moe_cache_mib):.2f} MiB for 32768 MiB of host experts",
+              flush=True)
 if os.getenv("VRAMBRIDGE_HYBRID_PLAN") and Path(args.model).stem != "hybrid-no-markers":
     plan = os.environ["VRAMBRIDGE_HYBRID_PLAN"]
     selected = 0 if plan == "auto" else sum(bool(line) and not line.startswith("#")
@@ -197,6 +223,14 @@ class Handler(BaseHTTPRequestHandler):
                     "tuning-hybrid-slow-decode": 90.0 if hybrid else 100.0,
                     "tuning-hosted-decode": (150.0 if hosted else 120.0) if hybrid else 100.0,
                     }.get(Path(args.model).stem, 100.0)
+            if Path(args.model).stem in ("tuning-native-cache-fast", "tuning-native-cache-limit"):
+                rate = 150.0 if int(args.moe_cache_mib) else 100.0
+            if Path(args.model).stem == "tuning-native-cache-slow":
+                rate = 90.0 if int(args.moe_cache_mib) else 100.0
+            if Path(args.model).stem == "tuning-native-cache-refine":
+                rate = 200.0 if int(args.moe_cache_mib) == 10240 else 150.0 if int(args.moe_cache_mib) else 100.0
+            if os.getenv("VRAMBRIDGE_STRATA_CONFIG") and Path(args.model).stem == "tuning-strata-fast":
+                rate = 220.0
             self.send_json(200, {"content": "x" * data["n_predict"], "timings": {
                 "predicted_n": data["n_predict"], "predicted_per_second": rate,
                 "prompt_n": 18, "prompt_per_second": 900.0}})
@@ -208,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
             content = json.dumps({"start": "cedar4821", "middle": "violet7319", "end": "quartz9067"})
             if Path(args.model).stem == "tuning-wrong-answer":
                 content = '{"start":"wrong"}'
+            if Path(args.model).stem == "tuning-reasoning" and data.get("reasoning_effort") != "low":
+                content = ""
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()

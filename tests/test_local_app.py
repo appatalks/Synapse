@@ -79,6 +79,126 @@ class LocalAppTests(unittest.TestCase):
         self.thread.join(timeout=3)
         self.temporary.cleanup()
 
+    def configure_strata(self, model, context=8192):
+        write_metadata(model, {**HYBRID_METADATA, "gpt-oss.context_length": context})
+        configuration = self.root / "strata-config.json"
+        configuration.write_text("{}")
+
+        def identity(path):
+            info = path.stat()
+            return {"path": str(path), "size": info.st_size, "mtime_ns": info.st_mtime_ns}
+
+        profile = self.root / "strata-profile.json"
+        profile.write_text(json.dumps({
+            "schema_version": 1, "executable": str(self.backend), "configuration": str(configuration),
+            "model": identity(model), "minimum_vram_mib": 14336, "maximum_context": 16384,
+            "cache_mib": 4096, "cache_slots": 128, "build_files": [identity(self.backend), identity(configuration)],
+            "qualification_sha256": "0" * 64}))
+        self.runtime.strata = app._strata.Installation(profile)
+        self.runtime.native_cache_available = False
+
+    def test_shared_context_default_applies_to_each_model_and_respects_limits(self):
+        self.runtime.preferred_context = 131072
+        write_metadata(self.model, {**HYBRID_METADATA, "gpt-oss.context_length": 262144})
+        state = self.load()
+        self.assertEqual(state["context"], 131072)
+        self.runtime.stop()
+        other = self.root / "limited.gguf"
+        write_metadata(other, {**HYBRID_METADATA, "gpt-oss.context_length": 32768})
+        state = self.load(model=str(other))
+        self.assertEqual(state["context"], 32768)
+        self.assertIn("advertised", state["context_warning"])
+        self.runtime.stop()
+        self.assertEqual(self.load(model=str(other), context=8192)["context"], 8192)
+
+    def test_shared_context_tuning_is_fixed_and_does_not_reuse_shorter_contexts(self):
+        self.runtime.preferred_context = 131072
+        self.runtime.native_cache_available = False
+        write_metadata(self.model, {**HYBRID_METADATA, "gpt-oss.context_length": 131072})
+        code, _, body = self.request("POST", "/api/v1/tuning/start", {"model": str(self.model), "confirm": True})
+        self.assertEqual(code, 202, body)
+        report = self.wait_tuning("completed")
+        self.assertEqual(report["target_context"], 131072)
+        self.assertTrue(all(trial["settings"]["context"] == 131072 for trial in report["trials"]))
+        self.assertEqual(self.runtime.status()["context"], 131072)
+
+    @unittest.skipUnless(sys.platform == "linux", "Strata qualification is Linux-only.")
+    def test_strata_auto_tune_verifies_remembers_and_reloads_the_provider(self):
+        model = self.root / "tuning-strata-fast.gguf"
+        self.configure_strata(model)
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        with mock.patch.object(self.server.tuner, "hardware", return_value=hardware):
+            code, _, body = self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})
+            self.assertEqual(code, 202, body)
+            report = self.wait_tuning("completed")
+        self.assertEqual(report["recommendation"]["settings"]["execution_mode"], "strata")
+        choice = self.server.choices.lookup(model, "f16", self.server._machine())
+        self.assertEqual(choice["profile_id"], "strata-mtp")
+        self.runtime.stop()
+        status = self.load(model=str(model), execution_mode="auto")
+        self.assertTrue(status["strata_verified"])
+        self.assertEqual(status["backend_kind"], "strata")
+        self.assertEqual(status["execution_profile_id"], "strata-mtp")
+        self.assertEqual(status["execution_mode"], "auto")
+
+    @unittest.skipUnless(sys.platform == "linux", "Strata qualification is Linux-only.")
+    def test_strata_missing_activation_fails_without_native_fallback(self):
+        model = self.root / "strata-no-markers.gguf"
+        self.configure_strata(model)
+        with mock.patch.object(app, "SPECULATION_VERIFICATION_TIMEOUT", 0.1):
+            code, _, body = self.request("POST", "/api/v1/model/load",
+                                         {"model": str(model), "execution_mode": "strata", "context": 4096})
+            self.assertEqual(code, 202, body)
+            state = self.wait_state("error")
+        self.assertFalse(state["strata_verified"])
+        self.assertIn("fallback", state["error"])
+        self.assertIsNotNone(self.runtime.process.poll())
+
+    @unittest.skipUnless(sys.platform == "linux", "Strata qualification is Linux-only.")
+    def test_standard_only_tuning_does_not_enable_strata(self):
+        model = self.root / "tuning-strata-fast.gguf"
+        self.configure_strata(model)
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        with mock.patch.object(self.server.tuner, "hardware", return_value=hardware):
+            code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                         {"model": str(model), "confirm": True, "include_hybrid": False})
+            self.assertEqual(code, 202, body)
+            report = self.wait_tuning("completed")
+        self.assertFalse(report["strata_candidate"])
+        self.assertFalse(self.runtime.status()["strata_active"])
+        self.assertTrue(all(trial["settings"]["execution_mode"] == "standard" for trial in report["trials"]))
+
+    @unittest.skipUnless(sys.platform == "linux", "Strata qualification is Linux-only.")
+    def test_strata_balanced_reports_its_supported_context_without_shortening_maximum(self):
+        model = self.root / "tuning-strata-fast.gguf"
+        self.configure_strata(model, context=32768)
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        with mock.patch.object(self.server.tuner, "hardware", return_value=hardware):
+            for goal, expected_mode, expected_context in (("balanced", "strata", 16384),
+                                                           ("maximum", "standard", 32768)):
+                self.runtime.stop()
+                code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                             {"model": str(model), "goal": goal, "confirm": True})
+                self.assertEqual(code, 202, body)
+                report = self.wait_tuning("completed")
+                self.assertEqual(report["recommendation"]["settings"]["execution_mode"], expected_mode)
+                self.assertEqual(report["recommendation"]["settings"]["context"], expected_context)
+
+    def test_native_cache_refines_the_measured_fit_boundary(self):
+        model = self.root / "tuning-native-cache-refine.gguf"
+        write_metadata(model, {**HYBRID_METADATA, "gpt-oss.context_length": 8192})
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        with mock.patch.object(self.server.tuner, "hardware", return_value=hardware):
+            code, _, body = self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})
+            self.assertEqual(code, 202, body)
+            report = self.wait_tuning("completed")
+        self.assertEqual(report["recommendation"]["settings"]["expert_cache_mib"], 10240)
+        self.assertTrue(self.runtime.status()["native_cache_verified"])
+        if sys.platform == "linux":
+            cached = [trial for trial in report["trials"] if trial.get("cache_statistics")]
+            self.assertTrue(cached)
+            self.assertIn("uploaded_mib", next(iter(cached[0]["cache_statistics"].values())))
+
     def request(self, method, path, data=None, headers=None, *, port=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.port if port is None else port, timeout=5)
         try:
@@ -870,6 +990,11 @@ class LocalAppTests(unittest.TestCase):
             self.assertEqual(status["execution_mode"], "auto")
             self.assertEqual(status["hybrid_active"], mode == "hybrid")
             self.assertEqual(status["engine_source"], "measured")
+            identifier = "hybrid-classic" if mode == "hybrid" else "standard-auto"
+            self.assertEqual(status["execution_profile_id"], identifier)
+            measured = self.server.choices.lookup(model, "f16", self.server._machine())
+            self.assertEqual(measured["profile_id"], identifier)
+            self.assertEqual(measured["profile_revision"], app._profiles.revision(identifier))
             self.runtime.stop()
 
     def test_automatic_reuses_the_measured_engine_until_settings_conflict(self):
@@ -930,7 +1055,8 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})[0], 202)
         result = self.wait_tuning("completed")
         variants = [(trial["settings"]["execution_mode"], trial["settings"]["hybrid_variant"],
-                     trial["decode_tokens_per_second"]) for trial in result["trials"]]
+                     trial["decode_tokens_per_second"]) for trial in result["trials"]
+                    if trial["settings"]["execution_mode"] == "hybrid" or not trial["settings"]["expert_cache_mib"]]
         self.assertEqual(variants, [("standard", "classic", 100.0), ("hybrid", "classic", 120.0),
                                     ("hybrid", "hosted", 150.0)])
         self.assertEqual(result["recommendation"]["settings"]["hybrid_variant"], "hosted")
@@ -1166,6 +1292,10 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(result["required_hybrid"]["reason_code"], "no_profile")
         self.assertEqual(result["automatic"]["execution_profile"], "standard")
         self.assertEqual(result["layout"]["expert_count"], 128)
+        profiles = {item["id"]: item for item in result["profiles"]}
+        self.assertEqual(profiles["standard-auto"]["eligibility"], "candidate")
+        self.assertEqual(profiles["hybrid-classic"]["eligibility"], "unavailable")
+        self.assertIn("hybrid", profiles["hybrid-classic"]["missing_requirements"])
         self.assertIn("unverified", " ".join(result["limitations"]))
         self.assertIsNone(self.runtime.process)
         self.assertEqual(self.runtime.state, "stopped")
@@ -1241,6 +1371,9 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(result["required_hybrid"]["cache_mib"], 32)
         self.assertEqual(result["required_hybrid"]["initialization"], "causal")
         self.assertEqual(result["required_hybrid"]["transfer"], "staged")
+        profiles = {item["id"]: item for item in result["profiles"]}
+        self.assertEqual(profiles["hybrid-classic"]["eligibility"], "candidate")
+        self.assertIn("direct", profiles["hybrid-hosted"]["missing_requirements"])
         status = self.load()
         self.assertEqual(status["selection_reason"], result["automatic"]["reason"])
         self.runtime.stop()
@@ -1819,6 +1952,7 @@ class LocalAppTests(unittest.TestCase):
         self.assertIsNone(self.runtime.process)
 
     def test_explicit_execution_settings_and_cache_flags(self):
+        write_metadata(self.model, HYBRID_METADATA)
         threads = min(2, os.cpu_count() or 1)
         status = self.load(cpu_threads=threads, batch_threads=1, load_mode="none",
                            expert_cache_mib=8192)
@@ -1833,6 +1967,95 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(flags["expert_cache_mib"], "8192")
         self.assertEqual(flags["gpu_layers"], "all")
         self.assertTrue(flags["cpu_moe"])
+        self.assertTrue(status["native_cache_active"])
+        self.assertEqual(status["execution_profile_id"], "standard-native-cache")
+
+    def test_native_cache_requires_activation_and_clears_verification_on_unload(self):
+        write_metadata(self.model, HYBRID_METADATA)
+        status = self.load(expert_cache_mib=4096, execution_mode="standard")
+        self.assertTrue(status["native_cache_active"])
+        self.assertEqual(status["native_cache_mib"], 4096)
+        self.runtime.stop()
+
+        self.assertFalse(self.runtime.status()["native_cache_active"])
+        for stem in ("native-cache-no-markers", "native-cache-disabled"):
+            model = self.root / (stem + ".gguf")
+            write_metadata(model, HYBRID_METADATA)
+            with mock.patch.object(app, "NATIVE_CACHE_VERIFICATION_TIMEOUT", 0.1):
+                code, _, body = self.request("POST", "/api/v1/model/load",
+                                             {"model": str(model), "execution_mode": "standard", "expert_cache_mib": 4096})
+                self.assertEqual(code, 202, body)
+                status = self.wait_state("error")
+            self.assertFalse(status["native_cache_active"])
+            self.assertIn("cache", status["error"].lower())
+            self.assertIsNotNone(self.runtime.process.poll())
+            self.runtime.stop()
+
+    def test_native_cache_does_not_inherit_unqualified_sharing_or_precision_bundles(self):
+        write_metadata(self.model, HYBRID_METADATA)
+        with mock.patch.dict(os.environ, {"LLAMA_MOE_CPU": "auto", "LLAMA_MOE_TAIL_SKIP": "7",
+                                         "GGML_CUDA_Q8_CACHE": "1"}):
+            status = self.load(execution_mode="standard", expert_cache_mib=4096)
+        flags = json.loads(status["logs"][0])
+        self.assertIsNone(flags["native_cpu_share"])
+        self.assertIsNone(flags["native_q8_cache"])
+        self.assertEqual(flags["native_defaults_off"], "1")
+        self.assertEqual(flags["native_tail_skip"], "0")
+        self.assertTrue(status["native_cache_verified"])
+
+    def test_auto_tune_remembers_native_cache_winner_and_falls_back_after_allocation_failures(self):
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        for stem, expected in (("tuning-native-cache-fast", 15360), ("tuning-native-cache-limit", 4096),
+                               ("tuning-native-cache-slow", 0)):
+            model = self.root / (stem + ".gguf")
+            write_metadata(model, {**HYBRID_METADATA, "gpt-oss.context_length": 8192})
+            with mock.patch.object(self.server.tuner, "hardware", return_value=hardware):
+                code, _, body = self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})
+                self.assertEqual(code, 202, body)
+                report = self.wait_tuning("completed")
+            self.assertEqual(report["recommendation"]["settings"]["expert_cache_mib"], expected)
+            status = self.runtime.status()
+            self.assertEqual(status["execution_mode"], "auto")
+            self.assertEqual(status["expert_cache_mib"], expected)
+            self.assertFalse(status["hybrid_active"])
+            self.assertEqual(status["native_cache_active"], bool(expected))
+            choice = self.server.choices.lookup(model, "f16", self.server._machine())
+            self.assertEqual(choice["profile_id"], "standard-native-cache" if expected else "standard-auto")
+            self.runtime.stop()
+
+    def test_auto_tune_capacity_probe_requests_low_reasoning_without_model_name_rules(self):
+        model = self.root / "tuning-reasoning.gguf"
+        write_metadata(model, {"general.architecture": "gpt-oss", "gpt-oss.context_length": 1024})
+        code, _, body = self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})
+        self.assertEqual(code, 202, body)
+        report = self.wait_tuning("completed")
+        self.assertTrue(report["trials"][0]["capacity_passed"])
+
+    def test_auto_tune_does_not_retry_an_unconfirmed_native_cache(self):
+        model = self.root / "native-cache-no-markers.gguf"
+        write_metadata(model, {**HYBRID_METADATA, "gpt-oss.context_length": 1024})
+        hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
+        with mock.patch.object(self.server.tuner, "hardware", return_value=hardware), \
+             mock.patch.object(app, "NATIVE_CACHE_VERIFICATION_TIMEOUT", 0.1):
+            self.assertEqual(self.request("POST", "/api/v1/tuning/start", {"model": str(model), "confirm": True})[0], 202)
+            report = self.wait_tuning("completed")
+        cached = [trial for trial in report["trials"] if trial["settings"]["expert_cache_mib"]]
+        self.assertEqual(len(cached), 1)
+        self.assertFalse(cached[0]["capacity_passed"])
+        self.assertEqual(report["recommendation"]["settings"]["expert_cache_mib"], 0)
+
+    def test_engine_choices_invalidate_when_a_native_backend_library_changes(self):
+        library = self.backend.parent / "libllama.so"
+        library.write_bytes(b"first library build")
+        machine = self.server._machine()
+        entry = {"settings": {**app._profiles.settings("standard-auto"), "context": 8192,
+                              "cpu_threads": 8, "batch_threads": 16, "expert_cache_mib": 0, "kv_cache_type": "f16"},
+                 "goal": "balanced", "measured_at": 1.0, "decode_tokens_per_second": 100.0,
+                 "standard_decode_tokens_per_second": 100.0}
+        self.server.choices.remember(self.model, machine, entry)
+        self.assertIsNotNone(self.server.choices.lookup(self.model, "f16", self.server._machine()))
+        library.write_bytes(b"second, different library build")
+        self.assertIsNone(self.server.choices.lookup(self.model, "f16", self.server._machine()))
 
     def test_invalid_execution_settings(self):
         for extra in ({"cpu_threads": True}, {"cpu_threads": 0},

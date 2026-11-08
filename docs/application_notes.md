@@ -82,6 +82,51 @@ general answer-quality check or an exhaustive speed search. With Hybrid off,
 only Standard is tested and applied; that restricted run does not replace an
 existing Automatic engine winner or turn Hybrid back on.
 
+On a declared-capable native llama.cpp backend, Linux/NVIDIA MoE tuning
+with F16 KV also compares native GPU expert-cache budgets. These are
+Standard-backend trials, not experimental CPU-expert sharing or drafting.
+Only configurations that pass the input/answer/generation checks can win,
+and the same 5% selection margin applies. GPU cache allocation and KV
+precision must appear in backend output; an ignored/disabled cache is
+an error, not an uncached fallback. Allocation failures try a smaller
+budget; missing activation stops cache trials. CPU-only, non-qualified
+platforms, dense models and unsupported backends keep ordinary trials.
+Cache budgets, context and thread counts remain internal measured settings,
+not new engine switches.
+
+Native cache budgets now scale with detected NVIDIA VRAM rather than
+stopping at 12 GiB. The backend must still pass actual allocation,
+precision and input checks. Auto Tune can test two intermediate budgets
+between observed fitting/OOM sizes, preserving the 5% selection margin.
+Completed native cache trials retain the backend's cumulative hit/miss
+and upload counters; these are load-level diagnostics, not pure per-token
+decode counters or a reason to choose a slower configuration.
+
+When a qualified optional Strata component/profile is installed, Auto
+Tune also compares that model-bound provider without another user switch.
+It must confirm full routing, the bound cache, F16 and MTP before ready.
+Its controller/library/Python dependency identity is recorded separately;
+its winner side-store leaves legacy native choices readable by older
+apps. Balanced can recommend a faster supported context; Maximum keeps
+the selected capacity. Installer/backend upgrades and registration still
+require consent, and the native backend remains available.
+
+A shared local context preference can be registered in
+`~/.config/synapse/context-policy.json` (or the platform/XDG configuration
+directory) as `{"schema_version":1,"default_context":131072}`. It applies
+to new model loads and Auto Tune, not just the last model's saved settings.
+Automatic measures that exact capacity rather than reusing a shorter
+winner; models with a smaller advertised limit use that limit with an
+explanation. Manual explicit context overrides remain available. Without
+the preference, existing defaults and saved controls are unchanged.
+
+The capacity probe requests low reasoning effort on native llama.cpp as
+well as disabling thinking where supported, so models that do not
+understand `/no_think` can return the bounded JSON answer. This does not
+change reasoning preferences for normal chats. Backend identity also
+includes matching native shared libraries; changing those invalidates
+older measured choices without rewriting saved files.
+
 Maximum Context prioritizes verified capacity and long-prompt request time,
 not fastest generation. Its saved winner may use a much larger context and
 decode more slowly than a previous manual run. The checkbox does not establish

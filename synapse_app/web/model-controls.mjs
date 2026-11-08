@@ -99,7 +99,9 @@ export function statusPollDelay(status, hidden) {
 export function restoreModelControls(status, initialized, control) {
   const active = status.model && ["loading", "ready", "stopping"].includes(status.state);
   if (initialized && !active) return null;
-  const settings = active ? status : status.saved_model_settings || status;
+  const saved = status.saved_model_settings || status;
+  const settings = active ? status : status.default_context
+    ? { ...saved, context: status.default_context } : saved;
   const fields = {
     model: "model", execution_mode: "execution-mode", context: "context", placement: "placement",
     cpu_threads: "cpu-threads", batch_threads: "batch-threads", cpu_poll: "cpu-poll",

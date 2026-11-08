@@ -37,4 +37,4 @@ packages = ["synapse_app"]
 version = {attr = "synapse_app.__version__"}
 
 [tool.setuptools.package-data]
-synapse_app = ["web/*", "hybrid-profile.example.json"]
+synapse_app = ["web/*", "hybrid-profile.example.json", "execution-profiles.json"]

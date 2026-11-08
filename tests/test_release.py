@@ -24,6 +24,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("synapse_app/web/monitor.mjs", names)
         self.assertIn("synapse_app/tuning.py", names)
         self.assertIn("synapse_app/settings.py", names)
+        self.assertIn("synapse_app/profiles.py", names)
+        self.assertIn("synapse_app/execution-profiles.json", names)
         self.assertIn("synapse_app/web/model-controls.mjs", names)
         self.assertFalse(any(name.endswith((".gguf", ".bin", ".log")) or
                              "/results/" in name or "__pycache__" in name for name in names))
@@ -47,6 +49,7 @@ class ReleaseTests(unittest.TestCase):
                                   ("/model-controls.mjs", b"bindEngineSelection"), ("/app.js", b"tuningPayload"),
                                   ("/navigation.mjs", b"navigate"), ("/style.css", b"sidebar"),
                                   ("/icon.svg", b"<svg"), ("/api/v1/status", b'"app_name": "SYNAPSE"'),
+                                  ("/api/v1/status", b'"execution_profile_id": "standard-auto"'),
                                   ("/api/v1/monitor", b'"samples"')):
                 with self.subTest(path=path):
                     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)

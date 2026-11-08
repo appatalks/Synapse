@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from functools import lru_cache
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +27,7 @@ import struct
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
@@ -40,6 +42,8 @@ HardwareMonitor, number, rate, system_probe = (
 _updates = import_module(f"{APP_PACKAGE}.updates")
 _tuning = import_module(f"{APP_PACKAGE}.tuning")
 _settings = import_module(f"{APP_PACKAGE}.settings")
+_profiles = import_module(f"{APP_PACKAGE}.profiles")
+_strata = import_module(f"{APP_PACKAGE}.strata_profile")
 
 LOG = logging.getLogger("synapse")
 WEB_ROOT = Path(__file__).with_name("web")
@@ -51,6 +55,7 @@ MAX_CONTEXT = 262144
 HYBRID_VERIFICATION_TIMEOUT = 60
 KV_VERIFICATION_TIMEOUT = 60
 SPECULATION_VERIFICATION_TIMEOUT = 60
+NATIVE_CACHE_VERIFICATION_TIMEOUT = 60
 HYBRID_CHECK_LABELS = {
     "hybrid": "hybrid dispatcher activation", "coverage": "full routed-layer coverage",
     "context": "actual context size", "direct": "direct transfers", "registered": "host-memory registration",
@@ -102,6 +107,33 @@ def backend_executable(value: str) -> str | None:
     if path.suffix.lower() == ".py" and path.is_file():
         return str(path.resolve())
     return shutil.which(value)
+
+
+@lru_cache(maxsize=16)
+def _native_cache_help(executable: str, size: int, modified: int) -> bool:
+    command = ([sys.executable] if executable.lower().endswith(".py") else []) + [executable, "--help"]
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
+    environment["CUDA_VISIBLE_DEVICES"] = ""
+    try:
+        with tempfile.TemporaryFile() as output:
+            result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, env=environment, timeout=3)
+            output.seek(0)
+            text = output.read(65536).decode("utf-8", errors="replace")
+        return result.returncode == 0 and "--moe-cache-mib" in text and "--cpu-moe" in text
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def native_cache_supported(executable: str | None) -> bool:
+    if executable is None:
+        return False
+    try:
+        path = Path(executable).resolve(strict=True)
+        info = path.stat()
+        return _native_cache_help(str(path), info.st_size, info.st_mtime_ns)
+    except OSError:
+        return False
 
 
 BACKEND_ARGUMENT_ERROR = re.compile(
@@ -435,7 +467,8 @@ class Runtime:
                  hybrid_context: int = 16384, hybrid_cache_mib: int = 10240, hybrid_transfer: str = "direct",
                  hybrid_decode_pipeline: bool = False, hybrid_async_ids: bool = False,
                  hybrid_generic_cache_mib: int | None = None, hybrid_generic_transfer: str | None = None,
-                 hybrid_hosted: bool = False, settings_store: Path | None = None):
+                 hybrid_hosted: bool = False, settings_store: Path | None = None,
+                 strata_profile: Path | None = None, default_context: int | None = None):
         if backend_kind not in ("llama.cpp", "ik_llama.cpp"):
             raise ValueError("Unsupported backend kind.")
         if (hybrid_plan is None) != (hybrid_cuda_plugin is None):
@@ -446,6 +479,9 @@ class Runtime:
         if self.default_execution_mode == "hybrid" and hybrid_plan is None:
             raise ValueError("Hybrid mode requires an installed or explicit plan/plugin profile.")
         self.execution_mode = self.default_execution_mode
+        if default_context is not None and (type(default_context) is not int or not 512 <= default_context <= MAX_CONTEXT):
+            raise ValueError("Invalid shared default context.")
+        self.preferred_context = default_context
         self.hybrid_active = hybrid_plan is not None and self.execution_mode == "hybrid"
         self.selection_reason = ("Hybrid direct DMA explicitly selected." if self.hybrid_active else
                                  "Automatic mode selects a profile from GGUF metadata when a model is loaded."
@@ -478,6 +514,16 @@ class Runtime:
         self.machine = None
         self.engine_source = "default"
         self.engine_summary = None
+        self.native_cache_requested = False
+        self.native_cache_mib = 0.0
+        self.native_cache_allocations: dict[str, float] = {}
+        self.native_cache_statistics = {}
+        self.log_thread = None
+        self.strata = _strata.Installation(strata_profile)
+        self.strata_active = False
+        self.strata_verified = False
+        self.strata_cache_mib = 0.0
+        self.strata_backend_pid = None
         self.active_hybrid_transfer = self.hybrid_generic_transfer if hybrid_plan == "auto" else hybrid_transfer
         self.required_hybrid_markers = {"hybrid", "context", "coverage", "direct", "registered"} if self.active_hybrid_transfer == "direct" else {"hybrid", "context", "coverage", "staged"}
         self.hybrid_cuda_plugin = hybrid_cuda_plugin.resolve(strict=True) if hybrid_cuda_plugin is not None else None
@@ -502,6 +548,7 @@ class Runtime:
         self.executable = backend_executable(executable)
         self.requested_executable = executable
         self.standard_executable = self.executable
+        self.native_cache_available = backend_kind == "llama.cpp" and native_cache_supported(self.standard_executable)
         self.hybrid_executable = backend_executable(hybrid_executable or executable) if hybrid_plan is not None else None
         if hybrid_plan is not None and not self.hybrid_executable:
             raise ValueError("The configured patched hybrid executable was not found.")
@@ -520,7 +567,7 @@ class Runtime:
         self.logs: deque[str] = deque(maxlen=80)
         self.port = 0
         self.key = ""
-        self.context = 4096
+        self.context = default_context or 4096
         self.placement = "auto"
         self.cpu_threads = default_cpu_threads()
         self.batch_threads = self.cpu_threads
@@ -672,6 +719,8 @@ class Runtime:
                     waiting.append("Q8 attention K/V cache precision")
                 if self.flash_attention_verified is not True:
                     waiting.append("Flash Attention activation")
+            if self.native_cache_requested and not self.native_cache_mib:
+                waiting.append("Native GPU expert-cache allocation")
             if self.draft_model is not None and self.backend_kind == "llama.cpp" and not self.speculation_verified:
                 waiting.append(f"{self.draft_type.upper()} speculative decoder activation")
             loading = None
@@ -688,6 +737,7 @@ class Runtime:
                 "api_version": 1,
                 "app_name": "SYNAPSE",
                 "app_version": __version__,
+                "default_context": self.preferred_context,
                 "state": self.state,
                 "model": self.model,
                 "error": self.error,
@@ -698,9 +748,9 @@ class Runtime:
                 "logs": list(self.logs),
                 "backend_available": self.executable is not None or self.hybrid_executable is not None,
                 "backend": self.executable or self.requested_executable,
-                "backend_kind": self.backend_kind,
+                "backend_kind": "strata" if self.strata_active else self.backend_kind,
                 "speculation_enabled": self.enable_speculation,
-                "speculation_verified": self.speculation_verified,
+                "speculation_verified": self.speculation_verified or self.strata_verified,
                 "execution_mode": self.execution_mode,
                 "hybrid_available": self.hybrid_plan is not None,
                 "hybrid_plan_sha256": self.hybrid_plan_sha256,
@@ -708,7 +758,12 @@ class Runtime:
                 "hybrid_generic": self.hybrid_generic,
                 "hybrid_initialization": "auto" if self.hybrid_plan == "auto" else "trained",
                 "selection_reason": self.selection_reason,
-                "execution_profile": f"experimental-hybrid-{self.active_hybrid_transfer}" if self.hybrid_active else "standard",
+                "execution_profile": ("experimental-strata-mtp" if self.strata_active else
+                                      f"experimental-hybrid-{self.active_hybrid_transfer}" if self.hybrid_active else "standard"),
+                "execution_profile_id": _profiles.identify({
+                    "execution_mode": "strata" if self.strata_active else "hybrid" if self.hybrid_active else "standard",
+                    "placement": self.placement, "hybrid_variant": "hosted" if self.active_hosted else "classic",
+                    "expert_cache_mib": self.expert_cache_mib if self.native_cache_requested else 0}),
                 "hybrid_transfer": self.active_hybrid_transfer if self.hybrid_active else None,
                 "hybrid_decode_pipeline": self.hybrid_active and self.hybrid_decode_pipeline,
                 "hybrid_async_ids": self.hybrid_active and self.hybrid_async_ids,
@@ -717,7 +772,18 @@ class Runtime:
                 "hybrid_variant": ("hosted" if self.active_hosted else "classic") if self.hybrid_active else "auto",
                 "hybrid_active": self.hybrid_active,
                 "engine_capabilities": {"standard": True, "hybrid": self.hybrid_plan is not None,
-                                        "hosted": self.hybrid_plan is not None and self.hosted_capable},
+                                        "hosted": self.hybrid_plan is not None and self.hosted_capable,
+                                        "native_cache": self.native_cache_available, "strata": self.strata.available()},
+                "strata_available": self.strata.available(),
+                "strata_active": self.strata_active,
+                "strata_verified": self.strata_verified,
+                "strata_cache_mib": self.strata_cache_mib,
+                "strata_error": self.strata.error,
+                "native_cache_available": self.native_cache_available,
+                "native_cache_active": self.native_cache_requested and self.native_cache_mib > 0,
+                "native_cache_verified": self.native_cache_requested and self.native_cache_mib > 0 and self.kv_cache_verified,
+                "native_cache_mib": self.native_cache_mib,
+                "native_cache_statistics": {key: dict(value) for key, value in self.native_cache_statistics.items()},
                 "engine_source": self.engine_source,
                 "engine_summary": self.engine_summary,
                 "hybrid_hosted_verified": self.hybrid_active and {"hosted", "lfu"} <= self.hybrid_markers,
@@ -765,6 +831,8 @@ class Runtime:
         if entry is None:
             return None
         settings = entry["settings"]
+        if settings["execution_mode"] == "strata" and not self.strata.available(model):
+            return None
         if (settings["execution_mode"] == "hybrid" and self.hybrid_plan is None) or any(
                 key in data and data[key] != settings[key] and not (key == "hybrid_variant" and data[key] == "auto")
                 for key in ("context", "placement", "cpu_threads", "batch_threads", "expert_cache_mib",
@@ -819,6 +887,15 @@ class Runtime:
         hybrid_context = learned["context"] if learned is not None else self.hybrid_context
         planned_context = min(hybrid_context if hybrid else 4096, context_limit) if context_limit else (
             hybrid_context if hybrid else 4096)
+        if self.preferred_context is not None and mode in ("auto", "standard") and learned is None:
+            limit = metadata.get(str(metadata.get("general.architecture")) + ".context_length", MAX_CONTEXT)
+            if type(limit) is not int or limit < 512:
+                raise AppError(400, "The model has an invalid context limit.")
+            planned_context = min(self.preferred_context, limit)
+            if mode == "auto":
+                hybrid = False
+                reason = "Shared default context selected; Auto Tune must measure an engine at this context."
+                reason_code = "context_policy"
         return {"hybrid": hybrid, "plan": selected_plan, "transfer": transfer,
                 "cache_mib": selected_cache_mib if hybrid else 0, "layout": layout,
                 "context": planned_context, "reason": reason, "reason_code": reason_code,
@@ -848,6 +925,10 @@ class Runtime:
             "api_version": 1, "model": str(model), "architecture": metadata["general.architecture"],
             "file_type": metadata.get("general.file_type"), "file_size_bytes": model_bytes,
             "layout": required["layout"], "hybrid_candidate": required["hybrid"],
+            "profiles": _profiles.assess({
+                "moe": required["layout"] is not None, "hybrid": required["hybrid"],
+                "hosted": self.hosted_capable, "direct": required["transfer"] == "direct",
+                "native_cache": self.native_cache_available, "strata": self.strata.available(model)}),
             "automatic": summary(automatic), "required_hybrid": summary(required),
             "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
             "limitations": [
@@ -873,20 +954,41 @@ class Runtime:
         model_value = data.get("model")
         model = readable_gguf(model_value, "Model")
         mode = data.get("execution_mode", self.default_execution_mode)
-        if mode not in ("auto", "standard", "hybrid"):
-            raise AppError(400, "Execution mode must be auto, standard, or hybrid.")
+        if mode not in ("auto", "standard", "hybrid", "strata"):
+            raise AppError(400, "Execution mode must be auto, standard, hybrid, or an installed Strata provider.")
         variant = data.get("hybrid_variant", "auto")
         if variant not in ("auto", "classic", "hosted"):
             raise AppError(400, "Hybrid variant must be auto, classic, or hosted.")
         metadata = {}
+        context_policy_warning = None
         if mode != "standard" and self.hybrid_plan is not None:
             try:
                 metadata = model_metadata(model)
             except (OSError, ValueError) as exc:
                 raise AppError(400, f"Cannot select an execution profile: {exc}") from exc
+        if self.preferred_context is not None and "context" not in data:
+            try:
+                metadata = metadata or model_metadata(model)
+                limit = metadata.get(metadata["general.architecture"] + ".context_length", MAX_CONTEXT)
+                if type(limit) is not int or limit < 512:
+                    raise ValueError("Invalid model context limit.")
+                requested = min(self.preferred_context, limit)
+                if requested < self.preferred_context:
+                    context_policy_warning = (f"Shared {self.preferred_context} context default is capped at this "
+                                              f"model's advertised {limit}-token limit.")
+                data = {**data, "context": requested}
+            except (OSError, ValueError) as exc:
+                raise AppError(400, f"Cannot apply shared context: {exc}") from exc
         learned = self._learned_choice(model, mode, data)
+        strata = (learned["execution_mode"] if learned else mode) == "strata"
+        if strata:
+            if not self.strata.available(model):
+                raise AppError(400, "No current qualified Strata pack/component binding exists for this model.")
+            metadata = metadata or model_metadata(model)
+            if moe_layout(metadata) is None:
+                raise AppError(400, "Strata requires a complete routed-MoE descriptor.")
         selection = self._select_execution(metadata, model.stat().st_size,
-                                           learned["execution_mode"] if learned else mode, learned)
+                                           "standard" if strata else learned["execution_mode"] if learned else mode, learned)
         if learned is not None and selection["hybrid"] != (learned["execution_mode"] == "hybrid"):
             learned = None
             selection = self._select_execution(metadata, model.stat().st_size, mode)
@@ -904,7 +1006,10 @@ class Runtime:
             raise AppError(400, "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor. "
                            + reason)
         selected_executable = (self.hybrid_executable if hybrid else
-                               self.standard_executable if self.hybrid_plan is not None else self.executable)
+                               self.standard_executable if self.hybrid_plan is not None or self.strata_active else
+                               self.executable)
+        if strata:
+            selected_executable = backend_executable(self.strata.data["executable"])
         context = data.get("context", planned_context)
         placement = data.get("placement", learned["placement"] if learned else "auto")
         cpu_threads = data.get("cpu_threads", learned["cpu_threads"] if learned else
@@ -912,7 +1017,8 @@ class Runtime:
         batch_threads = data.get("batch_threads", learned["batch_threads"] if learned else
                                  min(16, len(available_cpus())) if hybrid else cpu_threads)
         load_mode = data.get("load_mode", "auto")
-        expert_cache_mib = data.get("expert_cache_mib", selected_cache_mib if hybrid else 0)
+        expert_cache_mib = data.get("expert_cache_mib", learned["expert_cache_mib"] if learned else
+                                   selected_cache_mib if hybrid else 0)
         fit_target_mib = data.get("fit_target_mib", 1024)
         host_op_offload = data.get("host_op_offload", not hybrid)
         cpu_poll = data.get("cpu_poll", 50)
@@ -921,6 +1027,10 @@ class Runtime:
         draft_value = data.get("draft_model")
         draft_type = data.get("draft_type", "dflash" if draft_value not in (None, "") else "none")
         draft_tokens = data.get("draft_tokens", 4 if draft_type == "mtp" else 9)
+        if strata and (placement != "auto" or kv_cache_type != "f16" or expert_cache_mib != 0 or
+                       draft_type != "none" or load_mode != "auto" or context > self.strata.data["maximum_context"]):
+            raise AppError(400, "Strata uses its verified F16/MTP/cache profile, automatic placement and qualified context; "
+                           "native cache/draft overrides are not compatible.")
         if draft_type not in ("none", "dflash", "mtp"):
             raise AppError(400, "Draft type must be none, dflash, or mtp.")
         if draft_type == "none" and draft_value not in (None, ""):
@@ -957,6 +1067,15 @@ class Runtime:
             selected_cache_mib = expert_cache_mib
         if expert_cache_mib and placement != "auto":
             raise AppError(400, "The experimental GPU expert cache requires automatic placement.")
+        native_cache = not hybrid and not strata and expert_cache_mib > 0 and self.backend_kind == "llama.cpp"
+        if native_cache:
+            if not self.native_cache_available:
+                raise AppError(400, "This native backend does not declare GPU expert-cache support.")
+            try:
+                if moe_layout(metadata or model_metadata(model)) is None:
+                    raise ValueError("A complete routed-MoE descriptor is required.")
+            except (OSError, ValueError) as exc:
+                raise AppError(400, f"Cannot use the native GPU expert cache: {exc}") from exc
         if self.backend_kind == "ik_llama.cpp" and (placement != "auto" or expert_cache_mib):
             raise AppError(400, "The experimental ik_llama.cpp adapter currently supports "
                            "automatic placement without an explicit expert cache.")
@@ -1065,6 +1184,8 @@ class Runtime:
                                 "--gpu-layers-draft", "999"]
             if kv_cache_type == "q8_0":
                 command += ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--log-verbosity", "4"]
+            elif native_cache:
+                command += ["--cache-type-k", "f16", "--cache-type-v", "f16", "--log-verbosity", "4"]
             if draft_type == "dflash" or kv_cache_type == "q8_0":
                 command += ["--flash-attn", "on"]
             # Do not inherit placement overrides or credentials from a developer's shell.
@@ -1073,6 +1194,14 @@ class Runtime:
                 if not key.startswith(("LLAMA_ARG_", "GGML_CUDA_ENABLE_UNIFIED_MEMORY", "VRAMBRIDGE_HYBRID_"))
                 and key not in ("GGML_OP_OFFLOAD_MIN_BATCH", "GGML_CUDA_REGISTER_HOST", "GGML_CUDA_HOST_MAILBOX")
             }
+            if native_cache:
+                environment = {key: value for key, value in environment.items()
+                               if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
+                environment.update(LLAMA_MOE_NO_DEFAULTS="1", LLAMA_MOE_TAIL_SKIP="0")
+            if strata:
+                environment = {key: value for key, value in environment.items()
+                               if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
+                environment["VRAMBRIDGE_STRATA_CONFIG"] = self.strata.data["configuration"]
             if hybrid:
                 environment.update(
                     GGML_BACKEND_PATH=str(self.hybrid_cuda_plugin),
@@ -1104,6 +1233,14 @@ class Runtime:
                 environment["GGML_OP_OFFLOAD_MIN_BATCH"] = str(op_offload_min_batch)
             self.logs.clear()
             self.hybrid_markers.clear()
+            self.native_cache_requested = native_cache
+            self.native_cache_mib = 0.0
+            self.native_cache_allocations.clear()
+            self.native_cache_statistics = {}
+            self.strata_active = strata
+            self.strata_verified = False
+            self.strata_cache_mib = 0.0
+            self.strata_backend_pid = None
             self.executable = selected_executable
             self.hybrid_active = hybrid
             self.hybrid_experts = selected_experts
@@ -1124,7 +1261,7 @@ class Runtime:
             self.execution_mode = mode
             self.active_hosted = hosted
             self.engine_source = "measured" if learned else "manual" if mode != "auto" else "default"
-            label = engine_label(hybrid, hosted, placement)
+            label = "Automatic provider" if strata else engine_label(hybrid, hosted, placement)
             if learned and hybrid:
                 self.engine_summary = (f"{label}: measured fastest on this machine by Auto Tune "
                                        f"({learned['decode_tokens_per_second']:.0f} tok/s vs "
@@ -1143,7 +1280,7 @@ class Runtime:
             self.model = str(model)
             self.context = context
             self.requested_context = context
-            self.context_warning = None
+            self.context_warning = context_policy_warning
             self.placement = placement
             self.cpu_threads = cpu_threads
             self.batch_threads = batch_threads
@@ -1185,7 +1322,8 @@ class Runtime:
             self.last_output_at = None
             self.backend_ready_at = None
             self.loading_phase = "Starting backend"
-            threading.Thread(target=self._read_logs, args=(process, self.key), daemon=True).start()
+            self.log_thread = threading.Thread(target=self._read_logs, args=(process, self.key), daemon=True)
+            self.log_thread.start()
             threading.Thread(target=self._watch, args=(process,), daemon=True).start()
 
     def _read_logs(self, process: subprocess.Popen[str], key: str) -> None:
@@ -1210,11 +1348,54 @@ class Runtime:
                         cache = re.search(r"K \(([^)]+)\):.*V \(([^)]+)\):", line)
                         if cache and "kv_cache" in lower:
                             self.kv_cache_verified = cache[1] == cache[2] == self.kv_cache_type
-                            if self.kv_cache_type == "q8_0" and not self.kv_cache_verified:
+                            if (self.kv_cache_type == "q8_0" or self.native_cache_requested) and not self.kv_cache_verified:
                                 self.state = "error"
-                                self.error = (f"Requested Q8 attention cache, but backend reported K={cache[1]}, "
+                                self.error = (f"Requested {self.kv_cache_type} attention cache, but backend reported K={cache[1]}, "
                                               f"V={cache[2]}. No precision fallback was accepted.")
+                                if self.kv_cache_type == "q8_0":
+                                    self.error = self.error.replace("Requested q8_0", "Requested Q8")
                                 LOG.error("%s", self.error)
+                                backend_failed = True
+                        if self.native_cache_requested:
+                            counters = re.search(
+                                r"\bllama_moe_cache: (ubatch\s*[<>]=?\s*8): hits = (\d+), misses = (\d+), "
+                                r"hit rate = (\d+(?:\.\d+)?)%, uploaded = (\d+(?:\.\d+)?) MiB", line)
+                            if counters:
+                                self.native_cache_statistics[counters[1]] = {
+                                    "hits": int(counters[2]), "misses": int(counters[3]),
+                                    "hit_rate_percent": float(counters[4]), "uploaded_mib": float(counters[5]),
+                                    "scope": "Cumulative backend load; <=8 includes decode and small input batches."}
+                            allocation = re.search(r"(\S+)\s+MoE cache size\s*=\s*([\d.]+)\s+MiB", line)
+                            if allocation and not allocation[1].startswith("CPU"):
+                                amount = float(allocation[2])
+                                if 0 < amount <= self.expert_cache_mib:
+                                    self.native_cache_allocations[allocation[1]] = amount
+                                    self.native_cache_mib = sum(self.native_cache_allocations.values())
+                            if "moe cache is disabled" in lower or "the cache is disabled" in lower:
+                                self.state = "error"
+                                self.error = "Requested native GPU expert cache was disabled by the backend; fallback is not accepted."
+                                backend_failed = True
+                        if self.strata_active and line.startswith("SYNAPSE_STRATA_VERIFIED "):
+                            try:
+                                facts = json.loads(line.partition(" ")[2])
+                                pid = facts["pid"]
+                                if (facts["context"] != self.context or facts["kv"] != "fp16" or
+                                        facts["mtp"] is not True or facts["full_routing"] is not True or
+                                        facts["cache_slots"] != self.strata.data["cache_slots"] or
+                                        type(facts["cache_mib"]) not in (int, float) or
+                                        not 0 < facts["cache_mib"] <= self.strata.data["cache_mib"] or
+                                        type(pid) is not int or pid <= 0):
+                                    raise ValueError("Unexpected Strata activation facts.")
+                                if pid != process.pid:
+                                    stat = Path(f"/proc/{pid}/stat").read_text()
+                                    if int(stat[stat.rfind(")") + 2:].split()[1]) != process.pid:
+                                        raise ValueError("Strata telemetry PID is not the owned provider child.")
+                                self.strata_verified = True
+                                self.strata_cache_mib = facts["cache_mib"]
+                                self.strata_backend_pid = pid
+                            except (OSError, ValueError, KeyError, TypeError):
+                                self.state = "error"
+                                self.error = "Strata did not confirm its bound full-routing/F16/MTP/cache contract."
                                 backend_failed = True
                         attention = re.search(r"flash_attn\s*=\s*(on|off|enabled|disabled|true|false|1|0)\b", lower)
                         if attention:
@@ -1319,6 +1500,10 @@ class Runtime:
                                     self.backend_ready_at = time.monotonic()
                                 if self.hybrid_active and not self.required_hybrid_markers <= self.hybrid_markers:
                                     self.loading_phase = "Verifying experimental hybrid execution"
+                                if self.native_cache_requested and not (self.native_cache_mib > 0 and self.kv_cache_verified):
+                                    self.loading_phase = "Verifying native GPU expert cache"
+                                if self.strata_active and not self.strata_verified:
+                                    self.loading_phase = "Verifying measured provider"
                                 if self.kv_cache_type == "q8_0" and (
                                         not self.kv_cache_verified or self.flash_attention_verified is not True):
                                     self.loading_phase = "Verifying Q8 cache and Flash Attention"
@@ -1335,6 +1520,9 @@ class Runtime:
                             if (self.process is process and self.state == "loading" and
                                     (not self.hybrid_active or
                                      self.required_hybrid_markers <= self.hybrid_markers) and
+                                    (not self.native_cache_requested or
+                                     (self.native_cache_mib > 0 and self.kv_cache_verified)) and
+                                    (not self.strata_active or self.strata_verified) and
                                     (self.kv_cache_type != "q8_0" or
                                      (self.kv_cache_verified and self.flash_attention_verified is True)) and
                                     (not verify_speculation or self.speculation_verified)):
@@ -1360,8 +1548,14 @@ class Runtime:
                     speculation_expired = (verify_speculation and not self.speculation_verified and
                                            self.backend_ready_at is not None and
                                            time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT)
+                    native_cache_expired = (self.native_cache_requested and self.backend_ready_at is not None and
+                                            time.monotonic() - self.backend_ready_at >= NATIVE_CACHE_VERIFICATION_TIMEOUT and
+                                            not (self.native_cache_mib > 0 and self.kv_cache_verified))
+                    strata_expired = (self.strata_active and not self.strata_verified and self.backend_ready_at is not None and
+                                      time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT)
                     if (self.process is process and self.state == "loading"
-                            and (time.monotonic() >= deadline or verification_expired or cache_expired or speculation_expired)):
+                            and (time.monotonic() >= deadline or verification_expired or cache_expired or
+                                 speculation_expired or native_cache_expired or strata_expired)):
                         self._terminate(process)
                         self.state = "error"
                         missing = ", ".join(sorted(self.required_hybrid_markers - self.hybrid_markers))
@@ -1380,6 +1574,11 @@ class Runtime:
                             self.error = (f"{self.draft_type.upper()} speculation verification timed out: "
                                           "the backend must confirm an active speculative decoder in every slot. "
                                           "Target-only fallback is not accepted. " + (self.readiness_error or "Check backend output."))
+                        if self.native_cache_requested and not (self.native_cache_mib > 0 and self.kv_cache_verified):
+                            self.error = ("Native GPU expert-cache verification timed out: GPU cache allocation and "
+                                          "requested KV precision must be confirmed. No uncached fallback was accepted.")
+                        if self.strata_active and not self.strata_verified:
+                            self.error = "Strata provider verification timed out. No native or target-only fallback was accepted."
                         LOG.error("%s", self.error)
                         return
             time.sleep(0.2)
@@ -1387,7 +1586,7 @@ class Runtime:
     def _sample_resources(self, process: subprocess.Popen[str]) -> None:
         try:
             probe = system_probe()
-            resources = probe.process(process.pid)
+            resources = probe.process(self.strata_backend_pid or process.pid)
             cpu_seconds = resources.pop("cpu_seconds")
             _, available = probe.memory()
             now = time.monotonic()
@@ -1432,6 +1631,9 @@ class Runtime:
             process = self.process
         if process is not None:
             self._terminate(process)
+            thread = self.log_thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=2)
         with self.lock:
             if self.process is process:
                 self.process = None
@@ -1443,6 +1645,15 @@ class Runtime:
                 self.resource_error = None
                 self.cpu_sample = None
                 self.hybrid_markers.clear()
+                self.native_cache_requested = False
+                self.native_cache_mib = 0.0
+                self.native_cache_allocations.clear()
+                if self.strata_active:
+                    self.executable = self.standard_executable
+                self.strata_active = False
+                self.strata_verified = False
+                self.strata_cache_mib = 0.0
+                self.strata_backend_pid = None
                 self.speculation_verified = False
                 self.generation_serial += 1
                 self.generation = {}
@@ -1515,7 +1726,7 @@ class AppServer(ThreadingHTTPServer):
     def _tuning_hardware(self) -> dict:
         snapshot = self.runtime.monitor.snapshot()
         samples = snapshot["samples"]
-        devices = samples[-1]["gpus"] if samples else []
+        devices = samples[-1]["gpus"] if samples else self._gpu_identity()
         return {"platform": snapshot["platform"],
                 "gpus": [{"name": device.get("name"), "vram_total_bytes": device.get("vram_total_bytes")}
                          for device in devices]}
@@ -1548,16 +1759,27 @@ class AppServer(ThreadingHTTPServer):
         """Identity of this machine and backend; remembered engine choices apply only while it is unchanged."""
         runtime = self.runtime
         backend = []
-        for path in (runtime.standard_executable, runtime.hybrid_executable, runtime.hybrid_cuda_plugin):
+        paths = [runtime.standard_executable, runtime.hybrid_executable, runtime.hybrid_cuda_plugin]
+        if runtime.standard_executable is not None:
+            directory = Path(runtime.standard_executable).resolve().parent
+            libraries = {path.resolve() for pattern in
+                         ("libllama.so*", "libggml*.so*", "llama.dll", "ggml*.dll",
+                          "libllama*.dylib", "libggml*.dylib")
+                         for path in directory.glob(pattern)}
+            paths.extend(sorted(libraries))
+        for path in paths:
             if path is not None:
                 try:
                     info = Path(path).stat()
                     backend.append([str(path), info.st_size, info.st_mtime_ns])
                 except OSError:
                     backend.append([str(path), None, None])
-        return {"platform": platform.system(), "gpus": self._gpu_identity(), "logical_cpus": len(available_cpus()),
+        identity = {"platform": platform.system(), "gpus": self._gpu_identity(), "logical_cpus": len(available_cpus()),
                 "ram_gib": round(system_probe().memory()[0] / 1024 ** 3), "backend": backend,
                 "hosted": runtime.hosted_capable}
+        if runtime.strata.data is not None:
+            identity["strata"] = runtime.strata.identity()
+        return identity
 
     def status(self) -> dict:
         with self.operation_lock:
@@ -2024,7 +2246,9 @@ def main() -> None:
         mode = "hybrid" if explicit and args.execution_mode == "auto" else args.execution_mode
         runtime = Runtime(args.llama_server, backend_kind=args.backend_kind,
                           enable_speculation=args.experimental_speculation,
-                          execution_mode=mode, settings_store=user_config_dir() / "model-settings.json", **profile)
+                          execution_mode=mode, settings_store=user_config_dir() / "model-settings.json",
+                          strata_profile=user_config_dir() / "strata-profile.json",
+                          default_context=_settings.read_context_policy(user_config_dir() / "context-policy.json"), **profile)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if runtime.hybrid_plan is not None:
