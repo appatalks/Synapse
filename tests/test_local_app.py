@@ -268,6 +268,16 @@ class LocalAppTests(unittest.TestCase):
         self.assertIn("provider is registered", row["note"])
         self.assertIn("runtime verification", row["note"])
 
+    @unittest.skipUnless(sys.platform == "linux", "The qualified provider is Linux-only.")
+    def test_precheck_reports_registered_provider_as_an_unverified_candidate(self):
+        model = self.root / "precheck-bound.gguf"
+        self.configure_causal(model)
+        code, _, body = self.request("POST", "/api/v1/model/precheck", {"model": str(model)})
+        self.assertEqual(code, 200)
+        result = json.loads(body)
+        self.assertEqual(result["automatic"]["execution_profile"], "provider-candidate")
+        self.assertIn("verification", result["automatic"]["reason"])
+
     def test_model_library_download_and_picker_through_api(self):
         content = b"GGUF fixture"
         model = {"id": "test", "name": "Fixture", "repo": "publisher/repo", "revision": "a" * 40,

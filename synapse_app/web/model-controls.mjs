@@ -157,10 +157,12 @@ export function bindReasoningEffort(primary, quick, invalid) {
 
 export function precheckText(data) {
   const automatic = data.automatic, hybrid = data.required_hybrid;
+  const defaultLabel = automatic.execution_profile === "standard" ? "Standard backend" :
+    automatic.execution_profile === "provider-candidate" ? "Registered provider (verification required)" : "Hybrid candidate";
   const lines = [
     `Hybrid eligibility: ${data.hybrid_candidate ? "Candidate - runtime unverified" : "Not eligible with this installation"}.`,
     `Architecture: ${data.architecture}${data.layout ? `; ${data.layout.expert_count} experts, ${data.layout.block_count} blocks` : ""}.`,
-    `Automatic defaults: ${automatic.execution_profile === "standard" ? "Standard backend" : "Hybrid candidate"}. ${automatic.reason}`,
+    `Automatic defaults: ${defaultLabel}. ${automatic.reason}`,
     `Require hybrid: ${data.hybrid_candidate ? `${hybrid.initialization} plan, ${hybrid.transfer} transfers, ${hybrid.context.toLocaleString()} context, ${hybrid.cache_mib.toLocaleString()} MiB cache.` : hybrid.reason}`,
     data.scope,
     ...data.limitations,

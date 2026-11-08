@@ -165,6 +165,10 @@ test("pre-check separates candidate eligibility from Automatic's actual selectio
     required_hybrid: { reason: "No hybrid installation profile found." } });
   assert.match(unavailable, /Not eligible with this installation/);
   assert.match(unavailable, /No hybrid installation profile/);
+  const provider = precheckText({ ...candidate, automatic: {
+    execution_profile: "provider-candidate", reason: "Runtime verification is required." } });
+  assert.match(provider, /Automatic defaults: Registered provider \(verification required\)/);
+  assert.doesNotMatch(provider, /Automatic defaults: Hybrid candidate/);
 });
 
 function precheck(request) {

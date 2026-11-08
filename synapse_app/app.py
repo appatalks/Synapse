@@ -936,6 +936,7 @@ class Runtime:
             raise AppError(400, f"Cannot inspect model: {exc}") from exc
         automatic = self._select_execution(metadata, model_bytes, "auto")
         required = self._select_execution(metadata, model_bytes, "hybrid")
+        causal_candidate = self.causal.bound_model(model)
 
         def summary(selection):
             hybrid = selection["hybrid"]
@@ -945,6 +946,12 @@ class Runtime:
                     "initialization": ("causal" if selection["plan"] == "auto" else "trained") if hybrid else None,
                     "transfer": selection["transfer"] if hybrid else None}
 
+        automatic_summary = summary(automatic)
+        if causal_candidate and _causal.native_cannot_load(self.standard_executable):
+            automatic_summary.update(
+                execution_profile="provider-candidate", reason_code="provider_candidate",
+                reason="A registered provider can be selected after model, machine and runtime verification.")
+
         return {
             "api_version": 1, "model": str(model), "architecture": metadata["general.architecture"],
             "file_type": metadata.get("general.file_type"), "file_size_bytes": model_bytes,
@@ -953,8 +960,8 @@ class Runtime:
                 "moe": required["layout"] is not None, "hybrid": required["hybrid"],
                 "hosted": self.hosted_capable, "direct": required["transfer"] == "direct",
                 "native_cache": self.native_cache_available, "strata": self.strata.available(model),
-                "causal": self.causal.bound_model(model)}),
-            "automatic": summary(automatic), "required_hybrid": summary(required),
+                "causal": causal_candidate}),
+            "automatic": automatic_summary, "required_hybrid": summary(required),
             "scope": "Read-only GGUF metadata and installed-profile defaults; no weights loaded or backend started.",
             "limitations": [
                 "Expert tensor layouts, quantization kernels and precision requirements are unverified.",
