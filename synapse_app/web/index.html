@@ -78,6 +78,11 @@
           <label for="library-directory">Download directory</label>
           <div class="copy-row"><input id="library-directory" autocomplete="off" spellcheck="false"><button id="library-refresh" type="button" class="secondary">Refresh</button></div>
           <p class="hint">Sizes are downloads, not total RAM or VRAM required. Speed gains are measured examples on a specific machine, not predictions or guarantees. Auto Tune selects the best supported settings locally.</p>
+          <h4>Downloaded models</h4>
+          <p class="hint">Local discovery does not verify model quality or backend compatibility. Split models list their first shard.</p>
+          <p id="local-model-status" role="status" aria-live="polite"></p>
+          <div id="local-models"></div>
+          <h4>Tested downloads</h4>
           <div id="library-status" role="status" aria-live="polite"></div>
           <div id="library-models"></div>
           <div id="library-download" hidden><progress id="library-progress" max="1" value="0"></progress><p id="library-download-text" role="status"></p><button id="library-cancel" type="button" class="secondary">Cancel download</button></div>

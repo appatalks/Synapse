@@ -333,6 +333,41 @@ async function refreshLibrary() {
     const directory = el("library-directory").value.trim();
     const data = await request(`/api/v1/models/library${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`);
     if (!directory) el("library-directory").value = data.directory;
+    const scan = data.discovery;
+    el("local-models").replaceChildren();
+    for (const model of scan.models) {
+      const card = document.createElement("article");
+      card.className = "library-card";
+      const heading = document.createElement("h4");
+      heading.textContent = model.name;
+      const details = document.createElement("p");
+      details.textContent = `${(model.size / 1024 ** 3).toFixed(2)} GiB · ${model.path}`;
+      const note = document.createElement("p");
+      note.className = "hint";
+      note.textContent = model.missing_shards.length
+        ? `Missing shards: ${model.missing_shards.join(", ")}`
+        : model.note;
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "secondary";
+      action.textContent = "Use this model";
+      action.disabled = !!model.missing_shards.length || ["ready", "loading", "stopping"].includes(status?.state) ||
+        !!status?.tuning?.active;
+      action.addEventListener("click", () => {
+        el("model").value = model.path;
+        modelPrecheck.invalidate();
+        selectTab(el("tab-model"));
+        el("model").focus();
+      });
+      card.append(heading, details, note, action);
+      el("local-models").append(card);
+    }
+    el("local-model-status").textContent = [
+      scan.active ? `Scanning locally · ${scan.models.length} models found…` :
+        `${scan.models.length} local model${scan.models.length === 1 ? "" : "s"} found.`,
+      scan.truncated ? "Search reached its safety limit; narrow the folder or use Browse models." : "",
+      ...scan.warnings,
+    ].filter(Boolean).join(" ");
     el("library-models").replaceChildren();
     for (const model of data.models) {
       const card = document.createElement("article");
@@ -380,8 +415,9 @@ async function refreshLibrary() {
     if (download.active) {
       el("library-progress").value = download.total ? download.downloaded / download.total : 0;
       el("library-download-text").textContent = `${(download.downloaded / 1024 ** 3).toFixed(2)} / ${(download.total / 1024 ** 3).toFixed(2)} GiB · verifying SHA-256 when complete`;
-      libraryTimer = setTimeout(refreshLibrary, 1000);
     }
+    clearTimeout(libraryTimer);
+    if (download.active || scan.active) libraryTimer = setTimeout(refreshLibrary, 1000);
     el("library-status").textContent = download.state === "completed" ? "Download verified. Choose the model below." :
       download.state === "error" ? `Download failed: ${download.error}` :
       download.state === "cancelled" ? "Download cancelled; partial file removed." : "";
@@ -391,7 +427,15 @@ async function refreshLibrary() {
     libraryBusy = false;
   }
 }
-el("library-refresh").addEventListener("click", () => { clearTimeout(libraryTimer); refreshLibrary(); });
+el("library-refresh").addEventListener("click", async () => {
+  clearTimeout(libraryTimer);
+  try {
+    await request("/api/v1/models/discover", { directory: el("library-directory").value.trim() });
+    refreshLibrary();
+  } catch (error) {
+    el("local-model-status").textContent = error.message;
+  }
+});
 el("library-cancel").addEventListener("click", async () => {
   try { await request("/api/v1/models/download/cancel", {}); }
   catch (error) { el("library-status").textContent = error.message; }

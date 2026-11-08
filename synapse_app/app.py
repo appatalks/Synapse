@@ -234,7 +234,7 @@ def validate_hybrid_plan(path: Path, layout: dict | None = None) -> int:
     return len(selected)
 
 
-def model_metadata(path: Path) -> dict:
+def model_metadata(path: Path, *, architecture_only: bool = False) -> dict:
     """Read bounded GGUF metadata without mapping weights or allocating vocabulary arrays."""
     limit = min(path.stat().st_size, 64 * 1024 * 1024)
     result = {}
@@ -308,6 +308,8 @@ def model_metadata(path: Path) -> dict:
             item = value(number("I"), keep)
             if keep:
                 result[key] = item
+                if architecture_only and key == "general.architecture" and isinstance(item, str):
+                    return result
     if not isinstance(result.get("general.architecture"), str):
         raise ValueError("Select the first GGUF shard with architecture metadata.")
     return result
@@ -1674,7 +1676,8 @@ class AppServer(ThreadingHTTPServer):
     block_on_close = False
 
     def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True,
-                 tuning_store: Path | None = None, model_library_dir: str | None = None):
+                 tuning_store: Path | None = None, model_library_dir: str | None = None,
+                 model_search_roots: list[str] | None = None):
         self.choices = _tuning.EngineChoices(tuning_store.parent / "engine-choices.json" if tuning_store else None)
         self._gpus: list[dict] | None = None
         self.runtime = runtime
@@ -1689,7 +1692,9 @@ class AppServer(ThreadingHTTPServer):
             choices=self.choices, machine=self._machine)
         archive = Path(sys.argv[0]).resolve() if sys.argv[0].endswith(".pyz") else None
         self.updates = _updates.UpdateManager(__version__, archive, automatic=update_checks)
-        self.model_library = _model_library.ModelLibrary(model_library_dir)
+        self.model_library = _model_library.ModelLibrary(
+            model_library_dir, search_roots=model_search_roots,
+            metadata=lambda path: model_metadata(path, architecture_only=True))
         self.restart_requested = False
         self.stop_requested = False
         super().__init__(address, Handler)
@@ -1890,7 +1895,26 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
                 if set(query) - {"directory"} or any(len(values) != 1 for values in query.values()):
                     raise AppError(400, "Provide one model library directory.")
-                self._json(200, self.server.model_library.listing(query.get("directory", [None])[0]))
+                runtime = self.server.runtime
+                saved = runtime.model_settings.settings or {}
+                try:
+                    listing = self.server.model_library.listing(
+                        query.get("directory", [None])[0], recent=[runtime.model, saved.get("model")])
+                except ValueError as exc:
+                    raise AppError(400, str(exc)) from exc
+                self._json(200, listing)
+            elif method == "POST" and path == "/api/v1/models/discover":
+                data = self._body()
+                if set(data) - {"directory"}:
+                    raise AppError(400, "Discovery accepts only the model library directory.")
+                runtime = self.server.runtime
+                saved = runtime.model_settings.settings or {}
+                try:
+                    self.server.model_library.discover(
+                        data.get("directory"), recent=[runtime.model, saved.get("model")], force=True)
+                except ValueError as exc:
+                    raise AppError(400, str(exc)) from exc
+                self._json(202, self.server.model_library.discovery())
             elif method == "POST" and path == "/api/v1/models/download":
                 data = self._body()
                 if set(data) != {"model", "directory", "confirm"}:
@@ -2280,6 +2304,7 @@ def main() -> None:
     try:
         library_file = user_config_dir() / "model-library.json"
         library_dir = None
+        search_roots = []
         if library_file.exists():
             if library_file.stat().st_size > 4096:
                 raise ValueError("Model library configuration exceeds 4 KiB.")
@@ -2287,8 +2312,14 @@ def main() -> None:
             library_dir = library_config.get("directory") if isinstance(library_config, dict) else None
             if not isinstance(library_dir, str) or not Path(library_dir).expanduser().is_absolute():
                 raise ValueError("Model library directory must be an absolute path.")
+            search_roots = library_config.get("search_roots", [])
+            if (not isinstance(search_roots, list) or len(search_roots) > 16 or
+                    any(not isinstance(root, str) or not Path(root).expanduser().is_absolute()
+                        for root in search_roots)):
+                raise ValueError("Model search roots must be a list of absolute paths.")
         server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check,
-                           tuning_store=user_config_dir() / "tuning.json", model_library_dir=library_dir)
+                           tuning_store=user_config_dir() / "tuning.json", model_library_dir=library_dir,
+                           model_search_roots=search_roots)
     except (OSError, ValueError) as exc:
         parser.exit(1, f"Cannot start local app: {exc}\n")
     url = f"http://127.0.0.1:{server.server_address[1]}"

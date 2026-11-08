@@ -88,6 +88,68 @@ class ModelLibraryTests(unittest.TestCase):
             self.assertIn("free disk", self.wait()["error"])
             opener.assert_not_called()
 
+    def test_discovers_recent_and_local_models_groups_shards_and_reports_clover(self):
+        root = self.root / "models"
+        root.mkdir()
+        nested = root / "qwen"
+        nested.mkdir()
+        first = nested / "weights-00001-of-00002.gguf"
+        second = nested / "weights-00002-of-00002.gguf"
+        first.write_bytes(b"GGUFfirst")
+        second.write_bytes(b"GGUFsecond")
+        clover = root / "clover.gguf"
+        clover.write_bytes(b"GGUFclover")
+        recent = self.root / "outside.gguf"
+        recent.write_bytes(b"GGUFrecent")
+        invalid = root / "invalid.gguf"
+        invalid.write_bytes(b"NOPE")
+        try:
+            (root / "loop").symlink_to(root, target_is_directory=True)
+            (root / "duplicate.gguf").symlink_to(clover)
+            outside = self.root / "outside-dir"
+            outside.mkdir()
+            (outside / "not-allowed.gguf").write_bytes(b"GGUFoutside")
+            (root / "outside-link").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pass
+
+        def metadata(path):
+            return {"general.architecture": "clover_moe" if path.name == "clover.gguf" else "qwen4exp"}
+
+        library = ModelLibrary(str(root), [], metadata=metadata)
+        self.addCleanup(library.close)
+        library.discover(recent=[str(recent), str(clover)])
+        library.scan_worker.join(timeout=5)
+        state = library.discovery()
+        self.assertEqual(state["state"], "completed")
+        self.assertEqual(len(state["models"]), 3)
+        by_name = {item["name"]: item for item in state["models"]}
+        self.assertIn("outside.gguf", by_name)
+        self.assertEqual(by_name[first.name]["size"], first.stat().st_size + second.stat().st_size)
+        self.assertEqual(by_name[first.name]["missing_shards"], [])
+        self.assertIn("compatible backend", by_name[clover.name]["note"])
+        self.assertNotIn(second.name, by_name)
+        self.assertNotIn("not-allowed.gguf", by_name)
+
+        second.unlink()
+        library.discover(recent=[str(recent), str(clover)], force=True)
+        library.scan_worker.join(timeout=5)
+        first_entry = next(item for item in library.discovery()["models"] if item["name"] == first.name)
+        self.assertEqual(first_entry["missing_shards"], [second.name])
+
+    def test_unavailable_roots_are_reported_and_do_not_block_other_models(self):
+        folder = self.root / "present"
+        folder.mkdir()
+        (folder / "test.gguf").write_bytes(b"GGUFdata")
+        missing = self.root / "missing"
+        library = ModelLibrary(str(folder), [], search_roots=[str(missing)])
+        self.addCleanup(library.close)
+        library.discover()
+        library.scan_worker.join(timeout=5)
+        state = library.discovery()
+        self.assertEqual(len(state["models"]), 1)
+        self.assertTrue(any(str(missing) in warning for warning in state["warnings"]))
+
 
 if __name__ == "__main__":
     unittest.main()

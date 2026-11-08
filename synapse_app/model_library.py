@@ -4,10 +4,12 @@ import hashlib
 import http.client
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import threading
 import urllib.request
+from collections import deque
 
 from .updates import HttpsRedirect
 
@@ -43,20 +45,32 @@ class Cancelled(Exception):
 
 
 class ModelLibrary:
-    def __init__(self, default_directory=None, catalog=CATALOG):
+    def __init__(self, default_directory=None, catalog=CATALOG, *, search_roots=None, metadata=None):
         self.default_directory = str(default_directory or Path.home() / "Synapse Models")
+        self.search_roots = list(search_roots or [])
+        self.metadata = metadata
         self.catalog = {item["id"]: dict(item) for item in catalog}
         self.lock = threading.Lock()
         self.cancelled = threading.Event()
         self.state = {"state": "idle", "active": False}
         self.worker = None
+        self.scan_worker = None
+        self.scan_cancelled = threading.Event()
+        self.scan_state = {"state": "idle", "active": False, "models": [], "warnings": [], "truncated": False}
+        self.scan_key = None
 
     def snapshot(self):
         with self.lock:
             return dict(self.state)
 
-    def listing(self, directory=None):
+    def discovery(self):
+        with self.lock:
+            return {**self.scan_state, "models": [dict(item) for item in self.scan_state["models"]],
+                    "warnings": list(self.scan_state["warnings"])}
+
+    def listing(self, directory=None, *, recent=()):
         root = Path(directory or self.default_directory).expanduser()
+        self.discover(str(root), recent=recent)
         result = []
         for item in self.catalog.values():
             path = root / item["id"] / item["filename"]
@@ -66,7 +80,121 @@ class ModelLibrary:
             except OSError:
                 exists = False
             result.append({**item, "path": str(path), "installed": exists})
-        return {"directory": str(root), "models": result, "download": self.snapshot()}
+        return {"directory": str(root), "models": result, "download": self.snapshot(),
+                "discovery": self.discovery()}
+
+    def discover(self, directory=None, *, recent=(), force=False):
+        root = directory or self.default_directory
+        if not isinstance(root, str) or not root.strip() or len(root) > 4096 or not Path(root).expanduser().is_absolute():
+            raise ValueError("Model library directory must be an absolute path.")
+        roots = list(dict.fromkeys([str(Path(root).expanduser()), *self.search_roots]))
+        recent = tuple(path for path in recent if isinstance(path, str) and path and len(path) <= 4096)
+        key = (tuple(roots), recent)
+        with self.lock:
+            if self.scan_state["active"] or (self.scan_key == key and not force):
+                return
+            self.scan_key = key
+            self.scan_cancelled.clear()
+            self.scan_state = {"state": "scanning", "active": True, "models": [], "warnings": [],
+                               "truncated": False, "roots": roots}
+            self.scan_worker = threading.Thread(target=self._scan, args=(roots, recent), daemon=True)
+            self.scan_worker.start()
+
+    def _scan(self, roots, recent):
+        models, warnings, files_seen, dirs_seen = [], [], set(), set()
+        visited_entries = 0
+        truncated = False
+        allowed = []
+        for root in roots:
+            try:
+                allowed.append(Path(root).expanduser().resolve())
+            except (OSError, RuntimeError):
+                warnings.append(f"Could not scan: {root}")
+
+        def append(path, *, recent_file=False):
+            try:
+                resolved = path.resolve(strict=True)
+                if not recent_file and not any(resolved == root or root in resolved.parents for root in allowed):
+                    return
+                match = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", path.name, re.IGNORECASE)
+                if match and int(match[1]) != 1:
+                    return
+                info = path.stat()
+                identity = (info.st_dev, info.st_ino)
+                if identity in files_seen or not path.is_file():
+                    return
+                with path.open("rb") as source:
+                    if source.read(4) != b"GGUF":
+                        return
+                files_seen.add(identity)
+                missing, size = [], info.st_size
+                if match:
+                    total = int(match[2])
+                    if not 1 <= total <= 128:
+                        missing = ["Shard count outside discovery limit"]
+                    else:
+                        for index in range(1, total + 1):
+                            shard = path.with_name(path.name[:match.start(1)] + f"{index:05d}" + path.name[match.end(1):])
+                            if not shard.is_file():
+                                missing.append(shard.name)
+                            elif index != 1:
+                                size += shard.stat().st_size
+                architecture = None
+                if self.metadata is not None:
+                    try:
+                        architecture = self.metadata(path).get("general.architecture")
+                    except (OSError, ValueError, UnicodeError):
+                        pass
+                note = ("Clover architecture needs a compatible backend; the default installer backend cannot load it."
+                        if architecture == "clover_moe" else
+                        "Local file discovered; backend compatibility and quality are not verified.")
+                models.append({"name": path.name, "path": str(path), "size": size,
+                               "architecture": architecture, "missing_shards": missing, "note": note})
+                with self.lock:
+                    self.scan_state["models"] = list(models)
+            except (OSError, RuntimeError):
+                return
+
+        for value in recent:
+            path = Path(value).expanduser()
+            if path.suffix.lower() == ".gguf":
+                append(path, recent_file=True)
+        queue = deque(allowed)
+        while queue and not self.scan_cancelled.is_set():
+            directory = queue.popleft()
+            try:
+                real = directory.resolve(strict=True)
+                if not any(real == root or root in real.parents for root in allowed):
+                    continue
+                info = real.stat()
+                identity = (info.st_dev, info.st_ino)
+                if identity in dirs_seen:
+                    continue
+                if len(dirs_seen) >= 5000 or visited_entries >= 30000 or len(models) >= 500:
+                    truncated = True
+                    break
+                dirs_seen.add(identity)
+                with os.scandir(real) as entries:
+                    for entry in entries:
+                        visited_entries += 1
+                        if visited_entries > 30000 or len(models) >= 500 or self.scan_cancelled.is_set():
+                            truncated = True
+                            break
+                        if entry.name.startswith("."):
+                            continue
+                        try:
+                            if entry.is_dir(follow_symlinks=True):
+                                queue.append(Path(entry.path))
+                            elif entry.name.lower().endswith(".gguf"):
+                                append(Path(entry.path))
+                        except OSError:
+                            continue
+            except (OSError, RuntimeError):
+                if len(warnings) < 10:
+                    warnings.append(f"Could not scan: {directory}")
+        with self.lock:
+            self.scan_state.update(state="cancelled" if self.scan_cancelled.is_set() else "completed",
+                                   active=False, models=models, warnings=warnings, truncated=truncated)
 
     def start(self, model_id, directory, confirm):
         if confirm is not True:
@@ -94,8 +222,11 @@ class ModelLibrary:
 
     def close(self):
         self.cancelled.set()
+        self.scan_cancelled.set()
         if self.worker and self.worker is not threading.current_thread():
             self.worker.join(timeout=3)
+        if self.scan_worker and self.scan_worker is not threading.current_thread():
+            self.scan_worker.join(timeout=3)
 
     def _download(self, model, root):
         temporary = None

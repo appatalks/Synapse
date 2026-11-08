@@ -20,6 +20,14 @@ publishing the file. Cancelled or failed partial downloads are removed;
 existing files are never overwritten. A file found by name and size is
 identified as local, but is not automatically re-hashed.
 
+The library also scans the chosen library folder, configured local search
+roots, and the last-used model for GGUF files without reading model weights.
+Split files appear once under their first shard; missing shards are reported.
+The scan is bounded and does not upload, move or modify models. A discovered
+file is not automatically validated for quality or compatibility. Clover's
+architecture is listed with a warning because the default installed backend
+does not yet support it.
+
 Speed percentages are historical measurements for the exact file and
 specified hardware/context, not guaranteed predictions or quality
 rankings. Where no comparable acceleration measurement exists, the

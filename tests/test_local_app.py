@@ -108,6 +108,24 @@ class LocalAppTests(unittest.TestCase):
             code, _, _ = self.request("POST", "/api/v1/models/download", data)
             self.assertEqual(code, 400)
         self.assertFalse(self.server.model_library.snapshot()["active"])
+        code, _, _ = self.request("GET", "/api/v1/models/library?directory=relative")
+        self.assertEqual(code, 400)
+
+    def test_model_library_discovers_real_metadata_and_first_shard(self):
+        model = self.root / "clover-00001-of-00002.gguf"
+        write_metadata(model, {"general.architecture": "clover_moe"})
+        (self.root / "clover-00002-of-00002.gguf").write_bytes(b"GGUFshard")
+        code, _, body = self.request("POST", "/api/v1/models/discover", {"directory": str(self.root)})
+        self.assertEqual(code, 202, body)
+        self.server.model_library.scan_worker.join(timeout=5)
+        code, _, body = self.request("GET", "/api/v1/models/library?directory=" + str(self.root))
+        self.assertEqual(code, 200)
+        state = json.loads(body)["discovery"]
+        row = next(item for item in state["models"] if item["name"] == model.name)
+        self.assertEqual(row["architecture"], "clover_moe")
+        self.assertIn("default installer backend", row["note"])
+        self.assertEqual(row["missing_shards"], [])
+        self.assertFalse(any(item["name"].endswith("-00002-of-00002.gguf") for item in state["models"]))
 
     def test_model_library_download_and_picker_through_api(self):
         content = b"GGUF fixture"
