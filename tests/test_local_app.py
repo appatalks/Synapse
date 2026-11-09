@@ -119,6 +119,8 @@ class LocalAppTests(unittest.TestCase):
             mock.patch.object(app._causal, "driver_version", return_value=app._causal.DRIVER_VERSION),
             mock.patch.object(app._causal.platform, "machine", return_value="x86_64"),
             mock.patch.object(app._causal, "native_cannot_load", return_value=True),
+            mock.patch.object(app, "available_cpus", return_value=set(range(32))),
+            mock.patch.object(self.server.tuner, "cpu_threads", return_value=16),
         )
         for patch in patches:
             patch.start()
