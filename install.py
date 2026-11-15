@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -238,12 +239,75 @@ def select_backend(value, package, interactive=True, directory=None):
     return value
 
 
+def confirm_pi():
+    prompt = ("Optional Pi coding agent: reuse an existing Pi, or download a verified standalone build.\n"
+              "This adds a Synapse provider to Pi's user configuration; credentials and existing defaults are preserved.\n"
+              "Pi can edit files and run commands with your user permissions; it is not a sandbox.\n"
+              "Install/configure Pi for SYNAPSE? [y/N]: ")
+    if sys.platform != "win32":
+        try:
+            with open("/dev/tty", "r+") as terminal:
+                terminal.write(prompt)
+                terminal.flush()
+                return terminal.readline().strip().lower() in ("y", "yes")
+        except OSError:
+            return False
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        return input(prompt).strip().lower() in ("y", "yes")
+    return False
+
+
+def setup_pi(directory, launcher_dir, receipt):
+    from synapse_app import pi_setup
+    executable = pi_setup.existing_pi()
+    if executable is None:
+        saved = receipt.get("pi_executable")
+        if isinstance(saved, str) and Path(saved).is_file():
+            executable = saved
+    if executable is None:
+        executable = pi_setup.install_pi(directory)
+    else:
+        print("Reusing the existing Pi installation; no replacement or update.")
+    context = 4096
+    try:
+        context = pi_setup.loaded_context()
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        print(f"Loaded context unavailable: {error}\nUsing conservative 4K Pi defaults.\n"
+              "After loading a model, run synapse --configure-pi to refresh these limits.")
+    launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
+    if launcher.is_symlink() or launcher.exists() and "# SYNAPSE managed Pi launcher" not in launcher.read_text():
+        raise ValueError("The synapse-pi launcher belongs to another program; it was not replaced.")
+    config = pi_setup.configure_pi(context=context)
+    if sys.platform == "win32":
+        command = "call " if Path(executable).suffix.lower() in (".cmd", ".bat") else ""
+        text = ("@rem # SYNAPSE managed Pi launcher\n@chcp 65001 >nul\n@setlocal DisableDelayedExpansion\n@" +
+                command + windows_command([executable]) + " %*\n")
+    else:
+        text = "#!/usr/bin/env bash\n# SYNAPSE managed Pi launcher\nexec " + shlex.join([executable]) + ' "$@"\n'
+    descriptor, name = tempfile.mkstemp(prefix=".synapse-pi-launcher-", dir=launcher_dir)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        staged.chmod(0o755)
+        os.replace(staged, launcher)
+    finally:
+        staged.unlink(missing_ok=True)
+    receipt["pi_executable"] = executable
+    pi_setup.write_config(directory / "install.json", receipt)
+    print(f"Pi configured in {config}. Start with {launcher}\n"
+          "In Pi, use /model and select Synapse Local; keep a model loaded in Synapse.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, help="private installation directory (also puts the launcher in PREFIX/bin)")
     parser.add_argument("--local-package", type=Path, help="install an explicitly supplied local SYNAPSE.pyz without a release download")
     parser.add_argument("--llama-server", help="backend path to save in the launcher")
-    parser.add_argument("--non-interactive", action="store_true", help="do not prompt for a Windows backend location")
+    parser.add_argument("--non-interactive", action="store_true", help="skip interactive backend, acceleration and Pi offers")
+    pi_choice = parser.add_mutually_exclusive_group()
+    pi_choice.add_argument("--with-pi", action="store_true", help="consent to optional Pi installation and configuration")
+    pi_choice.add_argument("--no-pi", action="store_true", help="skip the optional Pi offer")
     parser.add_argument("--windows-integration", action="store_true", help="also register Windows launchers for a custom --prefix")
     parser.add_argument("--no-shortcuts", action="store_true", help="skip Windows Desktop and Start Menu shortcuts")
     parser.add_argument("--no-path", action="store_true", help="do not add the Windows launcher directory to user PATH")
@@ -303,13 +367,15 @@ def main():
             previous = json.loads(receipt_file.read_text())
             if previous.get("app") != "SYNAPSE" or previous.get("mode") != "managed":
                 raise ValueError("Refusing to replace an unrecognized installation.")
+            if isinstance(previous.get("pi_executable"), str):
+                receipt["pi_executable"] = previous["pi_executable"]
         backend_args = previous.get("backend_args", ["--llama-server", os.environ.get("LLAMA_SERVER", "llama-server")])
         if args.llama_server:
             backend_args = ["--llama-server", args.llama_server]
         backend_args[1] = select_backend(backend_args[1], args.local_package or target,
                                          interactive=not args.non_interactive, directory=directory)
         accelerated = args.accelerated
-        if sys.platform == "linux" and not args.no_accelerated and not accelerated:
+        if sys.platform == "linux" and not args.no_accelerated and not accelerated and not args.non_interactive:
             try:
                 with open("/dev/tty", "r+") as terminal:
                     terminal.write("Offer experimental Linux/NVIDIA acceleration? Builds native code; no model downloads. [y/N] ")
@@ -366,6 +432,11 @@ def main():
             print("A llama-server backend is still required. Rerun this installer with\n"
                   "--llama-server followed by its path to remember it in your launchers.")
         print("Click the version in the sidebar for release details and verified application updates.")
+        if args.with_pi or not args.no_pi and not args.non_interactive and confirm_pi():
+            try:
+                setup_pi(directory, launcher_dir, receipt)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                print(f"Optional Pi setup failed: {error}\nSYNAPSE remains installed. Rerun with --with-pi to retry.")
         lock.unlink(missing_ok=True)
         if args.launch:
             subprocess.run(command, check=True)

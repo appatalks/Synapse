@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import threading
 import unittest
 from unittest import mock
@@ -16,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from synapse_app import updates
+from synapse_app import pi_setup
 
 
 def application(version):
@@ -40,6 +42,146 @@ class UpdateTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_pi_configuration_preserves_settings_and_tracks_explicit_context_refresh(self):
+        directory = self.root / "pi"
+        directory.mkdir()
+        settings_path = directory / "settings.json"
+        settings_path.write_text(json.dumps({"defaultProvider": "existing", "terminal": {"showTerminalProgress": True}}))
+        auth = directory / "auth.json"
+        auth.write_text("private credentials stay untouched")
+        pi_setup.configure_pi(directory, context=64512)
+        models = json.loads((directory / "models.json").read_text())
+        model = models["providers"]["synapse"]["models"][0]
+        self.assertEqual(model["contextWindow"], 64512)
+        self.assertEqual(model["maxTokens"], 4096)
+        settings = json.loads(settings_path.read_text())
+        self.assertEqual(settings["defaultProvider"], "existing")
+        self.assertTrue(settings["terminal"]["showTerminalProgress"])
+        pi_setup.configure_pi(directory, context=4096)
+        self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
+        pi_setup.configure_pi(directory, context=4096, refresh=True)
+        model = json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]
+        self.assertEqual((model["contextWindow"], model["maxTokens"]), (4096, 512))
+        self.assertEqual(auth.read_text(), "private credentials stay untouched")
+        pi_setup.configure_pi(directory, context=4096, port=8081, refresh=True)
+        self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["baseUrl"],
+                         "http://127.0.0.1:8081/v1")
+        before = (directory / "models.json").read_bytes()
+        settings_path.write_text('{"compaction": []}')
+        with self.assertRaisesRegex(ValueError, "compaction"):
+            pi_setup.configure_pi(directory, port=8081)
+        self.assertEqual((directory / "models.json").read_bytes(), before)
+
+    def test_pi_context_refresh_command_uses_ready_server_without_running_inference(self):
+        requested = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({"app_name": "SYNAPSE", "state": "ready", "context": 64512}).encode())
+
+            def log_message(self, *arguments):
+                pass
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        directory = self.root / "refreshed-pi"
+        try:
+            result = subprocess.run([sys.executable, "-m", "synapse_app", "--configure-pi", "--port", str(server.server_port)],
+                                    cwd=ROOT, env={**os.environ, "PI_CODING_AGENT_DIR": str(directory)},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("64512-token", result.stdout)
+            model = json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]
+            self.assertEqual(model["contextWindow"], 64512)
+            self.assertEqual(requested, ["/api/v1/status"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_pi_standalone_assets_cover_all_platforms_and_extract_only_verified_files(self):
+        for system in ("win32", "linux", "darwin"):
+            for architecture in ("AMD64", "ARM64"):
+                with mock.patch.object(sys, "platform", system), \
+                        mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": architecture}):
+                    self.assertIn(pi_setup.release_asset(), pi_setup.PI_HASHES)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("pi/pi.exe", b"fixture")
+            archive.writestr("pi/resources/help.txt", b"resource")
+        body = output.getvalue()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.dict(pi_setup.PI_HASHES, {"pi-windows-x64.zip": hashlib.sha256(body).hexdigest()}), \
+                mock.patch.object(pi_setup, "download", return_value=body), \
+                mock.patch.object(pi_setup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="1.5.2\n", stderr="")):
+            executable = Path(pi_setup.install_pi(self.root))
+            self.assertEqual(executable.read_bytes(), b"fixture")
+            self.assertTrue((executable.parent / "resources/help.txt").is_file())
+        before = set(self.root.iterdir())
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.object(pi_setup, "download", return_value=b"wrong"):
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                pi_setup.install_pi(self.root)
+        self.assertEqual(set(self.root.iterdir()), before)
+
+    def test_pi_unix_archive_extraction_and_link_rejection(self):
+        def archive_body(link=False):
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode="w:gz") as archive:
+                entry = tarfile.TarInfo("pi/pi")
+                entry.mode = 0o755
+                entry.size = 7
+                archive.addfile(entry, io.BytesIO(b"fixture"))
+                if link:
+                    entry = tarfile.TarInfo("pi/link")
+                    entry.type = tarfile.SYMTYPE
+                    entry.linkname = "../../outside"
+                    archive.addfile(entry)
+            return output.getvalue()
+        for link in (False, True):
+            body = archive_body(link)
+            with mock.patch.object(sys, "platform", "linux"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.dict(pi_setup.PI_HASHES, {"pi-linux-x64.tar.gz": hashlib.sha256(body).hexdigest()}), \
+                    mock.patch.object(pi_setup, "download", return_value=body), \
+                    mock.patch.object(pi_setup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="1.5.2\n", stderr="")):
+                before = set(self.root.iterdir())
+                if link:
+                    with self.assertRaisesRegex(ValueError, "Unsafe"):
+                        pi_setup.install_pi(self.root)
+                    self.assertEqual(set(self.root.iterdir()), before)
+                else:
+                    self.assertEqual(Path(pi_setup.install_pi(self.root)).read_bytes(), b"fixture")
+
+    def test_optional_pi_offer_declines_by_default_and_reuses_existing_install(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch("builtins.input", return_value=""):
+            self.assertFalse(installer.confirm_pi())
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi.cmd"
+        executable.write_text("@echo fixture")
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(self.root / "pi-config")}), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "install_pi") as install, \
+                mock.patch.object(pi_setup, "loaded_context", return_value=64512):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+            install.assert_not_called()
+            launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
+            self.assertIn("SYNAPSE managed Pi launcher", launcher.read_text())
+            self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
+            models = json.loads((self.root / "pi-config/models.json").read_text())
+            self.assertEqual(models["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
 
     def test_version_order_and_invalid_tags(self):
         versions = ["0.1.0a1", "0.1.0b1", "0.1.0rc1", "0.1.0rc2", "0.1.0", "0.2.0rc1", "1.0.0"]
@@ -198,7 +340,7 @@ class UpdateTests(unittest.TestCase):
         prefix = self.root / "installed"
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch.object(sys, "argv", ["install.py", "--local-package", str(self.archive),
-                                               "--prefix", str(prefix), "--no-accelerated"]), \
+                                               "--prefix", str(prefix), "--no-accelerated", "--no-pi"]), \
                 mock.patch.object(sys.stdin, "isatty", return_value=True), \
                 mock.patch.object(sys.stdout, "isatty", return_value=True), \
                 mock.patch.object(installer.shutil, "which", return_value=None), \
@@ -261,12 +403,12 @@ class UpdateTests(unittest.TestCase):
             result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                      str(script), "-Prefix", str(self.root / "custom prefix"),
                                      "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
-                                     "-NoPath", "-NoShortcuts", "-NonInteractive"],
+                                     "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi"],
                                     check=True, capture_output=True, text=True, timeout=20)
             arguments = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
                                          "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
-                                         "--no-shortcuts", "--no-path", "--non-interactive"])
+                                         "--no-shortcuts", "--no-path", "--non-interactive", "--with-pi"])
         finally:
             server.shutdown()
             server.server_close()
@@ -408,7 +550,7 @@ class UpdateTests(unittest.TestCase):
         package = self.root / "dist/SYNAPSE.pyz"
         prefix = self.root / "installed"
         command = [sys.executable, str(ROOT / "install.py"), "--local-package", str(package),
-                   "--prefix", str(prefix), "--no-accelerated"]
+                   "--prefix", str(prefix), "--no-accelerated", "--no-pi"]
         if sys.platform == "win32":
             command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                        str(ROOT / "install.ps1"), "-LocalPackage", str(package), "-Prefix", str(prefix),

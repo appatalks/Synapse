@@ -106,6 +106,83 @@ above to get those integrations and the optional consent-based backend setup.
 Neither method installs Ollama, GPU drivers or model weights, or replaces your
 existing backend.
 
+## Optional Pi coding agent
+
+The interactive installer offers Pi on Windows, Linux and macOS. Decline with
+Enter (the default), use `--no-pi` (`-NoPi` in PowerShell), or use
+`--non-interactive` to skip all optional offers. To explicitly consent:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -WithPi
+```
+
+From a Linux/macOS source checkout:
+
+```sh
+python3 install.py --with-pi --no-accelerated
+```
+
+The one-line installer also accepts `--with-pi`. This option permits Pi
+installation and adding a Synapse provider to its user configuration.
+An existing Pi on PATH or in its managed agent `bin` directory is reused,
+never upgraded or replaced. Otherwise SYNAPSE downloads a SHA-256-pinned Pi
+1.5.2 standalone release into a new private app subdirectory. x64 and ARM64
+builds are available for all three platforms. No system Node/npm installation,
+sudo, model download or background agent startup is performed.
+
+Pi runs with your user permissions and can edit files and execute commands;
+it is not a sandbox. Install only when you trust this capability. Failures are
+reported separately; SYNAPSE remains installed when optional Pi setup fails.
+Archive/checksum/platform-selection tests cover all platforms, but native
+Linux/macOS execution of this installer addition still requires validation.
+
+Configuration uses `PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent`.
+The installer adds `synapse/local-model` at `http://127.0.0.1:8080/v1`, preserves
+other providers, existing startup choices and credentials, and supplies safe
+defaults only where absent. It selects PowerShell tools on Windows and leaves
+Unix tool defaults unchanged. Start with `synapse-pi` (or the full launcher path
+printed during setup); inside Pi, select **Synapse Local** through `/model`.
+Keep Synapse running with a model loaded. `/login` is not required.
+
+If a model is already ready, new defaults use its actual loaded context.
+Otherwise defaults conservatively assume 4096 context tokens and 512 output
+tokens; this is not a claim that 4K is sufficient for every coding task.
+After loading a model or changing its context, explicitly refresh:
+
+```sh
+synapse --configure-pi
+# If Synapse uses another listening port:
+synapse --configure-pi --port 8081
+```
+
+This command changes only Pi's Synapse model context/output limits and its
+model-specific compaction reserve/recent-history defaults. It does not load
+models or run inference. It requires a running, ready Synapse model. Default
+output is capped at 4096 tokens; compaction reserves up to 8192 and keeps up to
+12000 recent tokens, scaled down for small contexts. Adjust these values in
+Pi's `models.json` and `settings.json`; `/reload` then `/model` reloads them.
+Explicit refresh resets those budgets to derived defaults, so rerun only when
+you want that reset. No cloud provider is silently selected by Synapse setup.
+
+## First-turn latency
+
+Backend startup warm-up and processing a new conversation's prompt are separate.
+A new coding session sends system instructions, tool schemas and project context;
+the backend must evaluate any uncached prefix before generating output. Follow-up
+turns can reuse matching prompt/KV state and therefore respond much faster.
+Model disk reads, GPU initialization and generated reasoning are other possible
+contributors. Fast generation alone does not identify the slow first-turn phase.
+
+SYNAPSE preserves the client's prompt-cache settings and does not send a hidden
+dummy prompt when a model loads or a conversation starts. A generic warm-up cannot
+guarantee it precomputes Pi's actual prompt, and can consume resources or evict
+useful cache state. No general pre-warmer has been qualified for production here.
+Diagnose using actual prompt-processing time, time to first streamed reasoning or
+answer token, cache reuse and decode timing, comparing a new session with its
+follow-up on the same loaded model. Do not infer a remedy from cache allocation
+size alone. Prefill/engine experiments belong in the research repository until
+measured and qualified; automatic generation behavior is unchanged.
+
 ## Context size and editor clients
 
 In **Chat -> Model Controls -> Run settings**, standard execution accepts

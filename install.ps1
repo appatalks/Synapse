@@ -7,6 +7,8 @@ param(
     [switch]$NoShortcuts,
     [switch]$NoPath,
     [switch]$NonInteractive,
+    [switch]$WithPi,
+    [switch]$NoPi,
     [switch]$Launch
 )
 
@@ -32,6 +34,8 @@ if ($LocalPackage) { $installerArgs += @('--local-package', (Resolve-Path -Liter
 if ($NoShortcuts) { $installerArgs += '--no-shortcuts' }
 if ($NoPath) { $installerArgs += '--no-path' }
 if ($NonInteractive) { $installerArgs += '--non-interactive' }
+if ($WithPi) { $installerArgs += '--with-pi' }
+if ($NoPi) { $installerArgs += '--no-pi' }
 if ($Launch) { $installerArgs += '--launch' }
 
 Write-Host 'Installing SYNAPSE for this user only. No administrator access is needed.'

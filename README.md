@@ -83,6 +83,10 @@ Python 3.10+ and your own GGUF model are required.
 The [portable download](docs/installing.md#windows-portable-app) remains available.
 See the [installation guide](docs/installing.md) for all platforms and options.
 
+On all three platforms, setup can optionally install/configure the
+[Pi coding agent](docs/installing.md#optional-pi-coding-agent) with your consent.
+Existing Pi installations and credentials are preserved.
+
 ## Open it. Pick a model. Go.
 
 1. In **Chat → Model Controls**, select an existing GGUF or explicitly download
