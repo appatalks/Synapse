@@ -1,4 +1,5 @@
 import hashlib
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import importlib.util
 import io
 import json
@@ -64,6 +65,212 @@ class UpdateTests(unittest.TestCase):
                 {"tag_name": "v8.0.0", "assets": []}, {"tag_name": "../bad", "assets": assets}]
         with mock.patch.object(updates, "download", return_value=json.dumps(data).encode()):
             self.assertEqual(updates.latest_release()["version"], "0.2.0rc1")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows shortcuts require WScript.Shell")
+    def test_windows_shortcuts_launch_archive_and_preserve_unrelated_shortcuts(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        folders = [self.root / "Desktop with spaces", self.root / "Programs"]
+        command = [sys.executable, str(self.archive), "--llama-server", str(self.root / "backend/llama-server.exe")]
+        installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        shortcut = folders[0] / "SYNAPSE.lnk"
+        environment = {**os.environ, "SYNAPSE_TEST_SHORTCUT": str(shortcut)}
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                                 "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SYNAPSE_TEST_SHORTCUT); "
+                                 "@{target=$s.TargetPath; arguments=$s.Arguments; description=$s.Description; icon=$s.IconLocation} | ConvertTo-Json"],
+                                env=environment, check=True, capture_output=True, text=True)
+        details = json.loads(result.stdout)
+        self.assertEqual(Path(details["target"]), Path(sys.executable))
+        self.assertEqual(details["arguments"], subprocess.list2cmdline(command[1:]))
+        self.assertEqual(details["description"], "SYNAPSE managed launcher")
+        icon = self.root / "SYNAPSE.ico"
+        self.assertEqual(details["icon"], str(icon) + ",0")
+        self.assertEqual(icon.read_bytes(), (ROOT / "synapse_app/web/icon.ico").read_bytes())
+        self.assertTrue((folders[1] / "SYNAPSE.lnk").is_file())
+        installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SYNAPSE_TEST_SHORTCUT); "
+                        "$s.Description = 'another app'; $s.Save()"], env=environment, check=True)
+        before = shortcut.read_bytes()
+        with self.assertRaises(subprocess.CalledProcessError):
+            installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        self.assertEqual(shortcut.read_bytes(), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows PATH handling requires PowerShell")
+    def test_windows_user_path_preserves_variables_and_does_not_duplicate_entries(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher = self.root / "bin"
+        command = installer.WINDOWS_PATH_VALUE + "\nGet-SynapseUserPath $env:SYNAPSE_TEST_PATH $env:SYNAPSE_TEST_BIN"
+        for previous, expected in [
+                ("", str(launcher)),
+                (r"%LOCALAPPDATA%\existing;C:\tools", rf"%LOCALAPPDATA%\existing;C:\tools;{launcher}"),
+                (str(launcher).upper() + "\\;C:\\tools", str(launcher).upper() + "\\;C:\\tools"),
+                (r"%SYNAPSE_TEST_ROOT%\bin", r"%SYNAPSE_TEST_ROOT%\bin")]:
+            environment = {**os.environ, "SYNAPSE_TEST_PATH": previous,
+                           "SYNAPSE_TEST_BIN": str(launcher), "SYNAPSE_TEST_ROOT": str(self.root)}
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                                    env=environment, check=True, capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), expected)
+
+    def test_windows_installer_finds_adjacent_backend_and_prompts_for_missing_backend(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        backend = self.root / "llama-server.exe"
+        backend.touch()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend("llama-server", self.archive), str(backend))
+            prompt.assert_not_called()
+        folder = self.root / "backend with spaces"
+        folder.mkdir()
+        selected = folder / "llama-server.exe"
+        selected.touch()
+        backend.unlink()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+            mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch("builtins.input", side_effect=["n", "ollama.exe", f'"{folder}"']) as prompt:
+            self.assertEqual(installer.select_backend("llama-server", self.archive), str(selected))
+            self.assertEqual(prompt.call_count, 3)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend("missing", self.archive, interactive=False), "missing")
+            prompt.assert_not_called()
+
+    def test_windows_backend_auto_setup_requires_consent_and_returns_verified_path(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer, "install_windows_backend", return_value="verified/llama-server.exe") as setup:
+            for answers in (["n", ""], ["", ""]):
+                with mock.patch("builtins.input", side_effect=answers):
+                    self.assertEqual(installer.select_backend("missing", self.archive), "missing")
+                setup.assert_not_called()
+            with mock.patch("builtins.input", side_effect=["yes", "invalid", "2"]):
+                self.assertEqual(installer.select_backend("missing", self.archive), "verified/llama-server.exe")
+            setup.assert_called_once_with(self.root, "vulkan")
+            setup.reset_mock()
+            with mock.patch("builtins.input", side_effect=["y", ""]):
+                installer.select_backend("missing", self.archive)
+            setup.assert_called_once_with(self.root, "cpu")
+            setup.side_effect = OSError("network denied")
+            with mock.patch("builtins.input", side_effect=["y", "1", ""]):
+                self.assertEqual(installer.select_backend("missing", self.archive), "missing")
+
+    def test_windows_backend_download_verification_extraction_and_cleanup(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        def backend_zip(extra=None):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("bin/llama-server.exe", b"test executable")
+                archive.writestr("bin/ggml.dll", b"matching library")
+                if extra:
+                    archive.writestr(extra, b"unsafe")
+            return output.getvalue()
+        body = backend_zip()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.object(installer, "download", return_value=body) as fetch, \
+                mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cpu", "x64"): hashlib.sha256(body).hexdigest()}), \
+                mock.patch.object(installer.subprocess, "run", side_effect=[
+                    mock.Mock(returncode=0, stdout="", stderr=(
+                        "version: 0.7.0-dev (build 11669, commit 620d2225c)\n"
+                        "built with Clang 20.1.8 for Windows x86_64\n")),
+                    mock.Mock(returncode=0, stdout="--model --host --port", stderr="")]) as run:
+            executable = Path(installer.install_windows_backend(self.root, "cpu"))
+            self.assertEqual(executable.read_bytes(), b"test executable")
+            self.assertEqual((executable.parent / "ggml.dll").read_bytes(), b"matching library")
+            self.assertEqual(run.call_args_list[0].args[0], [str(executable), "--version"])
+            self.assertIn("/b11669/llama-b11669-bin-win-cpu-x64.zip", fetch.call_args.args[0])
+        prefix = self.root / "installed"
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(sys, "argv", ["install.py", "--local-package", str(self.archive),
+                                               "--prefix", str(prefix), "--no-accelerated"]), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(installer, "install_windows_backend", return_value=str(executable)) as setup, \
+                mock.patch("builtins.input", side_effect=["y", "1"]):
+            installer.main()
+        setup.assert_called_once_with(prefix, "cpu")
+        receipt = json.loads((prefix / "install.json").read_text())
+        self.assertEqual(receipt["backend_args"], ["--llama-server", str(executable)])
+        self.assertIn(installer.windows_command([str(executable)]), (prefix / "bin/synapse.cmd").read_text())
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=str(executable)), \
+                mock.patch.object(installer, "install_windows_backend") as setup, \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend(str(executable), self.archive), str(executable))
+            prompt.assert_not_called()
+            setup.assert_not_called()
+        for content, checksum, message, output, returncode in [
+            (body, "0" * 64, "checksum", "", 1),
+            (backend_zip("../outside.txt"), None, "Unsafe", "", 1),
+            (backend_zip("bin/LLAMA-SERVER.exe"), None, "duplicate", "", 1),
+            (body, None, "startup checks", "", 1),
+            (body, None, "startup checks", "version: 0.7.0-dev (build 11668, commit 620d2225c)", 0),
+            (body, None, "startup checks", "version: 116690 (620d222)", 0)]:
+            with self.subTest(message=message), \
+                    mock.patch.object(sys, "platform", "win32"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.object(installer, "download", return_value=content), \
+                    mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {
+                        ("cpu", "x64"): checksum or hashlib.sha256(content).hexdigest()}), \
+                    mock.patch.object(installer.subprocess, "run", return_value=mock.Mock(
+                        returncode=returncode, stdout=output, stderr="missing DLL" if returncode else "")):
+                before = set(self.root.iterdir())
+                with self.assertRaisesRegex(ValueError, message):
+                    installer.install_windows_backend(self.root, "cpu")
+                self.assertEqual(set(self.root.iterdir()), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "PowerShell bootstrap is Windows-only")
+    def test_standalone_powershell_bootstrap_downloads_source_and_forwards_arguments(self):
+        source = io.BytesIO()
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("synapse-source/install.py", "import json, sys; print(json.dumps(sys.argv[1:]))")
+        body = source.getvalue()
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *arguments):
+                pass
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            script = self.root / "install.ps1"
+            script.write_text((ROOT / "install.ps1").read_text().replace(
+                "https://api.github.com/repos/appatalks/synapse/zipball/main",
+                f"http://127.0.0.1:{server.server_port}/source.zip"))
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                     str(script), "-Prefix", str(self.root / "custom prefix"),
+                                     "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
+                                     "-NoPath", "-NoShortcuts", "-NonInteractive"],
+                                    check=True, capture_output=True, text=True, timeout=20)
+            arguments = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
+                                         "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
+                                         "--no-shortcuts", "--no-path", "--non-interactive"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_no_release_is_not_an_update_or_silent_network_success(self):
         with mock.patch.object(updates, "latest_release", return_value=None):
@@ -202,6 +409,10 @@ class UpdateTests(unittest.TestCase):
         prefix = self.root / "installed"
         command = [sys.executable, str(ROOT / "install.py"), "--local-package", str(package),
                    "--prefix", str(prefix), "--no-accelerated"]
+        if sys.platform == "win32":
+            command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                       str(ROOT / "install.ps1"), "-LocalPackage", str(package), "-Prefix", str(prefix),
+                       "-NonInteractive"]
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
         self.assertIn("installed", result.stdout)
         self.assertTrue(updates.managed_receipt(prefix / "SYNAPSE.pyz")[0])

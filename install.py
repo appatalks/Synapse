@@ -2,16 +2,116 @@
 """Install SYNAPSE per-user; never install drivers or download model weights."""
 
 import argparse
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import platform
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 
-from synapse_app.updates import install_archive, latest_release, release_archive, validate_archive
+from synapse_app.updates import download, install_archive, latest_release, release_archive, validate_archive
+
+
+WINDOWS_BACKEND_RELEASE = "b11669"
+WINDOWS_BACKEND_HASHES = {
+    ("cpu", "x64"): "37b3efcf962847ca869745fd4ccf7f5e7e8dacfeff9fa3523b4ca8cdc66d632b",
+    ("cpu", "arm64"): "9cff39ffed17edcd03a7d876073f74d7b48cd43a1e5eafdd59ee094185ad871b",
+    ("vulkan", "x64"): "2c07574e7bde71321cb785282b20cc821e951132149eeceeea32ddebdbf0598e",
+    ("vulkan", "arm64"): "963d3b185362cadca3de643409f916a5ce95dd0f7fd8617ba9ee5d8833ac1ef3",
+}
+
+
+WINDOWS_PATH_VALUE = r"""
+function Get-SynapseUserPath {
+    param([string]$Previous, [string]$Directory)
+    $found = @($Previous -split ';' | Where-Object {
+        [Environment]::ExpandEnvironmentVariables($_).Trim().TrimEnd('\') -ieq $Directory.TrimEnd('\')
+    }).Count -gt 0
+    if ($found) { return $Previous }
+    if ($Previous) { return $Previous.TrimEnd(';') + ';' + $Directory }
+    return $Directory
+}
+"""
+
+WINDOWS_INTEGRATION = WINDOWS_PATH_VALUE + r"""
+$ErrorActionPreference = 'Stop'
+$settings = $env:SYNAPSE_INSTALL_SETTINGS | ConvertFrom-Json
+if ($settings.shortcuts) {
+    $folders = $settings.shortcut_dirs
+    if ($null -eq $folders) {
+        $folders = @([Environment]::GetFolderPath('DesktopDirectory'),
+                     [Environment]::GetFolderPath('Programs'))
+    }
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($folder in $folders) {
+        if (-not $folder) { throw 'Windows did not provide a shortcut folder.' }
+        $path = Join-Path $folder 'SYNAPSE.lnk'
+        $shortcut = $shell.CreateShortcut($path)
+        if ((Test-Path -LiteralPath $path) -and $shortcut.Description -ne 'SYNAPSE managed launcher') {
+            throw "Refusing to replace an unrelated shortcut: $path"
+        }
+    }
+    foreach ($folder in $folders) {
+        [IO.Directory]::CreateDirectory($folder) | Out-Null
+        $shortcut = $shell.CreateShortcut((Join-Path $folder 'SYNAPSE.lnk'))
+        $shortcut.TargetPath = $settings.executable
+        $shortcut.Arguments = $settings.arguments
+        $shortcut.WorkingDirectory = $settings.directory
+        $shortcut.Description = 'SYNAPSE managed launcher'
+        $shortcut.IconLocation = $settings.icon + ',0'
+        $shortcut.Save()
+    }
+}
+if ($settings.add_path) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $previous = $key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+        $kind = if ($key.GetValueNames() -contains 'Path') { $key.GetValueKind('Path') } else { 'ExpandString' }
+        $updated = Get-SynapseUserPath $previous $settings.launcher_dir
+        if ($updated -ne $previous) { $key.SetValue('Path', $updated, $kind) }
+    } finally { $key.Dispose() }
+    if ($updated -ne $previous) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace SynapseInstall {
+    public static class EnvironmentChange {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message,
+            UIntPtr param, string text, uint flags, uint timeout, out UIntPtr result);
+    }
+}
+'@
+        $result = [UIntPtr]::Zero
+        [SynapseInstall.EnvironmentChange]::SendMessageTimeoutW([IntPtr]0xffff, 0x1a,
+            [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null
+    }
+}
+"""
+
+
+def windows_integration(launcher_dir, command, shortcuts=True, add_path=True, shortcut_dirs=None):
+    icon = launcher_dir.parent / "SYNAPSE.ico"
+    if shortcuts:
+        if icon.is_symlink():
+            raise ValueError("Refusing a symlinked shortcut icon.")
+        shutil.copyfile(Path(__file__).parent / "synapse_app/web/icon.ico", icon)
+    settings = {"launcher_dir": str(launcher_dir), "directory": str(launcher_dir.parent),
+                "executable": command[0], "arguments": subprocess.list2cmdline(command[1:]),
+                "icon": str(icon),
+                "shortcuts": shortcuts, "add_path": add_path,
+                "shortcut_dirs": [str(folder) for folder in shortcut_dirs] if shortcut_dirs is not None else None}
+    environment = {**os.environ, "SYNAPSE_INSTALL_SETTINGS": json.dumps(settings)}
+    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_INTEGRATION],
+                   env=environment, check=True)
 
 
 def windows_command(arguments):
@@ -26,18 +126,137 @@ def windows_command(arguments):
     return " ".join(quoted)
 
 
+def install_windows_backend(directory, variant):
+    machine = os.environ.get("PROCESSOR_ARCHITEW6432", platform.machine()).lower()
+    architecture = {"amd64": "x64", "x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
+    expected = WINDOWS_BACKEND_HASHES.get((variant, architecture))
+    if sys.platform != "win32" or expected is None:
+        raise ValueError("Automatic backend installation supports only x64/ARM64 Windows CPU or Vulkan builds.")
+    name = f"llama-{WINDOWS_BACKEND_RELEASE}-bin-win-{variant}-{architecture}.zip"
+    url = f"https://github.com/ggml-org/llama.cpp/releases/download/{WINDOWS_BACKEND_RELEASE}/{name}"
+    print(f"Downloading {name} from ggml-org/llama.cpp...", flush=True)
+    body = download(url, 128 * 1024 * 1024)
+    if hashlib.sha256(body).hexdigest() != expected:
+        raise ValueError("llama.cpp backend checksum verification failed. Nothing was installed.")
+    if directory.is_symlink():
+        raise ValueError("Refusing a symlinked backend installation directory.")
+    root = Path(tempfile.mkdtemp(prefix=f"llama-{WINDOWS_BACKEND_RELEASE}-{variant}-", dir=directory))
+    installed = False
+    try:
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            entries = archive.infolist()
+            if len(entries) > 512 or sum(entry.file_size for entry in entries) > 512 * 1024 * 1024:
+                raise ValueError("Backend archive is unexpectedly large.")
+            seen = set()
+            for entry in entries:
+                relative = entry.filename.replace("\\", "/").rstrip("/")
+                parts = relative.split("/")
+                destination = root / relative
+                if (not relative or any(part in ("", ".", "..") or ":" in part or
+                                        part.rstrip(" .") != part or Path(part).is_reserved() for part in parts) or
+                        not destination.resolve().is_relative_to(root.resolve()) or
+                        stat.S_ISLNK(entry.external_attr >> 16) or relative.casefold() in seen):
+                    raise ValueError("Unsafe or duplicate backend archive path.")
+                seen.add(relative.casefold())
+            for entry in entries:
+                destination = root / entry.filename.replace("\\", "/")
+                if entry.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(entry) as source, destination.open("xb") as output:
+                        shutil.copyfileobj(source, output)
+        servers = list(root.rglob("llama-server.exe"))
+        if len(servers) != 1:
+            raise ValueError("Backend archive must contain exactly one llama-server.exe.")
+        executable = servers[0]
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
+        for option in ("--version", "--help"):
+            result = subprocess.run([str(executable), option], cwd=executable.parent, env=environment,
+                                    capture_output=True, text=True, errors="replace", timeout=30)
+            output = result.stdout + result.stderr
+            valid = (re.search(r"(?m)^version:\s*(?:11669\b|\S+\s+\(build 11669,\s*commit [0-9a-f]+\))", output)
+                     if option == "--version" else
+                     all(flag in output for flag in ("--model", "--host", "--port")))
+            if result.returncode != 0 or not valid:
+                raise ValueError("The downloaded llama-server.exe could not pass its startup checks.\n"
+                                 "Check Windows security, required Visual C++ runtime and existing GPU drivers.\n"
+                                 + output[-2000:])
+        installed = True
+        print(f"Verified llama.cpp {WINDOWS_BACKEND_RELEASE} ({variant}) installed at {executable}")
+        return str(executable)
+    except zipfile.BadZipFile as error:
+        raise ValueError("The backend ZIP is invalid or corrupt.") from error
+    finally:
+        if not installed:
+            shutil.rmtree(root)
+
+
+def select_backend(value, package, interactive=True, directory=None):
+    resolved = shutil.which(value)
+    if resolved:
+        return resolved
+    if sys.platform != "win32":
+        return value
+    if value == "llama-server":
+        for search_directory in (package.parent, Path(__file__).parent):
+            candidate = search_directory / "llama-server.exe"
+            if candidate.is_file():
+                return str(candidate.resolve())
+    print("SYNAPSE needs llama.cpp's llama-server.exe, not Ollama.")
+    if interactive and sys.stdin.isatty() and sys.stdout.isatty():
+        destination = directory or package.parent
+        print(f"Automatic setup can download verified official llama.cpp {WINDOWS_BACKEND_RELEASE}\n"
+              f"into a new private folder under {destination}.\n"
+              "No existing backend, drivers, system packages or model weights will be changed.")
+        if input("Auto-install llama-server.exe and configure SYNAPSE? [y/N]: ").strip().lower() in ("y", "yes"):
+            print("1. CPU (default; no GPU driver required)\n"
+                  "2. GPU via Vulkan (requires an existing Vulkan-capable GPU driver)")
+            while True:
+                variant = input("Choose backend [1/2, Enter for CPU]: ").strip()
+                if variant in ("", "1", "2"):
+                    break
+                print("Please choose 1 or 2.")
+            try:
+                return install_windows_backend(destination, "vulkan" if variant == "2" else "cpu")
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                print(f"Automatic backend setup failed: {error}\n"
+                      "No fallback backend was selected. Choose an existing backend below or set up later.")
+        while True:
+            selected = input("Path to llama-server.exe (Enter to set up later): ").strip().strip('"')
+            if not selected:
+                break
+            candidate = Path(selected).expanduser()
+            if candidate.is_dir():
+                candidate = candidate / "llama-server.exe"
+            if candidate.name.lower() == "llama-server.exe" and candidate.is_file():
+                return str(candidate.resolve())
+            print("That location does not contain llama-server.exe. Please try again.")
+        print("For manual setup, extract a Windows llama.cpp release from\n"
+                    "https://github.com/ggml-org/llama.cpp/releases with all its DLLs beside llama-server.exe.")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, help="private installation directory (also puts the launcher in PREFIX/bin)")
     parser.add_argument("--local-package", type=Path, help="install an explicitly supplied local SYNAPSE.pyz without a release download")
     parser.add_argument("--llama-server", help="backend path to save in the launcher")
+    parser.add_argument("--non-interactive", action="store_true", help="do not prompt for a Windows backend location")
+    parser.add_argument("--windows-integration", action="store_true", help="also register Windows launchers for a custom --prefix")
+    parser.add_argument("--no-shortcuts", action="store_true", help="skip Windows Desktop and Start Menu shortcuts")
+    parser.add_argument("--no-path", action="store_true", help="do not add the Windows launcher directory to user PATH")
     choice = parser.add_mutually_exclusive_group()
     choice.add_argument("--accelerated", action="store_true", help="set up the experimental Linux/NVIDIA backend")
     choice.add_argument("--no-accelerated", action="store_true", help="do not offer accelerated-backend setup")
     parser.add_argument("--launch", action="store_true", help="open SYNAPSE after installation")
     args = parser.parse_args()
-    directory = (args.prefix or Path.home() / ".local/share/synapse").expanduser().absolute()
-    launcher_dir = directory / "bin" if args.prefix else Path.home() / ".local/bin"
+    windows = sys.platform == "win32"
+    default_directory = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "Programs/SYNAPSE"
+                         if windows else Path.home() / ".local/share/synapse")
+    directory = (args.prefix or default_directory).expanduser().absolute()
+    launcher_dir = directory / "bin" if args.prefix or windows else Path.home() / ".local/bin"
     target = directory / "SYNAPSE.pyz"
     receipt_file = directory / "install.json"
     if directory.is_symlink() or target.is_symlink() or receipt_file.is_symlink():
@@ -87,6 +306,8 @@ def main():
         backend_args = previous.get("backend_args", ["--llama-server", os.environ.get("LLAMA_SERVER", "llama-server")])
         if args.llama_server:
             backend_args = ["--llama-server", args.llama_server]
+        backend_args[1] = select_backend(backend_args[1], args.local_package or target,
+                                         interactive=not args.non_interactive, directory=directory)
         accelerated = args.accelerated
         if sys.platform == "linux" and not args.no_accelerated and not accelerated:
             try:
@@ -134,9 +355,16 @@ def main():
             stream.write(text)
         launcher_temp.chmod(0o755)
         os.replace(launcher_temp, launcher)
+        if windows and (not args.prefix or args.windows_integration):
+            windows_integration(launcher_dir, command, shortcuts=not args.no_shortcuts, add_path=not args.no_path)
+            if not args.no_shortcuts:
+                print("Desktop and Start Menu shortcuts created (SYNAPSE).")
+            if not args.no_path:
+                print("User PATH registered. Open a new terminal and run: synapse")
         print(f"\nSYNAPSE v{version} installed. Run:\n  {launcher}\n")
         if not shutil.which(backend_args[1]) and not accelerated:
-            print("A llama-server backend is still required. Supply --llama-server /path/to/llama-server when launching.")
+            print("A llama-server backend is still required. Rerun this installer with\n"
+                  "--llama-server followed by its path to remember it in your launchers.")
         print("Click the version in the sidebar for release details and verified application updates.")
         lock.unlink(missing_ok=True)
         if args.launch:

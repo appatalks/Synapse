@@ -21,6 +21,91 @@ Review the script first if you do not want to pipe a network script into bash.
 The app opens `http://127.0.0.1:8080`. Ctrl+C stops it and its owned backend.
 `--port 0` chooses a free port; `--no-browser` suppresses browser opening.
 
+## Windows managed install
+
+Install Python 3.10+ from [python.org](https://www.python.org/downloads/windows/).
+SYNAPSE uses **llama.cpp's `llama-server.exe`, not Ollama**. If you do not already
+have it, the installer can download and configure it after asking for your
+consent. Manual installation from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases)
+is also supported: extract the entire ZIP into a permanent folder, keeping
+the accompanying DLLs beside the executable; do not copy just the EXE.
+Model weights and drivers are never downloaded by the installer.
+
+In PowerShell, download and review the installer, then run it:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/appatalks/synapse/main/install.ps1 -OutFile install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Launch
+```
+
+`-ExecutionPolicy Bypass` applies only to that PowerShell process; it does not
+change your saved execution policy. No administrator prompt is needed. The
+installer downloads source over HTTPS, prefers a checksummed public application
+release, and labels a source fallback as a preview, like the Linux/macOS installer.
+
+The default managed installation creates:
+
+- Application: `%LOCALAPPDATA%\Programs\SYNAPSE\SYNAPSE.pyz`.
+- CLI launcher: `%LOCALAPPDATA%\Programs\SYNAPSE\bin\synapse.cmd`, added to **user** PATH.
+- **SYNAPSE** shortcuts on your Desktop and in the Start Menu.
+
+The shortcuts use the SYNAPSE logo. Rerunning the installer refreshes existing
+managed shortcuts and their icon without replacing your saved backend.
+
+Close and reopen your terminal application after installation, then run `synapse`.
+You can also use the shortcuts immediately. The console stays open while the
+app runs; Ctrl+C stops it. Use `synapse --stop` from another terminal to stop it.
+
+The installer checks `LLAMA_SERVER`/PATH and looks beside a supplied local
+package for `llama-server.exe`. If it cannot find the backend, interactive setup
+first asks **Auto-install llama-server.exe and configure SYNAPSE? [y/N]**.
+Accepting offers CPU (default) or GPU via Vulkan for x64/ARM64 Windows. Vulkan
+requires an already installed compatible GPU driver; successful executable
+startup is not proof that your GPU or a particular model will work.
+
+Automatic setup downloads the official **b11669** package over HTTPS, verifies
+its pinned SHA-256, safely extracts the EXE and DLLs into a new private folder
+under the app directory, and checks `--version` and server CLI support before
+remembering its path in the launchers. It does not replace existing backends,
+install drivers/system runtimes, download models, or enable research patches.
+Download/verification/startup failures are explained and failed extraction is
+cleaned up; a different backend is never silently substituted.
+
+Declining (the default), or a failed automatic setup, leads to the manual EXE
+path/folder prompt. You may skip setup, but no model can load until a compatible
+backend is configured. To save or change the backend location, rerun the same installer:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -LlamaServer "C:\llama.cpp\llama-server.exe" -Launch
+```
+
+The saved path is reused by the CLI launcher and shortcuts, including after
+application updates. An installed Ollama service does not satisfy this requirement.
+
+Use `-NoShortcuts` or `-NoPath` to skip those integrations. `-NonInteractive`
+disables backend prompts and never downloads a backend. `-Prefix "C:\my folder\Synapse"` isolates the app and
+launcher under that folder without changing PATH or creating shortcuts. For a
+source checkout or offline package, the same installer supports
+`-LocalPackage .\dist\SYNAPSE.pyz`; no application download is performed. In a
+source checkout you may equivalently use `python install.py`; its Windows
+default creates the same integrations. Rerunning preserves an existing saved
+backend unless you supply a new one, and refuses unrelated launchers/shortcuts.
+
+## Windows portable app
+
+Download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases),
+verify it against the release's `SHA256SUMS`, and run:
+
+```powershell
+py -3 .\SYNAPSE.pyz --llama-server "C:\llama.cpp\llama-server.exe"
+```
+
+This runs the application **without installing it**: no Desktop shortcut,
+Start Menu entry or `synapse` command is created. Use the managed installer
+above to get those integrations and the optional consent-based backend setup.
+Neither method installs Ollama, GPU drivers or model weights, or replaces your
+existing backend.
+
 ## Context size and editor clients
 
 In **Chat -> Model Controls -> Run settings**, standard execution accepts
