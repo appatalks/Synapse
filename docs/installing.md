@@ -219,6 +219,13 @@ guarantee. Try larger contexts progressively and check the reported loaded
 context, memory use and a real long-prompt response, not just successful loading.
 Automatic fitting may reduce GPU weight placement as context memory grows.
 
+When no Hybrid profile is installed (including standard Windows/macOS setups),
+Automatic also allows an explicit context for the next load. Checking **Allow
+experimental Hybrid acceleration** does not lock that input or install Hybrid;
+other run settings remain automatic. Unload an active model before editing.
+Installations with a real Hybrid profile retain their profile/Auto Tune context
+policy and its validation guards.
+
 Experimental hybrid execution still uses the context budget in its installation
 profile, capped by model metadata. Profiles may explicitly configure up to
 262,144 tokens, but existing defaults and exact-context checks are unchanged.

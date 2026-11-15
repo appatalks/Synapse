@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, contextEditable, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -84,6 +84,7 @@ function controls() {
       el(id).disabled = true;
     }
   }
+  el("context").disabled = active || actionPending || !contextEditable(status, selectedMode);
   const draft = draftControls(status, selectedMode, el("draft-type").value);
   el("draft-type").disabled = active || actionPending || draft.disabled;
   el("draft-type").querySelector('option[value="dflash"]').disabled = draft.dflashDisabled;
@@ -122,7 +123,7 @@ function renderStatus() {
   el("profile-note").textContent = status.hybrid_generic
     ? "Automatic detects routed-MoE dimensions, validates plan bindings, and prefers native fitting for small weight files. Unbound layouts use a causal plan with their configured budget and transfer policy. Backend operations and coverage must verify before Ready; speedups are not universal."
     : status.hybrid_available ? "This installation uses a model-bound or explicitly supplied plan. A version-2 installation enables generic automatic fallback; other models use native execution."
-    : "No hybrid installation profile is configured. Automatic uses the standard backend. Uncheck Allow experimental Hybrid for Standard-only loading and editable context.";
+    : "No hybrid installation profile is configured. Automatic uses the standard backend with editable context. Allowing Hybrid does not install or activate it.";
   el("execution-warning").hidden = !status.execution_warning;
   el("execution-warning").textContent = status.execution_warning || "";
   el("execution-footer").textContent = hybrid
@@ -508,6 +509,7 @@ el("browser-path").addEventListener("keydown", (event) => {
   }
 });
 function engineChanged(previousMode) {
+  const context = el("context").value;
   if (previousMode === "standard") {
     standardSettings = { model: el("model").value,
       fields: Object.fromEntries(manualFields.map((id) => [id, el(id).value])) };
@@ -532,6 +534,9 @@ function engineChanged(previousMode) {
     el("op-offload-min-batch").value = "32";
     el("load-mode").value = "auto";
     el("draft-model").value = "";
+  }
+  if (contextEditable(status, previousMode) && contextEditable(status, el("execution-mode").value)) {
+    el("context").value = context;
   }
   controls();
 }
@@ -641,7 +646,7 @@ el("load-form").addEventListener("submit", async (event) => {
         ? el("draft-model").value.trim() || null : null,
       draft_tokens: Number(el("draft-tokens").value),
     };
-    const payload = modelLoadPayload(settings);
+    const payload = modelLoadPayload(settings, status);
     status = await request("/api/v1/model/load", payload);
     clearChat();
     el("model-browser").hidden = true;

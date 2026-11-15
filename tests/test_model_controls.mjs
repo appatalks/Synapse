@@ -1,6 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, contextEditable, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, precheckText, restoreModelControls, statusPollDelay, tuningPayload } from "../synapse_app/web/model-controls.mjs";
+
+test("allowing unavailable Hybrid keeps Automatic context editable and forwards the chosen value", () => {
+  const status = { hybrid_available: false };
+  const settings = { model: "/models/target.gguf", execution_mode: "auto", context: 64512, placement: "cpu" };
+  assert.equal(contextEditable(status, "auto"), true);
+  assert.equal(contextEditable({ hybrid_available: true }, "auto"), false);
+  assert.equal(contextEditable({ hybrid_available: true }, "standard"), true);
+  assert.equal(contextEditable(status, "hybrid"), false);
+  assert.equal(modelLoadPayload(settings, status).context, 64512);
+  assert.equal(modelLoadPayload(settings, status).placement, undefined);
+  assert.equal(modelLoadPayload(settings, { hybrid_available: true }).context, undefined);
+  assert.match(engineSettingsText(status, "auto", "64512"), /Context is editable for the next load/);
+  assert.doesNotMatch(engineSettingsText(status, "auto", "64512"), /not requested manually/);
+});
 
 class Select extends EventTarget {
   constructor(value) { super(); this.value = value; }
