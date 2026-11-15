@@ -27,6 +27,12 @@ WINDOWS_BACKEND_HASHES = {
     ("cpu", "arm64"): "9cff39ffed17edcd03a7d876073f74d7b48cd43a1e5eafdd59ee094185ad871b",
     ("vulkan", "x64"): "2c07574e7bde71321cb785282b20cc821e951132149eeceeea32ddebdbf0598e",
     ("vulkan", "arm64"): "963d3b185362cadca3de643409f916a5ce95dd0f7fd8617ba9ee5d8833ac1ef3",
+    ("cuda-13.4", "x64"): "3b92d5c064f5032e603e531d3ec8961f3bd6613e5dfad047399a92dec8e95dbc",
+    ("cuda-13.4", "arm64"): "6759d52197bef2955807c53778dc045110ac4e8677c4f113edad9fe5f8e9e97f",
+}
+WINDOWS_CUDA_RUNTIME_HASHES = {
+    "x64": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
+    "arm64": "642dcde8805b3e3165ca710a5443b3b4044b27d96bd3ee3132473988c9bcb774",
 }
 
 
@@ -127,16 +133,46 @@ def windows_command(arguments):
     return " ".join(quoted)
 
 
+def extract_backend_archive(body, root):
+    with zipfile.ZipFile(io.BytesIO(body)) as archive:
+        entries = archive.infolist()
+        if len(entries) > 512 or sum(entry.file_size for entry in entries) > 1024 * 1024 * 1024:
+            raise ValueError("Backend archive is unexpectedly large.")
+        seen = set()
+        for entry in entries:
+            relative = entry.filename.replace("\\", "/").rstrip("/")
+            parts = relative.split("/")
+            destination = root / relative
+            if (not relative or any(part in ("", ".", "..") or ":" in part or
+                                    part.rstrip(" .") != part or Path(part).is_reserved() for part in parts) or
+                    not destination.resolve().is_relative_to(root.resolve()) or
+                    stat.S_ISLNK(entry.external_attr >> 16) or relative.casefold() in seen):
+                raise ValueError("Unsafe or duplicate backend archive path.")
+            seen.add(relative.casefold())
+        for entry in entries:
+            destination = root / entry.filename.replace("\\", "/")
+            if entry.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    if not destination.is_file() or destination.read_bytes() != archive.read(entry):
+                        raise ValueError("Backend packages contain conflicting files.")
+                    continue
+                with archive.open(entry) as source, destination.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+
+
 def install_windows_backend(directory, variant):
     machine = os.environ.get("PROCESSOR_ARCHITEW6432", platform.machine()).lower()
     architecture = {"amd64": "x64", "x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
     expected = WINDOWS_BACKEND_HASHES.get((variant, architecture))
     if sys.platform != "win32" or expected is None:
-        raise ValueError("Automatic backend installation supports only x64/ARM64 Windows CPU or Vulkan builds.")
+        raise ValueError("Automatic backend installation supports only x64/ARM64 Windows CPU, Vulkan or CUDA builds.")
     name = f"llama-{WINDOWS_BACKEND_RELEASE}-bin-win-{variant}-{architecture}.zip"
     url = f"https://github.com/ggml-org/llama.cpp/releases/download/{WINDOWS_BACKEND_RELEASE}/{name}"
     print(f"Downloading {name} from ggml-org/llama.cpp...", flush=True)
-    body = download(url, 128 * 1024 * 1024)
+    body = download(url, (256 if variant == "cuda-13.4" else 128) * 1024 * 1024)
     if hashlib.sha256(body).hexdigest() != expected:
         raise ValueError("llama.cpp backend checksum verification failed. Nothing was installed.")
     if directory.is_symlink():
@@ -144,33 +180,31 @@ def install_windows_backend(directory, variant):
     root = Path(tempfile.mkdtemp(prefix=f"llama-{WINDOWS_BACKEND_RELEASE}-{variant}-", dir=directory))
     installed = False
     try:
-        with zipfile.ZipFile(io.BytesIO(body)) as archive:
-            entries = archive.infolist()
-            if len(entries) > 512 or sum(entry.file_size for entry in entries) > 512 * 1024 * 1024:
-                raise ValueError("Backend archive is unexpectedly large.")
-            seen = set()
-            for entry in entries:
-                relative = entry.filename.replace("\\", "/").rstrip("/")
-                parts = relative.split("/")
-                destination = root / relative
-                if (not relative or any(part in ("", ".", "..") or ":" in part or
-                                        part.rstrip(" .") != part or Path(part).is_reserved() for part in parts) or
-                        not destination.resolve().is_relative_to(root.resolve()) or
-                        stat.S_ISLNK(entry.external_attr >> 16) or relative.casefold() in seen):
-                    raise ValueError("Unsafe or duplicate backend archive path.")
-                seen.add(relative.casefold())
-            for entry in entries:
-                destination = root / entry.filename.replace("\\", "/")
-                if entry.is_dir():
-                    destination.mkdir(parents=True, exist_ok=True)
-                else:
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    with archive.open(entry) as source, destination.open("xb") as output:
-                        shutil.copyfileobj(source, output)
+        extract_backend_archive(body, root)
         servers = list(root.rglob("llama-server.exe"))
         if len(servers) != 1:
             raise ValueError("Backend archive must contain exactly one llama-server.exe.")
         executable = servers[0]
+        if variant == "cuda-13.4":
+            runtime_name = f"cudart-llama-bin-win-cuda-13.4-{architecture}.zip"
+            print(f"Downloading matching CUDA runtime DLLs: {runtime_name}", flush=True)
+            body = download(f"https://github.com/ggml-org/llama.cpp/releases/download/{WINDOWS_BACKEND_RELEASE}/{runtime_name}",
+                            512 * 1024 * 1024)
+            if hashlib.sha256(body).hexdigest() != WINDOWS_CUDA_RUNTIME_HASHES[architecture]:
+                raise ValueError("CUDA runtime checksum verification failed. Nothing was installed.")
+            runtime_root = root / "cuda-runtime"
+            runtime_root.mkdir()
+            extract_backend_archive(body, runtime_root)
+            libraries = [path for path in runtime_root.rglob("*") if path.is_file() and path.suffix.lower() == ".dll"]
+            if not libraries:
+                raise ValueError("CUDA runtime package did not contain DLLs.")
+            for library in libraries:
+                destination = executable.parent / library.name
+                if destination.exists():
+                    if destination.read_bytes() != library.read_bytes():
+                        raise ValueError("CUDA runtime package conflicts with a backend DLL.")
+                else:
+                    library.replace(destination)
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
         for option in ("--version", "--help"):
@@ -184,6 +218,13 @@ def install_windows_backend(directory, variant):
                 raise ValueError("The downloaded llama-server.exe could not pass its startup checks.\n"
                                  "Check Windows security, required Visual C++ runtime and existing GPU drivers.\n"
                                  + output[-2000:])
+        if variant == "cuda-13.4":
+            result = subprocess.run([str(executable), "--list-devices"], cwd=executable.parent, env=environment,
+                                    capture_output=True, text=True, errors="replace", timeout=30)
+            if result.returncode != 0 or not re.search(r"(?m)^\s*CUDA\d+:", result.stdout + result.stderr):
+                raise ValueError("CUDA backend did not detect a usable CUDA GPU. No CPU fallback was selected.\n"
+                                 "Check the existing NVIDIA driver and GPU compatibility.\n" +
+                                 (result.stdout + result.stderr)[-2000:])
         installed = True
         print(f"Verified llama.cpp {WINDOWS_BACKEND_RELEASE} ({variant}) installed at {executable}")
         return str(executable)
@@ -194,18 +235,25 @@ def install_windows_backend(directory, variant):
             shutil.rmtree(root)
 
 
-def select_backend(value, package, interactive=True, directory=None):
+def select_backend(value, package, interactive=True, directory=None, switch=False):
     resolved = shutil.which(value)
-    if resolved:
+    if resolved and not switch:
         return resolved
     if sys.platform != "win32":
+        if switch:
+            raise ValueError("Interactive backend switching is Windows-only; use --llama-server for an existing backend.")
         return value
-    if value == "llama-server":
+    if switch and (not interactive or not sys.stdin.isatty() or not sys.stdout.isatty()):
+        raise ValueError("--switch-backend requires an interactive Windows terminal.")
+    if value == "llama-server" and not switch:
         for search_directory in (package.parent, Path(__file__).parent):
             candidate = search_directory / "llama-server.exe"
             if candidate.is_file():
                 return str(candidate.resolve())
-    print("SYNAPSE needs llama.cpp's llama-server.exe, not Ollama.")
+    if switch:
+        print(f"Current backend: {resolved or value}\nExisting backend files will be kept; cancel to retain this path.")
+    else:
+        print("SYNAPSE needs llama.cpp's llama-server.exe, not Ollama.")
     if interactive and sys.stdin.isatty() and sys.stdout.isatty():
         destination = directory or package.parent
         print(f"Automatic setup can download verified official llama.cpp {WINDOWS_BACKEND_RELEASE}\n"
@@ -213,19 +261,22 @@ def select_backend(value, package, interactive=True, directory=None):
               "No existing backend, drivers, system packages or model weights will be changed.")
         if input("Auto-install llama-server.exe and configure SYNAPSE? [y/N]: ").strip().lower() in ("y", "yes"):
             print("1. CPU (default; no GPU driver required)\n"
-                  "2. GPU via Vulkan (requires an existing Vulkan-capable GPU driver)")
+                  "2. GPU via Vulkan (requires an existing Vulkan-capable GPU driver)\n"
+                  "3. NVIDIA CUDA 13.4 (requires a compatible NVIDIA GPU/driver; matching runtime DLLs included)")
+            print("CUDA x64 downloads about 552 MiB. No driver or system CUDA toolkit is installed.")
             while True:
-                variant = input("Choose backend [1/2, Enter for CPU]: ").strip()
-                if variant in ("", "1", "2"):
+                variant = input("Choose backend [1/2/3, Enter for CPU]: ").strip()
+                if variant in ("", "1", "2", "3"):
                     break
-                print("Please choose 1 or 2.")
+                print("Please choose 1, 2 or 3.")
             try:
-                return install_windows_backend(destination, "vulkan" if variant == "2" else "cpu")
+                return install_windows_backend(destination, {"2": "vulkan", "3": "cuda-13.4"}.get(variant, "cpu"))
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 print(f"Automatic backend setup failed: {error}\n"
                       "No fallback backend was selected. Choose an existing backend below or set up later.")
         while True:
-            selected = input("Path to llama-server.exe (Enter to set up later): ").strip().strip('"')
+            prompt = "Path to llama-server.exe (Enter to keep current backend): " if switch else "Path to llama-server.exe (Enter to set up later): "
+            selected = input(prompt).strip().strip('"')
             if not selected:
                 break
             candidate = Path(selected).expanduser()
@@ -304,6 +355,7 @@ def main():
     parser.add_argument("--prefix", type=Path, help="private installation directory (also puts the launcher in PREFIX/bin)")
     parser.add_argument("--local-package", type=Path, help="install an explicitly supplied local SYNAPSE.pyz without a release download")
     parser.add_argument("--llama-server", help="backend path to save in the launcher")
+    parser.add_argument("--switch-backend", action="store_true", help="show Windows backend setup again, retaining the current backend on cancel")
     parser.add_argument("--non-interactive", action="store_true", help="skip interactive backend, acceleration and Pi offers")
     pi_choice = parser.add_mutually_exclusive_group()
     pi_choice.add_argument("--with-pi", action="store_true", help="consent to optional Pi installation and configuration")
@@ -316,6 +368,8 @@ def main():
     choice.add_argument("--no-accelerated", action="store_true", help="do not offer accelerated-backend setup")
     parser.add_argument("--launch", action="store_true", help="open SYNAPSE after installation")
     args = parser.parse_args()
+    if args.switch_backend and (sys.platform != "win32" or args.non_interactive or args.llama_server):
+        parser.error("--switch-backend requires interactive Windows setup and cannot be combined with --llama-server.")
     windows = sys.platform == "win32"
     default_directory = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "Programs/SYNAPSE"
                          if windows else Path.home() / ".local/share/synapse")
@@ -373,7 +427,7 @@ def main():
         if args.llama_server:
             backend_args = ["--llama-server", args.llama_server]
         backend_args[1] = select_backend(backend_args[1], args.local_package or target,
-                                         interactive=not args.non_interactive, directory=directory)
+                                         interactive=not args.non_interactive, directory=directory, switch=args.switch_backend)
         accelerated = args.accelerated
         if sys.platform == "linux" and not args.no_accelerated and not accelerated and not args.non_interactive:
             try:

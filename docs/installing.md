@@ -59,9 +59,14 @@ app runs; Ctrl+C stops it. Use `synapse --stop` from another terminal to stop it
 The installer checks `LLAMA_SERVER`/PATH and looks beside a supplied local
 package for `llama-server.exe`. If it cannot find the backend, interactive setup
 first asks **Auto-install llama-server.exe and configure SYNAPSE? [y/N]**.
-Accepting offers CPU (default) or GPU via Vulkan for x64/ARM64 Windows. Vulkan
-requires an already installed compatible GPU driver; successful executable
-startup is not proof that your GPU or a particular model will work.
+Accepting offers CPU (default), GPU via Vulkan, or **NVIDIA CUDA 13.4** for
+x64/ARM64 Windows. GPU builds require an already installed compatible driver;
+successful executable startup is not proof that a particular model will fit
+or generate faster. CUDA setup downloads both the server and matching runtime
+DLL package (about 552 MiB total on x64), verifies both pinned SHA-256 hashes,
+places the DLLs beside the server and requires `--list-devices` to detect a
+CUDA GPU. No NVIDIA driver or system CUDA toolkit is installed. An absent or
+unusable CUDA GPU fails explicitly rather than accepting CPU-only execution.
 
 Automatic setup downloads the official **b11669** package over HTTPS, verifies
 its pinned SHA-256, safely extracts the EXE and DLLs into a new private folder
@@ -81,6 +86,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -LlamaServer "
 
 The saved path is reused by the CLI launcher and shortcuts, including after
 application updates. An installed Ollama service does not satisfy this requirement.
+
+### Switch an existing Windows backend
+
+Normal reruns preserve a working backend. Use `-SwitchBackend` to reopen the
+backend choices even when the saved executable is found:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -SwitchBackend -NoPi
+```
+
+Accept automatic setup and choose **3** for CUDA. New backend files go into a
+separate private folder; the existing Vulkan/CPU backend is never deleted or
+overwritten. Declining or skipping after a failed download keeps the saved
+backend path. Successful setup updates the CLI launcher and shortcuts.
+Restart Synapse to use the new backend; an already running app retains its old
+executable. Model settings and model weights are not changed. To return to the
+old backend, rerun with `-LlamaServer` and its original EXE path.
+
+From a checkout, `python install.py --switch-backend --no-pi` is equivalent.
+Switching requires an interactive Windows terminal and cannot be combined with
+`-NonInteractive` or `-LlamaServer`. It does not enable the Linux-only hybrid
+engine. Compare matched requests and run Auto Tune before claiming a speedup.
 
 Use `-NoShortcuts` or `-NoPath` to skip those integrations. `-NonInteractive`
 disables backend prompts and never downloads a backend. `-Prefix "C:\my folder\Synapse"` isolates the app and

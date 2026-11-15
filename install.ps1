@@ -3,6 +3,7 @@
 param(
     [string]$Prefix,
     [string]$LlamaServer,
+    [switch]$SwitchBackend,
     [string]$LocalPackage,
     [switch]$NoShortcuts,
     [switch]$NoPath,
@@ -30,6 +31,7 @@ if ($LASTEXITCODE -ne 0) {
 $installerArgs = @('--no-accelerated')
 if ($Prefix) { $installerArgs += @('--prefix', $Prefix) }
 if ($LlamaServer) { $installerArgs += @('--llama-server', $LlamaServer) }
+if ($SwitchBackend) { $installerArgs += '--switch-backend' }
 if ($LocalPackage) { $installerArgs += @('--local-package', (Resolve-Path -LiteralPath $LocalPackage).Path) }
 if ($NoShortcuts) { $installerArgs += '--no-shortcuts' }
 if ($NoPath) { $installerArgs += '--no-path' }

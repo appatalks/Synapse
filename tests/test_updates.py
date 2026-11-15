@@ -378,6 +378,66 @@ class UpdateTests(unittest.TestCase):
                     installer.install_windows_backend(self.root, "cpu")
                 self.assertEqual(set(self.root.iterdir()), before)
 
+    def test_backend_switch_can_choose_cuda_and_keeps_current_backend_on_cancel_or_failure(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        current = str(self.root / "vulkan/llama-server.exe")
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=current), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer, "install_windows_backend", return_value="cuda/llama-server.exe") as setup:
+            with mock.patch("builtins.input", side_effect=["n", ""]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), current)
+            setup.assert_not_called()
+            with mock.patch("builtins.input", side_effect=["y", "3"]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), "cuda/llama-server.exe")
+            setup.assert_called_once_with(self.root, "cuda-13.4")
+            setup.side_effect = ValueError("CUDA GPU unavailable")
+            with mock.patch("builtins.input", side_effect=["y", "3", ""]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), current)
+            with self.assertRaisesRegex(ValueError, "interactive"):
+                installer.select_backend(current, self.archive, interactive=False, switch=True)
+
+    def test_cuda_install_verifies_both_packages_and_requires_cuda_device(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        def package(entries):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                for name, body in entries.items():
+                    archive.writestr(name, body)
+            return output.getvalue()
+        backend = package({"bin/llama-server.exe": b"server", "bin/ggml-cuda.dll": b"cuda plugin"})
+        runtime = package({"runtime/cudart64_13.dll": b"runtime", "runtime/cublas64_13.dll": b"blas"})
+        for devices, runtime_hash, succeeds in [
+                ("CUDA0: NVIDIA GPU", hashlib.sha256(runtime).hexdigest(), True),
+                ("CPU: host", hashlib.sha256(runtime).hexdigest(), False),
+                ("CUDA0: NVIDIA GPU", "0" * 64, False)]:
+            with self.subTest(devices=devices, runtime_hash=runtime_hash), \
+                    mock.patch.object(sys, "platform", "win32"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cuda-13.4", "x64"): hashlib.sha256(backend).hexdigest()}), \
+                    mock.patch.dict(installer.WINDOWS_CUDA_RUNTIME_HASHES, {"x64": runtime_hash}), \
+                    mock.patch.object(installer, "download", side_effect=[backend, runtime]) as fetch, \
+                    mock.patch.object(installer.subprocess, "run", side_effect=[
+                        mock.Mock(returncode=0, stdout="version: 0.7.0-dev (build 11669, commit 620d2225c)", stderr=""),
+                        mock.Mock(returncode=0, stdout="--model --host --port", stderr=""),
+                        mock.Mock(returncode=0, stdout=devices, stderr="")]):
+                before = set(self.root.iterdir())
+                if succeeds:
+                    executable = Path(installer.install_windows_backend(self.root, "cuda-13.4"))
+                    self.assertEqual((executable.parent / "cudart64_13.dll").read_bytes(), b"runtime")
+                    self.assertEqual((executable.parent / "cublas64_13.dll").read_bytes(), b"blas")
+                    self.assertIn("llama-b11669-bin-win-cuda-13.4-x64.zip", fetch.call_args_list[0].args[0])
+                    self.assertIn("cudart-llama-bin-win-cuda-13.4-x64.zip", fetch.call_args_list[1].args[0])
+                else:
+                    with self.assertRaisesRegex(ValueError, "CUDA"):
+                        installer.install_windows_backend(self.root, "cuda-13.4")
+                    self.assertEqual(set(self.root.iterdir()), before)
+
     @unittest.skipUnless(sys.platform == "win32", "PowerShell bootstrap is Windows-only")
     def test_standalone_powershell_bootstrap_downloads_source_and_forwards_arguments(self):
         source = io.BytesIO()
@@ -403,11 +463,12 @@ class UpdateTests(unittest.TestCase):
             result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                      str(script), "-Prefix", str(self.root / "custom prefix"),
                                      "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
-                                     "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi"],
+                                     "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi", "-SwitchBackend"],
                                     check=True, capture_output=True, text=True, timeout=20)
             arguments = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
                                          "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
+                                         "--switch-backend",
                                          "--no-shortcuts", "--no-path", "--non-interactive", "--with-pi"])
         finally:
             server.shutdown()
