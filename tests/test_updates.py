@@ -691,6 +691,14 @@ class UpdateTests(unittest.TestCase):
                                          "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
                                          "--switch-backend",
                                          "--no-shortcuts", "--no-path", "--non-interactive", "--with-pi"])
+            source = io.BytesIO()
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("synapse-source/synapse_app/../../escape.py", "print('unsafe')")
+            body = source.getvalue()
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                                    capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Unsafe installer archive path", result.stderr)
         finally:
             server.shutdown()
             server.server_close()
