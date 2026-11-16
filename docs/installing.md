@@ -171,10 +171,17 @@ An explicit `--with-pi`/`-WithPi` request exits nonzero if Pi setup fails.
 
 Configuration uses `PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent`.
 The installer adds `synapse/local-model` at `http://127.0.0.1:8080/v1`, preserves
-other providers, startup choices, tool settings and credentials. `synapse-pi`
-selects **Synapse Local** for that invocation without changing ordinary `pi`
-startup defaults. On Windows the launcher selects PowerShell instead of Bash;
-on Unix it leaves Pi's tool selection unchanged.
+other providers, startup choices, tool settings and credentials. Use `pi` to
+start Pi with its normal defaults, and select **Synapse Local** with `/model`
+when desired. If an existing `pi` is already on PATH, it is not replaced or
+shadowed. Otherwise the installer creates a `pi` launcher beside `synapse`
+(`PREFIX/bin` for a custom prefix); use the full launcher path if that
+directory is not on PATH.
+
+For a session that explicitly selects Synapse and checks its loaded context,
+use `synapse-pi`. It does not change ordinary `pi` startup defaults. On Windows
+this launcher selects PowerShell instead of Bash; on Unix it leaves Pi's tool
+selection unchanged. Ordinary `pi` does not perform Synapse's context check.
 
 The Synapse Pi launcher requires a ready model with at least 8192 context tokens.
 Pi 1.5.2 reserves 4096 tokens when calculating output room, so a 4K context

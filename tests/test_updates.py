@@ -344,6 +344,102 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
         self.assertTrue((launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")).is_file())
 
+    @unittest.skipIf(sys.platform == "win32", "Unix launcher execution")
+    def test_plain_pi_launcher_preserves_defaults_and_reuses_install_on_rerun(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_plain_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi executable"
+        executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        executable.chmod(0o755)
+        agent = self.root / "agent"
+        agent.mkdir()
+        settings = {"defaultProvider": "existing", "defaultModel": "other", "defaultTools": ["read"]}
+        (agent / "settings.json").write_text(json.dumps(settings))
+        receipt = dict(self.receipt)
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent),
+                                         "PATH": str(launcher_dir) + os.pathsep + os.defpath}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "install_pi", return_value=str(executable)) as install, \
+                mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+            installer.setup_pi(self.root, launcher_dir, receipt)
+            result = subprocess.run([str(launcher_dir / "pi"), "--model", "existing/other", "hello world"],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["--model", "existing/other", "hello world"])
+            installer.setup_pi(self.root, launcher_dir, receipt)
+            install.assert_called_once_with(self.root)
+            self.assertEqual(receipt["pi_executable"], str(executable))
+            result = subprocess.run([str(launcher_dir / "pi"), "--version"],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual((result.returncode, result.stdout.strip()), (0, "--version"))
+        configured = json.loads((agent / "settings.json").read_text())
+        for key, value in settings.items():
+            self.assertEqual(configured[key], value)
+
+    @unittest.skipIf(sys.platform == "win32", "Unix executable discovery")
+    def test_existing_pi_on_path_is_not_replaced_or_shadowed(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_existing_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        existing_dir = self.root / "existing"
+        existing_dir.mkdir()
+        executable = existing_dir / "pi"
+        executable.write_text("#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
+        before = executable.read_bytes()
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(self.root / "agent"),
+                                         "PATH": str(existing_dir) + os.pathsep + os.defpath}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "install_pi") as install, \
+                mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+            install.assert_not_called()
+        self.assertEqual(executable.read_bytes(), before)
+        self.assertFalse((launcher_dir / "pi").exists())
+        self.assertTrue((launcher_dir / "synapse-pi").is_file())
+
+    def test_unrelated_pi_launcher_is_not_replaced(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_colliding_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        launcher = launcher_dir / ("pi.cmd" if sys.platform == "win32" else "pi")
+        launcher.write_bytes(b"unrelated executable")
+        with mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(pi_setup, "install_pi") as install:
+            with self.assertRaisesRegex(ValueError, "belongs to another program"):
+                installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+            install.assert_not_called()
+        self.assertEqual(launcher.read_bytes(), b"unrelated executable")
+
+    def test_windows_plain_pi_launcher_does_not_shadow_other_pi_commands(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_windows_pi_collision_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        for suffix in (".exe", ".bat", ".com"):
+            with self.subTest(suffix=suffix):
+                existing = launcher_dir / ("pi" + suffix)
+                existing.write_bytes(b"existing Pi command")
+                with mock.patch.object(sys, "platform", "win32"), \
+                        mock.patch.object(installer, "require_pi_support"), \
+                        mock.patch.object(installer.shutil, "which", return_value=None), \
+                        mock.patch.object(pi_setup, "install_pi") as install:
+                    with self.assertRaisesRegex(ValueError, "Refusing to shadow"):
+                        installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+                    install.assert_not_called()
+                self.assertEqual(existing.read_bytes(), b"existing Pi command")
+                self.assertFalse((launcher_dir / "pi.cmd").exists())
+                existing.unlink()
+
     def test_windows_pi_launcher_uses_powershell_without_changing_user_settings(self):
         spec = importlib.util.spec_from_file_location("synapse_installer_windows_pi_test", ROOT / "install.py")
         installer = importlib.util.module_from_spec(spec)
@@ -356,6 +452,7 @@ class UpdateTests(unittest.TestCase):
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent)}), \
                 mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
                 mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
                 mock.patch.object(pi_setup, "loaded_context", return_value=8192):
             installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
@@ -363,6 +460,10 @@ class UpdateTests(unittest.TestCase):
         self.assertIn("--check-pi", launcher)
         self.assertIn('"-bash,+powershell"', launcher)
         self.assertIn("@call ", launcher)
+        plain = (launcher_dir / "pi.cmd").read_text()
+        self.assertIn("@call ", plain)
+        self.assertNotIn("--model", plain)
+        self.assertNotIn("--tools", plain)
         self.assertNotIn("defaultTools", json.loads((agent / "settings.json").read_text()))
 
     def test_pi_setup_rejects_an_older_application_before_installing_pi(self):
@@ -438,12 +539,21 @@ class UpdateTests(unittest.TestCase):
             agent = self.root / "agent"
             agent.mkdir()
             (agent / "settings.json").write_text(json.dumps({"defaultProvider": "existing", "defaultModel": "existing"}))
-            env = {**os.environ, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "config"),
+            env = {**os.environ, "HOME": str(self.root), "PATH": os.defpath,
+                   "XDG_CONFIG_HOME": str(self.root / "config"),
                    "PI_CODING_AGENT_DIR": str(agent), "PI_OFFLINE": "1"}
             with mock.patch.dict(os.environ, env), \
                     mock.patch.object(pi_setup, "existing_pi", return_value=os.environ["SYNAPSE_TEST_PI"]), \
                     mock.patch.object(pi_setup, "loaded_context", return_value=8192):
                 installer.setup_pi(directory, launcher_dir, dict(self.receipt))
+            plain = launcher_dir / "pi"
+            direct = subprocess.run([os.environ["SYNAPSE_TEST_PI"], "--version"], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            via_launcher = subprocess.run([str(plain), "--version"], env=env,
+                                          capture_output=True, text=True, timeout=30)
+            self.assertEqual(direct.returncode, 0, direct.stderr)
+            self.assertEqual((via_launcher.returncode, via_launcher.stdout), (0, direct.stdout))
+            self.assertEqual(json.loads((agent / "settings.json").read_text())["defaultProvider"], "existing")
             pi_setup.configure_pi(agent, context=8192, port=server.server_port, refresh=True)
             command = [str(launcher_dir / "synapse-pi"), "--offline", "--no-session", "--no-extensions",
                        "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "Hi"]

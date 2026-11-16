@@ -326,21 +326,59 @@ def require_pi_support(directory):
                          "Install a compatible release or explicitly build a source preview and use --local-package.")
 
 
+def is_managed_launcher(path, marker):
+    if path.is_symlink() or not path.is_file():
+        return False
+    with path.open("rb") as stream:
+        return marker.encode("ascii") in stream.read(256)
+
+
+def write_pi_launcher(path, text):
+    descriptor, name = tempfile.mkstemp(prefix=".synapse-pi-launcher-", dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        staged.chmod(0o755)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def setup_pi(directory, launcher_dir, receipt):
     from synapse_app import pi_setup
     require_pi_support(directory)
+    launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
+    plain_launcher = launcher_dir / ("pi.cmd" if sys.platform == "win32" else "pi")
+    marker = "# SYNAPSE managed Pi launcher"
+    plain_marker = "# SYNAPSE managed plain Pi launcher"
+    if launcher.is_symlink() or launcher.exists() and not is_managed_launcher(launcher, marker):
+        raise ValueError("The synapse-pi launcher belongs to another program; it was not replaced.")
+    plain_managed = is_managed_launcher(plain_launcher, plain_marker)
+    path_pi = shutil.which("pi")
+    managed_on_path = (path_pi is not None and plain_managed and
+                       Path(path_pi).resolve() == plain_launcher.resolve())
+    create_plain = path_pi is None or managed_on_path or plain_managed
+    if create_plain and (plain_launcher.is_symlink() or
+                         plain_launcher.exists() and not plain_managed):
+        raise ValueError("The pi launcher path belongs to another program; it was not replaced.")
+    if create_plain and sys.platform == "win32":
+        for suffix in (".exe", ".bat", ".com"):
+            candidate = launcher_dir / ("pi" + suffix)
+            if candidate.exists() or candidate.is_symlink():
+                raise ValueError(f"Refusing to shadow the existing Pi command: {candidate}")
     executable = pi_setup.existing_pi()
+    if executable and plain_managed and Path(executable).resolve() == plain_launcher.resolve():
+        executable = None
     if executable is None:
         saved = receipt.get("pi_executable")
-        if isinstance(saved, str) and Path(saved).is_file():
+        if (isinstance(saved, str) and Path(saved).is_file() and
+                Path(saved).resolve() != plain_launcher.resolve()):
             executable = saved
     if executable is None:
         executable = pi_setup.install_pi(directory)
     else:
         print("Reusing the existing Pi installation; no replacement or update.")
-    launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
-    if launcher.is_symlink() or launcher.exists() and "# SYNAPSE managed Pi launcher" not in launcher.read_text():
-        raise ValueError("The synapse-pi launcher belongs to another program; it was not replaced.")
     check = [sys.executable, str(directory / "SYNAPSE.pyz"), "--check-pi"]
     pi_command = [executable, "--model", "synapse/local-model"]
     if sys.platform == "win32":
@@ -349,18 +387,16 @@ def setup_pi(directory, launcher_dir, receipt):
         text = ("@rem # SYNAPSE managed Pi launcher\n@chcp 65001 >nul\n@setlocal DisableDelayedExpansion\n@" +
                 windows_command(check) + "\n@if errorlevel 1 exit /b 1\n@" +
                 command + windows_command(pi_command) + " %*\n")
+        plain_text = ("@rem # SYNAPSE managed plain Pi launcher\n@setlocal DisableDelayedExpansion\n@" +
+                      command + windows_command([executable]) + " %*\n")
     else:
         text = ("#!/usr/bin/env bash\n# SYNAPSE managed Pi launcher\n" + shlex.join(check) +
                 " || exit $?\nexec " + shlex.join(pi_command) + ' "$@"\n')
-    descriptor, name = tempfile.mkstemp(prefix=".synapse-pi-launcher-", dir=launcher_dir)
-    staged = Path(name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(text)
-        staged.chmod(0o755)
-        os.replace(staged, launcher)
-    finally:
-        staged.unlink(missing_ok=True)
+        plain_text = ("#!/usr/bin/env bash\n# SYNAPSE managed plain Pi launcher\nexec " +
+                      shlex.join([executable]) + ' "$@"\n')
+    if create_plain:
+        write_pi_launcher(plain_launcher, plain_text)
+    write_pi_launcher(launcher, text)
     receipt["pi_executable"] = executable
     pi_setup.write_config(directory / "install.json", receipt)
     try:
@@ -371,7 +407,11 @@ def setup_pi(directory, launcher_dir, receipt):
     else:
         config = pi_setup.configure_pi(context=context)
         print(f"Pi configured in {config}.")
-    print(f"Start Synapse Pi with {launcher}; keep a suitably configured model loaded in Synapse.")
+    if create_plain:
+        print(f"Start Pi with {plain_launcher}; it uses your normal Pi defaults.")
+    else:
+        print(f"Start Pi with the existing command: {path_pi}")
+    print(f"To explicitly select Synapse, use {launcher}; keep a suitably configured model loaded.")
 
 
 def main():
