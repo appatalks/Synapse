@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from .updates import download
 
 PI_VERSION = "1.5.2"
+PI_MIN_CONTEXT = 8192
 PI_HASHES = {
     "pi-windows-x64.zip": "e6adb8cb8c84eca14391ad24b363de9d2be98a89ca3ba3fdee1fa4de32b7f2e8",
     "pi-windows-arm64.zip": "e83404bc5a6003ac950683edd9b6cf499dac91ec890d8439a8c32528de534a77",
@@ -157,9 +158,18 @@ def write_config(path, data):
         staged.unlink(missing_ok=True)
 
 
-def configure_pi(directory=None, context=4096, port=8080, refresh=False):
-    if (isinstance(context, bool) or not isinstance(context, int) or not 512 <= context <= 262144 or
-            isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535):
+def require_pi_context(context):
+    if isinstance(context, bool) or not isinstance(context, int) or not 512 <= context <= 262144:
+        raise ValueError("Pi configuration requires a valid loaded model context.")
+    if context < PI_MIN_CONTEXT:
+        raise ValueError(
+            f"Pi requires at least {PI_MIN_CONTEXT} context tokens for Synapse setup; "
+            f"the loaded model has {context}. Load a model with a larger context and run synapse --configure-pi.")
+
+
+def configure_pi(directory=None, context=None, port=8080, refresh=False):
+    require_pi_context(context)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("Pi configuration requires a valid loaded context and listening port.")
     directory = Path(directory) if directory is not None else agent_directory()
     if directory.is_symlink():
@@ -198,10 +208,6 @@ def configure_pi(directory=None, context=4096, port=8080, refresh=False):
             model[key] = value
         else:
             model.setdefault(key, value)
-    settings.setdefault("defaultProvider", "synapse")
-    settings.setdefault("defaultModel", "local-model")
-    if os.name == "nt":
-        settings.setdefault("defaultTools", ["-bash", "+powershell"])
     compaction = settings.setdefault("compaction", {})
     if not isinstance(compaction, dict):
         raise ValueError("Pi compaction settings must be an object.")
@@ -222,3 +228,31 @@ def configure_pi(directory=None, context=4096, port=8080, refresh=False):
     write_config(models_path, models)
     write_config(settings_path, settings)
     return directory
+
+
+def check_pi():
+    models = read_config(agent_directory() / "models.json")
+    providers = models.get("providers")
+    provider = providers.get("synapse") if isinstance(providers, dict) else None
+    if not isinstance(provider, dict) or provider.get("api") != "openai-completions":
+        raise ValueError("Synapse is not configured in Pi. Load a model and run synapse --configure-pi.")
+    endpoint = provider.get("baseUrl")
+    parsed = urlsplit(endpoint) if isinstance(endpoint, str) else None
+    if (parsed is None or parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or
+            parsed.path != "/v1" or parsed.username is not None or parsed.password is not None or
+            parsed.query or parsed.fragment):
+        raise ValueError("Pi's Synapse endpoint is not a local Synapse URL.")
+    port = parsed.port if parsed.port is not None else 80
+    if not 1 <= port <= 65535:
+        raise ValueError("Pi's Synapse endpoint has an invalid port.")
+    context = loaded_context(port)
+    require_pi_context(context)
+    entries = provider.get("models")
+    matches = [entry for entry in entries if isinstance(entry, dict) and entry.get("id") == "local-model"] \
+        if isinstance(entries, list) else []
+    if len(matches) != 1:
+        raise ValueError("Pi's Synapse model is missing or ambiguous. Run synapse --configure-pi.")
+    configured = matches[0].get("contextWindow")
+    require_pi_context(configured)
+    if configured > context:
+        raise ValueError("Pi's configured context exceeds the loaded model context. Run synapse --configure-pi.")

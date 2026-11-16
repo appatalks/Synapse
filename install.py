@@ -308,8 +308,20 @@ def confirm_pi():
     return False
 
 
+def require_pi_support(directory):
+    result = subprocess.run([sys.executable, str(directory / "SYNAPSE.pyz"), "--help"],
+                            capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise ValueError("The installed SYNAPSE app could not report its Pi capabilities: " +
+                         (result.stderr or result.stdout)[-2000:])
+    if "--configure-pi" not in result.stdout or "--check-pi" not in result.stdout:
+        raise ValueError("The installed SYNAPSE release does not support this Pi integration. "
+                         "Install a compatible release or explicitly build a source preview and use --local-package.")
+
+
 def setup_pi(directory, launcher_dir, receipt):
     from synapse_app import pi_setup
+    require_pi_support(directory)
     executable = pi_setup.existing_pi()
     if executable is None:
         saved = receipt.get("pi_executable")
@@ -319,22 +331,20 @@ def setup_pi(directory, launcher_dir, receipt):
         executable = pi_setup.install_pi(directory)
     else:
         print("Reusing the existing Pi installation; no replacement or update.")
-    context = 4096
-    try:
-        context = pi_setup.loaded_context()
-    except (OSError, ValueError, http.client.HTTPException) as error:
-        print(f"Loaded context unavailable: {error}\nUsing conservative 4K Pi defaults.\n"
-              "After loading a model, run synapse --configure-pi to refresh these limits.")
     launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
     if launcher.is_symlink() or launcher.exists() and "# SYNAPSE managed Pi launcher" not in launcher.read_text():
         raise ValueError("The synapse-pi launcher belongs to another program; it was not replaced.")
-    config = pi_setup.configure_pi(context=context)
+    check = [sys.executable, str(directory / "SYNAPSE.pyz"), "--check-pi"]
+    pi_command = [executable, "--model", "synapse/local-model"]
     if sys.platform == "win32":
+        pi_command += ["--tools", "-bash,+powershell"]
         command = "call " if Path(executable).suffix.lower() in (".cmd", ".bat") else ""
         text = ("@rem # SYNAPSE managed Pi launcher\n@chcp 65001 >nul\n@setlocal DisableDelayedExpansion\n@" +
-                command + windows_command([executable]) + " %*\n")
+                windows_command(check) + "\n@if errorlevel 1 exit /b 1\n@" +
+                command + windows_command(pi_command) + " %*\n")
     else:
-        text = "#!/usr/bin/env bash\n# SYNAPSE managed Pi launcher\nexec " + shlex.join([executable]) + ' "$@"\n'
+        text = ("#!/usr/bin/env bash\n# SYNAPSE managed Pi launcher\n" + shlex.join(check) +
+                " || exit $?\nexec " + shlex.join(pi_command) + ' "$@"\n')
     descriptor, name = tempfile.mkstemp(prefix=".synapse-pi-launcher-", dir=launcher_dir)
     staged = Path(name)
     try:
@@ -346,8 +356,15 @@ def setup_pi(directory, launcher_dir, receipt):
         staged.unlink(missing_ok=True)
     receipt["pi_executable"] = executable
     pi_setup.write_config(directory / "install.json", receipt)
-    print(f"Pi configured in {config}. Start with {launcher}\n"
-          "In Pi, use /model and select Synapse Local; keep a model loaded in Synapse.")
+    try:
+        context = pi_setup.loaded_context()
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        print(f"Pi installed, but model context is unavailable: {error}\n"
+              "Load a model with at least 8192 context tokens, then run synapse --configure-pi.")
+    else:
+        config = pi_setup.configure_pi(context=context)
+        print(f"Pi configured in {config}.")
+    print(f"Start Synapse Pi with {launcher}; keep a suitably configured model loaded in Synapse.")
 
 
 def main():
@@ -490,6 +507,8 @@ def main():
             try:
                 setup_pi(directory, launcher_dir, receipt)
             except (OSError, ValueError, subprocess.SubprocessError) as error:
+                if args.with_pi:
+                    raise ValueError(f"Optional Pi setup failed: {error}\nSYNAPSE remains installed.") from error
                 print(f"Optional Pi setup failed: {error}\nSYNAPSE remains installed. Rerun with --with-pi to retry.")
         lock.unlink(missing_ok=True)
         if args.launch:

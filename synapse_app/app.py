@@ -2429,12 +2429,23 @@ def main() -> None:
                         help="gracefully stop the local SYNAPSE app and its owned model backend on --port")
     parser.add_argument("--configure-pi", action="store_true",
                         help="explicitly refresh Pi provider limits from the model loaded on --port")
+    parser.add_argument("--check-pi", action="store_true",
+                        help="check the configured Pi provider against the running model")
     parser.add_argument("--no-browser", action="store_true", help="do not open a browser")
     parser.add_argument("--no-update-check", action="store_true", help="disable automatic GitHub release checks")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    if args.check_pi:
+        if args.stop or args.configure_pi:
+            parser.error("--check-pi cannot be combined with --stop or --configure-pi.")
+        from synapse_app.pi_setup import check_pi
+        try:
+            check_pi()
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            parser.exit(1, f"Cannot start Synapse Pi: {error}\n")
+        return
     if args.configure_pi:
         if args.stop or args.port == 0:
             parser.error("--configure-pi requires the running app's port and cannot be combined with --stop.")

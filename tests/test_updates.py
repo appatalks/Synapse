@@ -57,21 +57,55 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(model["maxTokens"], 4096)
         settings = json.loads(settings_path.read_text())
         self.assertEqual(settings["defaultProvider"], "existing")
+        self.assertNotIn("defaultModel", settings)
         self.assertTrue(settings["terminal"]["showTerminalProgress"])
-        pi_setup.configure_pi(directory, context=4096)
+        pi_setup.configure_pi(directory, context=8192)
         self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
-        pi_setup.configure_pi(directory, context=4096, refresh=True)
+        before = (directory / "models.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "at least 8192"):
+            pi_setup.configure_pi(directory, context=4096, refresh=True)
+        self.assertEqual((directory / "models.json").read_bytes(), before)
+        pi_setup.configure_pi(directory, context=8192, refresh=True)
         model = json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]
-        self.assertEqual((model["contextWindow"], model["maxTokens"]), (4096, 512))
+        self.assertEqual((model["contextWindow"], model["maxTokens"]), (8192, 1024))
         self.assertEqual(auth.read_text(), "private credentials stay untouched")
-        pi_setup.configure_pi(directory, context=4096, port=8081, refresh=True)
+        pi_setup.configure_pi(directory, context=8192, port=8081, refresh=True)
         self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["baseUrl"],
                          "http://127.0.0.1:8081/v1")
         before = (directory / "models.json").read_bytes()
         settings_path.write_text('{"compaction": []}')
         with self.assertRaisesRegex(ValueError, "compaction"):
-            pi_setup.configure_pi(directory, port=8081)
+            pi_setup.configure_pi(directory, context=8192, port=8081)
         self.assertEqual((directory / "models.json").read_bytes(), before)
+
+    def test_pi_preserves_implicit_and_explicit_startup_defaults(self):
+        for index, previous in enumerate(({}, {"defaultProvider": "existing"},
+                                          {"defaultModel": "existing-model"},
+                                          {"defaultProvider": "existing", "defaultModel": "existing-model"})):
+            directory = self.root / str(index)
+            directory.mkdir()
+            settings_path = directory / "settings.json"
+            settings_path.write_text(json.dumps(previous))
+            pi_setup.configure_pi(directory, context=8192)
+            settings = json.loads(settings_path.read_text())
+            for key in ("defaultProvider", "defaultModel", "defaultTools"):
+                self.assertEqual(settings.get(key), previous.get(key))
+
+    def test_pi_launch_check_rejects_small_or_stale_context(self):
+        directory = self.root / "agent"
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(directory)}):
+            with self.assertRaisesRegex(ValueError, "not configured"):
+                pi_setup.check_pi()
+            pi_setup.configure_pi(directory, context=16384, port=8081)
+            with mock.patch.object(pi_setup, "loaded_context", return_value=4096) as loaded:
+                with self.assertRaisesRegex(ValueError, "at least 8192"):
+                    pi_setup.check_pi()
+                loaded.assert_called_once_with(8081)
+            with mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    pi_setup.check_pi()
+            with mock.patch.object(pi_setup, "loaded_context", return_value=16384):
+                pi_setup.check_pi()
 
     def test_pi_context_refresh_command_uses_ready_server_without_running_inference(self):
         requested = []
@@ -172,6 +206,7 @@ class UpdateTests(unittest.TestCase):
         executable = self.root / "pi.cmd"
         executable.write_text("@echo fixture")
         with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(self.root / "pi-config")}), \
+                mock.patch.object(installer, "require_pi_support"), \
                 mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
                 mock.patch.object(pi_setup, "install_pi") as install, \
                 mock.patch.object(pi_setup, "loaded_context", return_value=64512):
@@ -179,9 +214,147 @@ class UpdateTests(unittest.TestCase):
             install.assert_not_called()
             launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
             self.assertIn("SYNAPSE managed Pi launcher", launcher.read_text())
+            self.assertIn("--check-pi", launcher.read_text())
+            self.assertIn("synapse/local-model", launcher.read_text())
             self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
             models = json.loads((self.root / "pi-config/models.json").read_text())
             self.assertEqual(models["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
+
+    def test_pi_install_defers_configuration_without_a_ready_model(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_deferred_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi"
+        executable.write_text("fixture")
+        agent = self.root / "agent"
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent)}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "loaded_context", side_effect=OSError("not running")):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+        self.assertFalse(agent.exists())
+        self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
+        self.assertTrue((launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")).is_file())
+
+    def test_windows_pi_launcher_uses_powershell_without_changing_user_settings(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_windows_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi.cmd"
+        executable.write_text("fixture")
+        agent = self.root / "agent"
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent)}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+        launcher = (launcher_dir / "synapse-pi.cmd").read_text()
+        self.assertIn("--check-pi", launcher)
+        self.assertIn('"-bash,+powershell"', launcher)
+        self.assertIn("@call ", launcher)
+        self.assertNotIn("defaultTools", json.loads((agent / "settings.json").read_text()))
+
+    def test_pi_setup_rejects_an_older_application_before_installing_pi(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_old_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(installer.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stdout="--help --configure-pi", stderr="")), \
+                mock.patch.object(pi_setup, "existing_pi") as existing, \
+                mock.patch.object(pi_setup, "install_pi") as install:
+            with self.assertRaisesRegex(ValueError, "does not support this Pi integration"):
+                installer.setup_pi(self.root, self.root, dict(self.receipt))
+            existing.assert_not_called()
+            install.assert_not_called()
+
+    def test_explicit_pi_setup_failure_returns_nonzero_without_rolling_back_synapse(self):
+        prefix = self.root / "installed"
+        result = subprocess.run([sys.executable, str(ROOT / "install.py"), "--local-package", str(self.archive),
+                                 "--prefix", str(prefix), "--non-interactive", "--no-accelerated", "--with-pi"],
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not support this Pi integration", result.stderr)
+        self.assertIn("SYNAPSE remains installed", result.stderr)
+        self.assertTrue((prefix / "SYNAPSE.pyz").is_file())
+        self.assertFalse((prefix / "bin" / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")).exists())
+
+    @unittest.skipUnless(os.environ.get("SYNAPSE_TEST_PI") and os.name != "nt",
+                         "Set SYNAPSE_TEST_PI to a native Pi executable to run this integration test")
+    def test_native_pi_launcher_checks_context_and_sends_a_useful_output_limit(self):
+        requests = []
+        state = {"context": 8192}
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json.dumps({"app_name": "SYNAPSE", "state": "ready", "context": state["context"]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                requests.append(request)
+                chunks = [
+                    {"id": "test", "object": "chat.completion.chunk", "created": 1, "model": "local-model",
+                     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Local reply."},
+                                  "finish_reason": None}]},
+                    {"id": "test", "object": "chat.completion.chunk", "created": 1, "model": "local-model",
+                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                body = ("".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) +
+                        "data: [DONE]\n\n").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *arguments):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            spec = importlib.util.spec_from_file_location("synapse_installer_native_pi_test", ROOT / "install.py")
+            installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installer)
+            directory = self.root / "installed"
+            launcher_dir = directory / "bin"
+            launcher_dir.mkdir(parents=True)
+            subprocess.run([sys.executable, str(ROOT / "scripts/build_synapse.py"), "--output", str(directory)],
+                           check=True, capture_output=True, text=True)
+            agent = self.root / "agent"
+            agent.mkdir()
+            (agent / "settings.json").write_text(json.dumps({"defaultProvider": "existing", "defaultModel": "existing"}))
+            env = {**os.environ, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "config"),
+                   "PI_CODING_AGENT_DIR": str(agent), "PI_OFFLINE": "1"}
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(pi_setup, "existing_pi", return_value=os.environ["SYNAPSE_TEST_PI"]), \
+                    mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+                installer.setup_pi(directory, launcher_dir, dict(self.receipt))
+            pi_setup.configure_pi(agent, context=8192, port=server.server_port, refresh=True)
+            command = [str(launcher_dir / "synapse-pi"), "--offline", "--no-session", "--no-extensions",
+                       "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "Hi"]
+            result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Local reply.", result.stdout)
+            self.assertEqual(requests[0]["model"], "local-model")
+            self.assertEqual(requests[0]["max_tokens"], 1024)
+            state["context"] = 4096
+            result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("at least 8192", result.stderr)
+            self.assertEqual(len(requests), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_version_order_and_invalid_tags(self):
         versions = ["0.1.0a1", "0.1.0b1", "0.1.0rc1", "0.1.0rc2", "0.1.0", "0.2.0rc1", "1.0.0"]

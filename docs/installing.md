@@ -156,25 +156,30 @@ never upgraded or replaced. Otherwise SYNAPSE downloads a SHA-256-pinned Pi
 1.5.2 standalone release into a new private app subdirectory. x64 and ARM64
 builds are available for all three platforms. No system Node/npm installation,
 sudo, model download or background agent startup is performed.
+Pi setup requires an installed SYNAPSE release with the Pi commands. If the
+latest published release is older, the installer reports this without installing
+Pi; wait for a compatible release or explicitly build a source preview and
+install it using `--local-package`.
 
 Pi runs with your user permissions and can edit files and execute commands;
 it is not a sandbox. Install only when you trust this capability. Failures are
 reported separately; SYNAPSE remains installed when optional Pi setup fails.
-Archive/checksum/platform-selection tests cover all platforms, but native
-Linux/macOS execution of this installer addition still requires validation.
+An explicit `--with-pi`/`-WithPi` request exits nonzero if Pi setup fails.
 
 Configuration uses `PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent`.
 The installer adds `synapse/local-model` at `http://127.0.0.1:8080/v1`, preserves
-other providers, existing startup choices and credentials, and supplies safe
-defaults only where absent. It selects PowerShell tools on Windows and leaves
-Unix tool defaults unchanged. Start with `synapse-pi` (or the full launcher path
-printed during setup); inside Pi, select **Synapse Local** through `/model`.
-Keep Synapse running with a model loaded. `/login` is not required.
+other providers, startup choices, tool settings and credentials. `synapse-pi`
+selects **Synapse Local** for that invocation without changing ordinary `pi`
+startup defaults. On Windows the launcher selects PowerShell instead of Bash;
+on Unix it leaves Pi's tool selection unchanged.
 
-If a model is already ready, new defaults use its actual loaded context.
-Otherwise defaults conservatively assume 4096 context tokens and 512 output
-tokens; this is not a claim that 4K is sufficient for every coding task.
-After loading a model or changing its context, explicitly refresh:
+The Synapse Pi launcher requires a ready model with at least 8192 context tokens.
+Pi 1.5.2 reserves 4096 tokens when calculating output room, so a 4K context
+can limit responses to one token. The 8192 minimum is not a guarantee that a
+large project prompt will fit. The launcher checks the running model and refuses
+to use Pi settings that advertise more context than the loaded model has.
+If no model is ready during installation, Pi installation completes but provider
+configuration is deferred. After loading a model or changing its context, refresh:
 
 ```sh
 synapse --configure-pi
@@ -182,7 +187,9 @@ synapse --configure-pi
 synapse --configure-pi --port 8081
 ```
 
-This command changes only Pi's Synapse model context/output limits and its
+Use `--port` for the port of the running Synapse app; the launcher reads that
+port from Pi's Synapse provider. This command adds the Synapse provider if
+needed, updates its endpoint, and refreshes its model context/output limits and
 model-specific compaction reserve/recent-history defaults. It does not load
 models or run inference. It requires a running, ready Synapse model. Default
 output is capped at 4096 tokens; compaction reserves up to 8192 and keeps up to
@@ -220,7 +227,10 @@ context, memory use and a real long-prompt response, not just successful loading
 Automatic fitting may reduce GPU weight placement as context memory grows.
 
 When no Hybrid profile is installed (including standard Windows/macOS setups),
-Automatic also allows an explicit context for the next load. Checking **Allow
+Automatic also allows an explicit context for the next load. Editing the context
+applies it to the currently selected model. When selecting a different model,
+the displayed value is not sent until edited; Automatic instead uses that model's
+remembered Auto Tune choice or installation defaults. Checking **Allow
 experimental Hybrid acceleration** does not lock that input or install Hybrid;
 other run settings remain automatic. Unload an active model before editing.
 Installations with a real Hybrid profile retain their profile/Auto Tune context

@@ -5,7 +5,7 @@ import { navigate } from "./navigation.mjs";
 import { MonitorView } from "./monitor.mjs";
 import { UpdateView } from "./updates.mjs";
 import { bindChatInput } from "./chat-input.mjs";
-import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, contextEditable, draftControls, elapsed, engineSettingsText, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
+import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, contextEditable, draftControls, elapsed, engineSettingsText, explicitContextForModel, loadingText, modelLoadPayload, ModelPrecheck, restoreModelControls, statusPollDelay, tuningPayload } from "./model-controls.mjs";
 
 const el = (id) => document.getElementById(id);
 let status = null;
@@ -20,6 +20,7 @@ let appliedTuningAt = null;
 let statusTimer = null;
 let statusPolling = false;
 let standardSettings = null;
+let autoContextModel;
 let libraryTimer = null;
 let libraryBusy = false;
 const manualFields = ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll",
@@ -28,6 +29,14 @@ const syncEngineSelection = bindEngineSelection(el("allow-hybrid"), el("executio
 const modelPrecheck = new ModelPrecheck({
   input: el("model"), button: el("precheck-model"), output: el("model-precheck"), request, changed: controls,
 });
+el("context").addEventListener("input", () => {
+  autoContextModel = el("model").value.trim();
+  controls();
+});
+
+function hasExplicitContext() {
+  return explicitContextForModel(autoContextModel, el("model").value);
+}
 
 function notice(message = "") {
   el("notice").textContent = message;
@@ -78,7 +87,7 @@ function controls() {
   el("allow-hybrid").disabled = !status || active || actionPending;
   syncEngineSelection();
   const selectedMode = el("execution-mode").value;
-  el("engine-settings-note").textContent = engineSettingsText(status, selectedMode, el("context").value);
+  el("engine-settings-note").textContent = engineSettingsText(status, selectedMode, el("context").value, hasExplicitContext());
   if (selectedMode === "auto") {
     for (const id of ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll", "host-op-offload", "op-offload-min-batch", "load-mode", "expert-cache", "fit-target", "draft-model", "draft-tokens"]) {
       el(id).disabled = true;
@@ -181,6 +190,10 @@ function renderStatus() {
   }
   const previousModel = el("model").value;
   const restored = restoreModelControls(status, settingsInitialized, el);
+  if (!settingsInitialized && restored && status.saved_model_settings &&
+      restored.model === status.saved_model_settings.model && restored.execution_mode === "auto") {
+    autoContextModel = restored.model;
+  }
   if (restored) hybridVariant = restored.hybrid_variant || "auto";
   settingsInitialized = true;
   if (el("model").value !== previousModel) modelPrecheck.invalidate();
@@ -242,6 +255,7 @@ function renderTuning() {
     Object.entries(settings).every(([key, value]) => status[key] === value) &&
     (settings.kv_cache_type || "f16") === (status.kv_cache_type || "f16");
   if (current && appliedTuningAt !== tuning.completed_at) {
+    autoContextModel = undefined;
     el("max-output").value = apps.maxOutputTokens;
     appliedTuningAt = tuning.completed_at;
     contextNote();
@@ -646,8 +660,9 @@ el("load-form").addEventListener("submit", async (event) => {
         ? el("draft-model").value.trim() || null : null,
       draft_tokens: Number(el("draft-tokens").value),
     };
-    const payload = modelLoadPayload(settings, status);
+    const payload = modelLoadPayload(settings, status, hasExplicitContext());
     status = await request("/api/v1/model/load", payload);
+    if (hasExplicitContext()) autoContextModel = settings.model.trim();
     clearChat();
     el("model-browser").hidden = true;
     el("model-controls").close();
