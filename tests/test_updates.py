@@ -592,6 +592,7 @@ class UpdateTests(unittest.TestCase):
             with self.subTest(devices=devices, runtime_hash=runtime_hash), \
                     mock.patch.object(sys, "platform", "win32"), \
                     mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.object(installer.platform, "machine", return_value="AMD64"), \
                     mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cuda-13.4", "x64"): hashlib.sha256(backend).hexdigest()}), \
                     mock.patch.dict(installer.WINDOWS_CUDA_RUNTIME_HASHES, {"x64": runtime_hash}), \
                     mock.patch.object(installer, "download", side_effect=[backend, runtime]) as fetch, \
@@ -610,6 +611,52 @@ class UpdateTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "CUDA"):
                         installer.install_windows_backend(self.root, "cuda-13.4")
                     self.assertEqual(set(self.root.iterdir()), before)
+
+    @unittest.skipIf(sys.platform == "win32", "Unix bootstrap requires bash and symlink support")
+    def test_unix_bootstrap_resolves_temp_directory_and_rejects_archive_escape(self):
+        state = {}
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(state["body"])
+
+            def log_message(self, *arguments):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            target = self.root / "real-temp"
+            target.mkdir()
+            alias = self.root / "temp-alias"
+            alias.symlink_to(target, target_is_directory=True)
+            script = self.root / "bootstrap.sh"
+            script.write_text((ROOT / "install.sh").read_text().replace(
+                "https://api.github.com/repos/appatalks/synapse/zipball/main",
+                f"http://127.0.0.1:{server.server_port}/source.zip"))
+            for name, succeeds in (("synapse-source/install.py", True),
+                                   ("synapse-source/synapse_app/../../escape.py", False)):
+                source = io.BytesIO()
+                with zipfile.ZipFile(source, "w") as archive:
+                    archive.writestr(name, "import json, sys; print(json.dumps(sys.argv[1:]))")
+                state["body"] = source.getvalue()
+                result = subprocess.run(["bash", str(script), "--non-interactive", "--with-pi"],
+                                        env={**os.environ, "TMPDIR": str(alias)},
+                                        capture_output=True, text=True, timeout=20)
+                if succeeds:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout.strip().splitlines()[-1]),
+                                     ["--non-interactive", "--with-pi"])
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Unsafe installer archive path", result.stderr)
+                    self.assertFalse((target / "escape.py").exists())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     @unittest.skipUnless(sys.platform == "win32", "PowerShell bootstrap is Windows-only")
     def test_standalone_powershell_bootstrap_downloads_source_and_forwards_arguments(self):
@@ -637,12 +684,21 @@ class UpdateTests(unittest.TestCase):
                                      str(script), "-Prefix", str(self.root / "custom prefix"),
                                      "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
                                      "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi", "-SwitchBackend"],
-                                    check=True, capture_output=True, text=True, timeout=20)
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
             arguments = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
                                          "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
                                          "--switch-backend",
                                          "--no-shortcuts", "--no-path", "--non-interactive", "--with-pi"])
+            source = io.BytesIO()
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("synapse-source/synapse_app/../../escape.py", "print('unsafe')")
+            body = source.getvalue()
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                                    capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Unsafe installer archive path", result.stderr)
         finally:
             server.shutdown()
             server.server_close()
