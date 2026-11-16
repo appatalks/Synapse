@@ -290,19 +290,26 @@ def select_backend(value, package, interactive=True, directory=None, switch=Fals
     return value
 
 
+def confirm_unix(prompt, option):
+    try:
+        with open("/dev/tty", "r", encoding="utf-8") as terminal_input, \
+                open("/dev/tty", "w", encoding="utf-8") as terminal_output:
+            terminal_output.write(prompt)
+            terminal_output.flush()
+            return terminal_input.readline().strip().lower() in ("y", "yes")
+    except OSError as error:
+        print(f"Cannot offer optional setup without an interactive terminal: {error}\n"
+              f"Rerun with {option} to request it explicitly.")
+        return False
+
+
 def confirm_pi():
     prompt = ("Optional Pi coding agent: reuse an existing Pi, or download a verified standalone build.\n"
               "This adds a Synapse provider to Pi's user configuration; credentials and existing defaults are preserved.\n"
               "Pi can edit files and run commands with your user permissions; it is not a sandbox.\n"
               "Install/configure Pi for SYNAPSE? [y/N]: ")
     if sys.platform != "win32":
-        try:
-            with open("/dev/tty", "r+") as terminal:
-                terminal.write(prompt)
-                terminal.flush()
-                return terminal.readline().strip().lower() in ("y", "yes")
-        except OSError:
-            return False
+        return confirm_unix(prompt, "--with-pi")
     if sys.stdin.isatty() and sys.stdout.isatty():
         return input(prompt).strip().lower() in ("y", "yes")
     return False
@@ -447,13 +454,9 @@ def main():
                                          interactive=not args.non_interactive, directory=directory, switch=args.switch_backend)
         accelerated = args.accelerated
         if sys.platform == "linux" and not args.no_accelerated and not accelerated and not args.non_interactive:
-            try:
-                with open("/dev/tty", "r+") as terminal:
-                    terminal.write("Offer experimental Linux/NVIDIA acceleration? Builds native code; no model downloads. [y/N] ")
-                    terminal.flush()
-                    accelerated = terminal.readline().strip().lower() in ("y", "yes")
-            except OSError:
-                print("No interactive terminal. For optional Linux/NVIDIA setup, rerun with --accelerated.")
+            accelerated = confirm_unix(
+                "Offer experimental Linux/NVIDIA acceleration? Builds native code; no model downloads. [y/N] ",
+                "--accelerated")
         if accelerated:
             if sys.platform != "linux":
                 raise ValueError("Experimental acceleration is Linux/NVIDIA-only. Standard app execution is cross-platform.")

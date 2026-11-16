@@ -151,6 +151,9 @@ python3 install.py --with-pi --no-accelerated
 
 The one-line installer also accepts `--with-pi`. This option permits Pi
 installation and adding a Synapse provider to its user configuration.
+On Unix, the interactive offers use the controlling terminal even when the
+installer is piped from `curl`. Without a terminal, the installer reports that
+the offers were skipped; `--with-pi` explicitly requests Pi setup.
 An existing Pi on PATH or in its managed agent `bin` directory is reused,
 never upgraded or replaced. Otherwise SYNAPSE downloads a SHA-256-pinned Pi
 1.5.2 standalone release into a new private app subdirectory. x64 and ARM64

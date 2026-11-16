@@ -5,6 +5,8 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -219,6 +221,109 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
             models = json.loads((self.root / "pi-config/models.json").read_text())
             self.assertEqual(models["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("script") and shutil.which("curl"),
+                         "Requires Linux script, curl, and a pseudo-terminal")
+    def test_piped_installer_offers_acceleration_and_pi_on_a_real_terminal(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/install.sh":
+                    content = (ROOT / "install.sh").read_text().replace(
+                        "https://api.github.com/repos/appatalks/synapse/zipball/main",
+                        f"http://127.0.0.1:{self.server.server_port}/source.zip").encode()
+                elif self.path == "/api/v1/status":
+                    content = json.dumps({"app_name": "SYNAPSE", "state": "ready", "context": 8192}).encode()
+                else:
+                    content = body
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def log_message(self, *arguments):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        source = io.BytesIO()
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.write(ROOT / "install.py", "synapse-source/install.py")
+            for path in (ROOT / "synapse_app").glob("*.py"):
+                contents = path.read_text(encoding="utf-8")
+                if path.name == "pi_setup.py":
+                    contents = contents.replace("def loaded_context(port=8080):",
+                                                f"def loaded_context(port={server.server_port}):")
+                archive.writestr(f"synapse-source/synapse_app/{path.name}", contents)
+        body = source.getvalue()
+        package = self.root / "pi-capable.pyz"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("__main__.py", "import sys\nif '--help' in sys.argv: print('--configure-pi --check-pi')\n")
+            archive.writestr("synapse_app/app.py", "")
+            archive.writestr("synapse_app/__init__.py", '__version__ = "0.1.0rc1"')
+        binaries = self.root / "binaries"
+        binaries.mkdir()
+        pi = binaries / "pi"
+        pi.write_text("#!/bin/sh\nexit 0\n")
+        pi.chmod(0o755)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for accept in (False, True):
+                with self.subTest(accept_pi=accept):
+                    prefix = self.root / ("accepted" if accept else "declined")
+                    agent = self.root / "agent"
+                    command = (f"curl -fsSL http://127.0.0.1:{server.server_port}/install.sh | "
+                               f"bash -s -- --local-package {shlex.quote(str(package))} "
+                               f"--prefix {shlex.quote(str(prefix))} --launch")
+                    result = subprocess.run(["script", "-q", "-e", "-c", command, "/dev/null"],
+                                            input=f"n\n{'y' if accept else 'n'}\n", capture_output=True,
+                                            text=True, timeout=30,
+                                            env={**os.environ, "HOME": str(self.root),
+                                                 "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
+                                                 "XDG_CONFIG_HOME": str(self.root / "config"),
+                                                 "PI_CODING_AGENT_DIR": str(agent)})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("Offer experimental Linux/NVIDIA acceleration?", result.stdout)
+                    self.assertIn("Install/configure Pi for SYNAPSE? [y/N]:", result.stdout)
+                    self.assertNotIn("Cannot offer optional setup", result.stdout)
+                    receipt = json.loads((prefix / "install.json").read_text())
+                    launcher = prefix / "bin/synapse-pi"
+                    self.assertEqual(launcher.is_file(), accept)
+                    if accept:
+                        self.assertEqual(receipt["pi_executable"], str(pi))
+                        config = json.loads((agent / "models.json").read_text())
+                        self.assertEqual(config["providers"]["synapse"]["models"][0]["contextWindow"], 8192)
+                    else:
+                        self.assertNotIn("pi_executable", receipt)
+
+            pi_command = shlex.join([sys.executable, "-c",
+                                     "import install; print('Accepted:', install.confirm_pi())"])
+            result = subprocess.run(["script", "-q", "-e", "-c", pi_command, "/dev/null"],
+                                    input="y\n", cwd=ROOT, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Install/configure Pi for SYNAPSE? [y/N]:", result.stdout)
+            self.assertIn("Accepted: True", result.stdout)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    @unittest.skipIf(sys.platform == "win32", "Unix controlling-terminal behavior")
+    def test_unavailable_terminal_reports_skipped_offers(self):
+        for flags, expected, absent in (
+                ([], ("--accelerated", "--with-pi"), ()),
+                (["--no-accelerated", "--no-pi"], (), ("--accelerated", "--with-pi")),
+                (["--non-interactive"], (), ("--accelerated", "--with-pi"))):
+            with self.subTest(flags=flags):
+                prefix = self.root / ("installed-" + str(len(flags)) + "-" + str(len(expected)))
+                result = subprocess.run([sys.executable, str(ROOT / "install.py"),
+                                         "--local-package", str(self.archive), "--prefix", str(prefix), *flags],
+                                        env={**os.environ, "HOME": str(self.root)},
+                                        start_new_session=True, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for option in expected:
+                    self.assertIn(f"Rerun with {option}", result.stdout)
+                for option in absent:
+                    self.assertNotIn(f"Rerun with {option}", result.stdout)
 
     def test_pi_install_defers_configuration_without_a_ready_model(self):
         spec = importlib.util.spec_from_file_location("synapse_installer_deferred_pi_test", ROOT / "install.py")
