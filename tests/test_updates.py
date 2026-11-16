@@ -309,8 +309,9 @@ class UpdateTests(unittest.TestCase):
 
     @unittest.skipIf(sys.platform == "win32", "Unix controlling-terminal behavior")
     def test_unavailable_terminal_reports_skipped_offers(self):
+        interactive_offers = ("--accelerated", "--with-pi") if sys.platform == "linux" else ("--with-pi",)
         for flags, expected, absent in (
-                ([], ("--accelerated", "--with-pi"), ()),
+                ([], interactive_offers, () if sys.platform == "linux" else ("--accelerated",)),
                 (["--no-accelerated", "--no-pi"], (), ("--accelerated", "--with-pi")),
                 (["--non-interactive"], (), ("--accelerated", "--with-pi"))):
             with self.subTest(flags=flags):
