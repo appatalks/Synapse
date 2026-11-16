@@ -592,6 +592,7 @@ class UpdateTests(unittest.TestCase):
             with self.subTest(devices=devices, runtime_hash=runtime_hash), \
                     mock.patch.object(sys, "platform", "win32"), \
                     mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.object(installer.platform, "machine", return_value="AMD64"), \
                     mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cuda-13.4", "x64"): hashlib.sha256(backend).hexdigest()}), \
                     mock.patch.dict(installer.WINDOWS_CUDA_RUNTIME_HASHES, {"x64": runtime_hash}), \
                     mock.patch.object(installer, "download", side_effect=[backend, runtime]) as fetch, \
@@ -637,7 +638,8 @@ class UpdateTests(unittest.TestCase):
                                      str(script), "-Prefix", str(self.root / "custom prefix"),
                                      "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
                                      "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi", "-SwitchBackend"],
-                                    check=True, capture_output=True, text=True, timeout=20)
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
             arguments = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
                                          "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
