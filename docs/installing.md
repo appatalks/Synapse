@@ -461,11 +461,13 @@ existing Automatic winner. Existing saved Standard choices remain off until
 explicitly changed. Advanced performance retains an engine override for
 troubleshooting.
 
-Automatic manages context and run settings; displayed manual values are not
-sent, and switching to Automatic can change context. Its hint shows the
-installed Hybrid context default when available. Standard-only enables manual
-context/settings, with in-page edits preserved when toggling back for the same
-model. The checkbox does not itself load or unload anything.
+Automatic manages run settings. When a Hybrid profile is installed, its context
+comes from the profile or a measured winner; the displayed manual context is
+not sent. Without a Hybrid profile, an explicit context edit applies to the
+selected model; otherwise Automatic uses that model's measured choice or
+defaults. Standard-only enables manual context/settings, with in-page edits
+preserved when toggling back for the same model. The checkbox does not itself
+load or unload anything.
 
 Without
 measurements, Automatic uses native fitting when the weights fit and GPU + CPU
