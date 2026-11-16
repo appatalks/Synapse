@@ -1,4 +1,5 @@
 import hashlib
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import importlib.util
 import io
 import json
@@ -7,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import threading
 import unittest
 from unittest import mock
@@ -15,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from synapse_app import updates
+from synapse_app import pi_setup
 
 
 def application(version):
@@ -40,6 +43,319 @@ class UpdateTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_pi_configuration_preserves_settings_and_tracks_explicit_context_refresh(self):
+        directory = self.root / "pi"
+        directory.mkdir()
+        settings_path = directory / "settings.json"
+        settings_path.write_text(json.dumps({"defaultProvider": "existing", "terminal": {"showTerminalProgress": True}}))
+        auth = directory / "auth.json"
+        auth.write_text("private credentials stay untouched")
+        pi_setup.configure_pi(directory, context=64512)
+        models = json.loads((directory / "models.json").read_text())
+        model = models["providers"]["synapse"]["models"][0]
+        self.assertEqual(model["contextWindow"], 64512)
+        self.assertEqual(model["maxTokens"], 4096)
+        settings = json.loads(settings_path.read_text())
+        self.assertEqual(settings["defaultProvider"], "existing")
+        self.assertNotIn("defaultModel", settings)
+        self.assertTrue(settings["terminal"]["showTerminalProgress"])
+        pi_setup.configure_pi(directory, context=8192)
+        self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
+        before = (directory / "models.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "at least 8192"):
+            pi_setup.configure_pi(directory, context=4096, refresh=True)
+        self.assertEqual((directory / "models.json").read_bytes(), before)
+        pi_setup.configure_pi(directory, context=8192, refresh=True)
+        model = json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]
+        self.assertEqual((model["contextWindow"], model["maxTokens"]), (8192, 1024))
+        self.assertEqual(auth.read_text(), "private credentials stay untouched")
+        pi_setup.configure_pi(directory, context=8192, port=8081, refresh=True)
+        self.assertEqual(json.loads((directory / "models.json").read_text())["providers"]["synapse"]["baseUrl"],
+                         "http://127.0.0.1:8081/v1")
+        before = (directory / "models.json").read_bytes()
+        settings_path.write_text('{"compaction": []}')
+        with self.assertRaisesRegex(ValueError, "compaction"):
+            pi_setup.configure_pi(directory, context=8192, port=8081)
+        self.assertEqual((directory / "models.json").read_bytes(), before)
+
+    def test_pi_preserves_implicit_and_explicit_startup_defaults(self):
+        for index, previous in enumerate(({}, {"defaultProvider": "existing"},
+                                          {"defaultModel": "existing-model"},
+                                          {"defaultProvider": "existing", "defaultModel": "existing-model"})):
+            directory = self.root / str(index)
+            directory.mkdir()
+            settings_path = directory / "settings.json"
+            settings_path.write_text(json.dumps(previous))
+            pi_setup.configure_pi(directory, context=8192)
+            settings = json.loads(settings_path.read_text())
+            for key in ("defaultProvider", "defaultModel", "defaultTools"):
+                self.assertEqual(settings.get(key), previous.get(key))
+
+    def test_pi_launch_check_rejects_small_or_stale_context(self):
+        directory = self.root / "agent"
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(directory)}):
+            with self.assertRaisesRegex(ValueError, "not configured"):
+                pi_setup.check_pi()
+            pi_setup.configure_pi(directory, context=16384, port=8081)
+            with mock.patch.object(pi_setup, "loaded_context", return_value=4096) as loaded:
+                with self.assertRaisesRegex(ValueError, "at least 8192"):
+                    pi_setup.check_pi()
+                loaded.assert_called_once_with(8081)
+            with mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    pi_setup.check_pi()
+            with mock.patch.object(pi_setup, "loaded_context", return_value=16384):
+                pi_setup.check_pi()
+
+    def test_pi_context_refresh_command_uses_ready_server_without_running_inference(self):
+        requested = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({"app_name": "SYNAPSE", "state": "ready", "context": 64512}).encode())
+
+            def log_message(self, *arguments):
+                pass
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        directory = self.root / "refreshed-pi"
+        try:
+            result = subprocess.run([sys.executable, "-m", "synapse_app", "--configure-pi", "--port", str(server.server_port)],
+                                    cwd=ROOT, env={**os.environ, "PI_CODING_AGENT_DIR": str(directory)},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("64512-token", result.stdout)
+            model = json.loads((directory / "models.json").read_text())["providers"]["synapse"]["models"][0]
+            self.assertEqual(model["contextWindow"], 64512)
+            self.assertEqual(requested, ["/api/v1/status"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_pi_standalone_assets_cover_all_platforms_and_extract_only_verified_files(self):
+        for system in ("win32", "linux", "darwin"):
+            for architecture in ("AMD64", "ARM64"):
+                with mock.patch.object(sys, "platform", system), \
+                        mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": architecture}):
+                    self.assertIn(pi_setup.release_asset(), pi_setup.PI_HASHES)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("pi/pi.exe", b"fixture")
+            archive.writestr("pi/resources/help.txt", b"resource")
+        body = output.getvalue()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.dict(pi_setup.PI_HASHES, {"pi-windows-x64.zip": hashlib.sha256(body).hexdigest()}), \
+                mock.patch.object(pi_setup, "download", return_value=body), \
+                mock.patch.object(pi_setup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="1.5.2\n", stderr="")):
+            executable = Path(pi_setup.install_pi(self.root))
+            self.assertEqual(executable.read_bytes(), b"fixture")
+            self.assertTrue((executable.parent / "resources/help.txt").is_file())
+        before = set(self.root.iterdir())
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.object(pi_setup, "download", return_value=b"wrong"):
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                pi_setup.install_pi(self.root)
+        self.assertEqual(set(self.root.iterdir()), before)
+
+    def test_pi_unix_archive_extraction_and_link_rejection(self):
+        def archive_body(link=False):
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode="w:gz") as archive:
+                entry = tarfile.TarInfo("pi/pi")
+                entry.mode = 0o755
+                entry.size = 7
+                archive.addfile(entry, io.BytesIO(b"fixture"))
+                if link:
+                    entry = tarfile.TarInfo("pi/link")
+                    entry.type = tarfile.SYMTYPE
+                    entry.linkname = "../../outside"
+                    archive.addfile(entry)
+            return output.getvalue()
+        for link in (False, True):
+            body = archive_body(link)
+            with mock.patch.object(sys, "platform", "linux"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.dict(pi_setup.PI_HASHES, {"pi-linux-x64.tar.gz": hashlib.sha256(body).hexdigest()}), \
+                    mock.patch.object(pi_setup, "download", return_value=body), \
+                    mock.patch.object(pi_setup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="1.5.2\n", stderr="")):
+                before = set(self.root.iterdir())
+                if link:
+                    with self.assertRaisesRegex(ValueError, "Unsafe"):
+                        pi_setup.install_pi(self.root)
+                    self.assertEqual(set(self.root.iterdir()), before)
+                else:
+                    self.assertEqual(Path(pi_setup.install_pi(self.root)).read_bytes(), b"fixture")
+
+    def test_optional_pi_offer_declines_by_default_and_reuses_existing_install(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch("builtins.input", return_value=""):
+            self.assertFalse(installer.confirm_pi())
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi.cmd"
+        executable.write_text("@echo fixture")
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(self.root / "pi-config")}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "install_pi") as install, \
+                mock.patch.object(pi_setup, "loaded_context", return_value=64512):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+            install.assert_not_called()
+            launcher = launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")
+            self.assertIn("SYNAPSE managed Pi launcher", launcher.read_text())
+            self.assertIn("--check-pi", launcher.read_text())
+            self.assertIn("synapse/local-model", launcher.read_text())
+            self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
+            models = json.loads((self.root / "pi-config/models.json").read_text())
+            self.assertEqual(models["providers"]["synapse"]["models"][0]["contextWindow"], 64512)
+
+    def test_pi_install_defers_configuration_without_a_ready_model(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_deferred_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi"
+        executable.write_text("fixture")
+        agent = self.root / "agent"
+        with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent)}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "loaded_context", side_effect=OSError("not running")):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+        self.assertFalse(agent.exists())
+        self.assertEqual(json.loads((self.root / "install.json").read_text())["pi_executable"], str(executable))
+        self.assertTrue((launcher_dir / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")).is_file())
+
+    def test_windows_pi_launcher_uses_powershell_without_changing_user_settings(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_windows_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher_dir = self.root / "bin"
+        launcher_dir.mkdir()
+        executable = self.root / "pi.cmd"
+        executable.write_text("fixture")
+        agent = self.root / "agent"
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(agent)}), \
+                mock.patch.object(installer, "require_pi_support"), \
+                mock.patch.object(pi_setup, "existing_pi", return_value=str(executable)), \
+                mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+            installer.setup_pi(self.root, launcher_dir, dict(self.receipt))
+        launcher = (launcher_dir / "synapse-pi.cmd").read_text()
+        self.assertIn("--check-pi", launcher)
+        self.assertIn('"-bash,+powershell"', launcher)
+        self.assertIn("@call ", launcher)
+        self.assertNotIn("defaultTools", json.loads((agent / "settings.json").read_text()))
+
+    def test_pi_setup_rejects_an_older_application_before_installing_pi(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_old_pi_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(installer.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stdout="--help --configure-pi", stderr="")), \
+                mock.patch.object(pi_setup, "existing_pi") as existing, \
+                mock.patch.object(pi_setup, "install_pi") as install:
+            with self.assertRaisesRegex(ValueError, "does not support this Pi integration"):
+                installer.setup_pi(self.root, self.root, dict(self.receipt))
+            existing.assert_not_called()
+            install.assert_not_called()
+
+    def test_explicit_pi_setup_failure_returns_nonzero_without_rolling_back_synapse(self):
+        prefix = self.root / "installed"
+        result = subprocess.run([sys.executable, str(ROOT / "install.py"), "--local-package", str(self.archive),
+                                 "--prefix", str(prefix), "--non-interactive", "--no-accelerated", "--with-pi"],
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not support this Pi integration", result.stderr)
+        self.assertIn("SYNAPSE remains installed", result.stderr)
+        self.assertTrue((prefix / "SYNAPSE.pyz").is_file())
+        self.assertFalse((prefix / "bin" / ("synapse-pi.cmd" if sys.platform == "win32" else "synapse-pi")).exists())
+
+    @unittest.skipUnless(os.environ.get("SYNAPSE_TEST_PI") and os.name != "nt",
+                         "Set SYNAPSE_TEST_PI to a native Pi executable to run this integration test")
+    def test_native_pi_launcher_checks_context_and_sends_a_useful_output_limit(self):
+        requests = []
+        state = {"context": 8192}
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json.dumps({"app_name": "SYNAPSE", "state": "ready", "context": state["context"]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                requests.append(request)
+                chunks = [
+                    {"id": "test", "object": "chat.completion.chunk", "created": 1, "model": "local-model",
+                     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Local reply."},
+                                  "finish_reason": None}]},
+                    {"id": "test", "object": "chat.completion.chunk", "created": 1, "model": "local-model",
+                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                body = ("".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) +
+                        "data: [DONE]\n\n").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *arguments):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            spec = importlib.util.spec_from_file_location("synapse_installer_native_pi_test", ROOT / "install.py")
+            installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installer)
+            directory = self.root / "installed"
+            launcher_dir = directory / "bin"
+            launcher_dir.mkdir(parents=True)
+            subprocess.run([sys.executable, str(ROOT / "scripts/build_synapse.py"), "--output", str(directory)],
+                           check=True, capture_output=True, text=True)
+            agent = self.root / "agent"
+            agent.mkdir()
+            (agent / "settings.json").write_text(json.dumps({"defaultProvider": "existing", "defaultModel": "existing"}))
+            env = {**os.environ, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "config"),
+                   "PI_CODING_AGENT_DIR": str(agent), "PI_OFFLINE": "1"}
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(pi_setup, "existing_pi", return_value=os.environ["SYNAPSE_TEST_PI"]), \
+                    mock.patch.object(pi_setup, "loaded_context", return_value=8192):
+                installer.setup_pi(directory, launcher_dir, dict(self.receipt))
+            pi_setup.configure_pi(agent, context=8192, port=server.server_port, refresh=True)
+            command = [str(launcher_dir / "synapse-pi"), "--offline", "--no-session", "--no-extensions",
+                       "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "Hi"]
+            result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Local reply.", result.stdout)
+            self.assertEqual(requests[0]["model"], "local-model")
+            self.assertEqual(requests[0]["max_tokens"], 1024)
+            state["context"] = 4096
+            result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("at least 8192", result.stderr)
+            self.assertEqual(len(requests), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
     def test_version_order_and_invalid_tags(self):
         versions = ["0.1.0a1", "0.1.0b1", "0.1.0rc1", "0.1.0rc2", "0.1.0", "0.2.0rc1", "1.0.0"]
         self.assertEqual(sorted(versions, key=updates.version_key), versions)
@@ -64,6 +380,273 @@ class UpdateTests(unittest.TestCase):
                 {"tag_name": "v8.0.0", "assets": []}, {"tag_name": "../bad", "assets": assets}]
         with mock.patch.object(updates, "download", return_value=json.dumps(data).encode()):
             self.assertEqual(updates.latest_release()["version"], "0.2.0rc1")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows shortcuts require WScript.Shell")
+    def test_windows_shortcuts_launch_archive_and_preserve_unrelated_shortcuts(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        folders = [self.root / "Desktop with spaces", self.root / "Programs"]
+        command = [sys.executable, str(self.archive), "--llama-server", str(self.root / "backend/llama-server.exe")]
+        installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        shortcut = folders[0] / "SYNAPSE.lnk"
+        environment = {**os.environ, "SYNAPSE_TEST_SHORTCUT": str(shortcut)}
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                                 "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SYNAPSE_TEST_SHORTCUT); "
+                                 "@{target=$s.TargetPath; arguments=$s.Arguments; description=$s.Description; icon=$s.IconLocation} | ConvertTo-Json"],
+                                env=environment, check=True, capture_output=True, text=True)
+        details = json.loads(result.stdout)
+        self.assertEqual(Path(details["target"]), Path(sys.executable))
+        self.assertEqual(details["arguments"], subprocess.list2cmdline(command[1:]))
+        self.assertEqual(details["description"], "SYNAPSE managed launcher")
+        icon = self.root / "SYNAPSE.ico"
+        self.assertEqual(details["icon"], str(icon) + ",0")
+        self.assertEqual(icon.read_bytes(), (ROOT / "synapse_app/web/icon.ico").read_bytes())
+        self.assertTrue((folders[1] / "SYNAPSE.lnk").is_file())
+        installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SYNAPSE_TEST_SHORTCUT); "
+                        "$s.Description = 'another app'; $s.Save()"], env=environment, check=True)
+        before = shortcut.read_bytes()
+        with self.assertRaises(subprocess.CalledProcessError):
+            installer.windows_integration(self.root / "bin", command, add_path=False, shortcut_dirs=folders)
+        self.assertEqual(shortcut.read_bytes(), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows PATH handling requires PowerShell")
+    def test_windows_user_path_preserves_variables_and_does_not_duplicate_entries(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        launcher = self.root / "bin"
+        command = installer.WINDOWS_PATH_VALUE + "\nGet-SynapseUserPath $env:SYNAPSE_TEST_PATH $env:SYNAPSE_TEST_BIN"
+        for previous, expected in [
+                ("", str(launcher)),
+                (r"%LOCALAPPDATA%\existing;C:\tools", rf"%LOCALAPPDATA%\existing;C:\tools;{launcher}"),
+                (str(launcher).upper() + "\\;C:\\tools", str(launcher).upper() + "\\;C:\\tools"),
+                (r"%SYNAPSE_TEST_ROOT%\bin", r"%SYNAPSE_TEST_ROOT%\bin")]:
+            environment = {**os.environ, "SYNAPSE_TEST_PATH": previous,
+                           "SYNAPSE_TEST_BIN": str(launcher), "SYNAPSE_TEST_ROOT": str(self.root)}
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                                    env=environment, check=True, capture_output=True, text=True)
+            self.assertEqual(result.stdout.strip(), expected)
+
+    def test_windows_installer_finds_adjacent_backend_and_prompts_for_missing_backend(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        backend = self.root / "llama-server.exe"
+        backend.touch()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend("llama-server", self.archive), str(backend))
+            prompt.assert_not_called()
+        folder = self.root / "backend with spaces"
+        folder.mkdir()
+        selected = folder / "llama-server.exe"
+        selected.touch()
+        backend.unlink()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+            mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch("builtins.input", side_effect=["n", "ollama.exe", f'"{folder}"']) as prompt:
+            self.assertEqual(installer.select_backend("llama-server", self.archive), str(selected))
+            self.assertEqual(prompt.call_count, 3)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend("missing", self.archive, interactive=False), "missing")
+            prompt.assert_not_called()
+
+    def test_windows_backend_auto_setup_requires_consent_and_returns_verified_path(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer, "install_windows_backend", return_value="verified/llama-server.exe") as setup:
+            for answers in (["n", ""], ["", ""]):
+                with mock.patch("builtins.input", side_effect=answers):
+                    self.assertEqual(installer.select_backend("missing", self.archive), "missing")
+                setup.assert_not_called()
+            with mock.patch("builtins.input", side_effect=["yes", "invalid", "2"]):
+                self.assertEqual(installer.select_backend("missing", self.archive), "verified/llama-server.exe")
+            setup.assert_called_once_with(self.root, "vulkan")
+            setup.reset_mock()
+            with mock.patch("builtins.input", side_effect=["y", ""]):
+                installer.select_backend("missing", self.archive)
+            setup.assert_called_once_with(self.root, "cpu")
+            setup.side_effect = OSError("network denied")
+            with mock.patch("builtins.input", side_effect=["y", "1", ""]):
+                self.assertEqual(installer.select_backend("missing", self.archive), "missing")
+
+    def test_windows_backend_download_verification_extraction_and_cleanup(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        def backend_zip(extra=None):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("bin/llama-server.exe", b"test executable")
+                archive.writestr("bin/ggml.dll", b"matching library")
+                if extra:
+                    archive.writestr(extra, b"unsafe")
+            return output.getvalue()
+        body = backend_zip()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                mock.patch.object(installer, "download", return_value=body) as fetch, \
+                mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cpu", "x64"): hashlib.sha256(body).hexdigest()}), \
+                mock.patch.object(installer.subprocess, "run", side_effect=[
+                    mock.Mock(returncode=0, stdout="", stderr=(
+                        "version: 0.7.0-dev (build 11669, commit 620d2225c)\n"
+                        "built with Clang 20.1.8 for Windows x86_64\n")),
+                    mock.Mock(returncode=0, stdout="--model --host --port", stderr="")]) as run:
+            executable = Path(installer.install_windows_backend(self.root, "cpu"))
+            self.assertEqual(executable.read_bytes(), b"test executable")
+            self.assertEqual((executable.parent / "ggml.dll").read_bytes(), b"matching library")
+            self.assertEqual(run.call_args_list[0].args[0], [str(executable), "--version"])
+            self.assertIn("/b11669/llama-b11669-bin-win-cpu-x64.zip", fetch.call_args.args[0])
+        prefix = self.root / "installed"
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(sys, "argv", ["install.py", "--local-package", str(self.archive),
+                                               "--prefix", str(prefix), "--no-accelerated", "--no-pi"]), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(installer, "install_windows_backend", return_value=str(executable)) as setup, \
+                mock.patch("builtins.input", side_effect=["y", "1"]):
+            installer.main()
+        setup.assert_called_once_with(prefix, "cpu")
+        receipt = json.loads((prefix / "install.json").read_text())
+        self.assertEqual(receipt["backend_args"], ["--llama-server", str(executable)])
+        self.assertIn(installer.windows_command([str(executable)]), (prefix / "bin/synapse.cmd").read_text())
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=str(executable)), \
+                mock.patch.object(installer, "install_windows_backend") as setup, \
+                mock.patch("builtins.input") as prompt:
+            self.assertEqual(installer.select_backend(str(executable), self.archive), str(executable))
+            prompt.assert_not_called()
+            setup.assert_not_called()
+        for content, checksum, message, output, returncode in [
+            (body, "0" * 64, "checksum", "", 1),
+            (backend_zip("../outside.txt"), None, "Unsafe", "", 1),
+            (backend_zip("bin/LLAMA-SERVER.exe"), None, "duplicate", "", 1),
+            (body, None, "startup checks", "", 1),
+            (body, None, "startup checks", "version: 0.7.0-dev (build 11668, commit 620d2225c)", 0),
+            (body, None, "startup checks", "version: 116690 (620d222)", 0)]:
+            with self.subTest(message=message), \
+                    mock.patch.object(sys, "platform", "win32"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.object(installer, "download", return_value=content), \
+                    mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {
+                        ("cpu", "x64"): checksum or hashlib.sha256(content).hexdigest()}), \
+                    mock.patch.object(installer.subprocess, "run", return_value=mock.Mock(
+                        returncode=returncode, stdout=output, stderr="missing DLL" if returncode else "")):
+                before = set(self.root.iterdir())
+                with self.assertRaisesRegex(ValueError, message):
+                    installer.install_windows_backend(self.root, "cpu")
+                self.assertEqual(set(self.root.iterdir()), before)
+
+    def test_backend_switch_can_choose_cuda_and_keeps_current_backend_on_cancel_or_failure(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        current = str(self.root / "vulkan/llama-server.exe")
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(installer.shutil, "which", return_value=current), \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True), \
+                mock.patch.object(installer, "install_windows_backend", return_value="cuda/llama-server.exe") as setup:
+            with mock.patch("builtins.input", side_effect=["n", ""]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), current)
+            setup.assert_not_called()
+            with mock.patch("builtins.input", side_effect=["y", "3"]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), "cuda/llama-server.exe")
+            setup.assert_called_once_with(self.root, "cuda-13.4")
+            setup.side_effect = ValueError("CUDA GPU unavailable")
+            with mock.patch("builtins.input", side_effect=["y", "3", ""]):
+                self.assertEqual(installer.select_backend(current, self.archive, switch=True), current)
+            with self.assertRaisesRegex(ValueError, "interactive"):
+                installer.select_backend(current, self.archive, interactive=False, switch=True)
+
+    def test_cuda_install_verifies_both_packages_and_requires_cuda_device(self):
+        spec = importlib.util.spec_from_file_location("synapse_installer_test", ROOT / "install.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        def package(entries):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                for name, body in entries.items():
+                    archive.writestr(name, body)
+            return output.getvalue()
+        backend = package({"bin/llama-server.exe": b"server", "bin/ggml-cuda.dll": b"cuda plugin"})
+        runtime = package({"runtime/cudart64_13.dll": b"runtime", "runtime/cublas64_13.dll": b"blas"})
+        for devices, runtime_hash, succeeds in [
+                ("CUDA0: NVIDIA GPU", hashlib.sha256(runtime).hexdigest(), True),
+                ("CPU: host", hashlib.sha256(runtime).hexdigest(), False),
+                ("CUDA0: NVIDIA GPU", "0" * 64, False)]:
+            with self.subTest(devices=devices, runtime_hash=runtime_hash), \
+                    mock.patch.object(sys, "platform", "win32"), \
+                    mock.patch.dict(os.environ, {"PROCESSOR_ARCHITEW6432": "AMD64"}), \
+                    mock.patch.dict(installer.WINDOWS_BACKEND_HASHES, {("cuda-13.4", "x64"): hashlib.sha256(backend).hexdigest()}), \
+                    mock.patch.dict(installer.WINDOWS_CUDA_RUNTIME_HASHES, {"x64": runtime_hash}), \
+                    mock.patch.object(installer, "download", side_effect=[backend, runtime]) as fetch, \
+                    mock.patch.object(installer.subprocess, "run", side_effect=[
+                        mock.Mock(returncode=0, stdout="version: 0.7.0-dev (build 11669, commit 620d2225c)", stderr=""),
+                        mock.Mock(returncode=0, stdout="--model --host --port", stderr=""),
+                        mock.Mock(returncode=0, stdout=devices, stderr="")]):
+                before = set(self.root.iterdir())
+                if succeeds:
+                    executable = Path(installer.install_windows_backend(self.root, "cuda-13.4"))
+                    self.assertEqual((executable.parent / "cudart64_13.dll").read_bytes(), b"runtime")
+                    self.assertEqual((executable.parent / "cublas64_13.dll").read_bytes(), b"blas")
+                    self.assertIn("llama-b11669-bin-win-cuda-13.4-x64.zip", fetch.call_args_list[0].args[0])
+                    self.assertIn("cudart-llama-bin-win-cuda-13.4-x64.zip", fetch.call_args_list[1].args[0])
+                else:
+                    with self.assertRaisesRegex(ValueError, "CUDA"):
+                        installer.install_windows_backend(self.root, "cuda-13.4")
+                    self.assertEqual(set(self.root.iterdir()), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "PowerShell bootstrap is Windows-only")
+    def test_standalone_powershell_bootstrap_downloads_source_and_forwards_arguments(self):
+        source = io.BytesIO()
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("synapse-source/install.py", "import json, sys; print(json.dumps(sys.argv[1:]))")
+        body = source.getvalue()
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *arguments):
+                pass
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            script = self.root / "install.ps1"
+            script.write_text((ROOT / "install.ps1").read_text().replace(
+                "https://api.github.com/repos/appatalks/synapse/zipball/main",
+                f"http://127.0.0.1:{server.server_port}/source.zip"))
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                     str(script), "-Prefix", str(self.root / "custom prefix"),
+                                     "-LlamaServer", str(self.root / "backend with spaces/llama-server.exe"),
+                                     "-NoPath", "-NoShortcuts", "-NonInteractive", "-WithPi", "-SwitchBackend"],
+                                    check=True, capture_output=True, text=True, timeout=20)
+            arguments = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(arguments, ["--no-accelerated", "--prefix", str(self.root / "custom prefix"),
+                                         "--llama-server", str(self.root / "backend with spaces/llama-server.exe"),
+                                         "--switch-backend",
+                                         "--no-shortcuts", "--no-path", "--non-interactive", "--with-pi"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_no_release_is_not_an_update_or_silent_network_success(self):
         with mock.patch.object(updates, "latest_release", return_value=None):
@@ -201,7 +784,11 @@ class UpdateTests(unittest.TestCase):
         package = self.root / "dist/SYNAPSE.pyz"
         prefix = self.root / "installed"
         command = [sys.executable, str(ROOT / "install.py"), "--local-package", str(package),
-                   "--prefix", str(prefix), "--no-accelerated"]
+                   "--prefix", str(prefix), "--no-accelerated", "--no-pi"]
+        if sys.platform == "win32":
+            command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                       str(ROOT / "install.ps1"), "-LocalPackage", str(package), "-Prefix", str(prefix),
+                       "-NonInteractive"]
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
         self.assertIn("installed", result.stdout)
         self.assertTrue(updates.managed_receipt(prefix / "SYNAPSE.pyz")[0])

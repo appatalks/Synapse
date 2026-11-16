@@ -21,6 +21,202 @@ Review the script first if you do not want to pipe a network script into bash.
 The app opens `http://127.0.0.1:8080`. Ctrl+C stops it and its owned backend.
 `--port 0` chooses a free port; `--no-browser` suppresses browser opening.
 
+## Windows managed install
+
+Install Python 3.10+ from [python.org](https://www.python.org/downloads/windows/).
+SYNAPSE uses **llama.cpp's `llama-server.exe`, not Ollama**. If you do not already
+have it, the installer can download and configure it after asking for your
+consent. Manual installation from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases)
+is also supported: extract the entire ZIP into a permanent folder, keeping
+the accompanying DLLs beside the executable; do not copy just the EXE.
+Model weights and drivers are never downloaded by the installer.
+
+In PowerShell, download and review the installer, then run it:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/appatalks/synapse/main/install.ps1 -OutFile install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Launch
+```
+
+`-ExecutionPolicy Bypass` applies only to that PowerShell process; it does not
+change your saved execution policy. No administrator prompt is needed. The
+installer downloads source over HTTPS, prefers a checksummed public application
+release, and labels a source fallback as a preview, like the Linux/macOS installer.
+
+The default managed installation creates:
+
+- Application: `%LOCALAPPDATA%\Programs\SYNAPSE\SYNAPSE.pyz`.
+- CLI launcher: `%LOCALAPPDATA%\Programs\SYNAPSE\bin\synapse.cmd`, added to **user** PATH.
+- **SYNAPSE** shortcuts on your Desktop and in the Start Menu.
+
+The shortcuts use the SYNAPSE logo. Rerunning the installer refreshes existing
+managed shortcuts and their icon without replacing your saved backend.
+
+Close and reopen your terminal application after installation, then run `synapse`.
+You can also use the shortcuts immediately. The console stays open while the
+app runs; Ctrl+C stops it. Use `synapse --stop` from another terminal to stop it.
+
+The installer checks `LLAMA_SERVER`/PATH and looks beside a supplied local
+package for `llama-server.exe`. If it cannot find the backend, interactive setup
+first asks **Auto-install llama-server.exe and configure SYNAPSE? [y/N]**.
+Accepting offers CPU (default), GPU via Vulkan, or **NVIDIA CUDA 13.4** for
+x64/ARM64 Windows. GPU builds require an already installed compatible driver;
+successful executable startup is not proof that a particular model will fit
+or generate faster. CUDA setup downloads both the server and matching runtime
+DLL package (about 552 MiB total on x64), verifies both pinned SHA-256 hashes,
+places the DLLs beside the server and requires `--list-devices` to detect a
+CUDA GPU. No NVIDIA driver or system CUDA toolkit is installed. An absent or
+unusable CUDA GPU fails explicitly rather than accepting CPU-only execution.
+
+Automatic setup downloads the official **b11669** package over HTTPS, verifies
+its pinned SHA-256, safely extracts the EXE and DLLs into a new private folder
+under the app directory, and checks `--version` and server CLI support before
+remembering its path in the launchers. It does not replace existing backends,
+install drivers/system runtimes, download models, or enable research patches.
+Download/verification/startup failures are explained and failed extraction is
+cleaned up; a different backend is never silently substituted.
+
+Declining (the default), or a failed automatic setup, leads to the manual EXE
+path/folder prompt. You may skip setup, but no model can load until a compatible
+backend is configured. To save or change the backend location, rerun the same installer:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -LlamaServer "C:\llama.cpp\llama-server.exe" -Launch
+```
+
+The saved path is reused by the CLI launcher and shortcuts, including after
+application updates. An installed Ollama service does not satisfy this requirement.
+
+### Switch an existing Windows backend
+
+Normal reruns preserve a working backend. Use `-SwitchBackend` to reopen the
+backend choices even when the saved executable is found:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -SwitchBackend -NoPi
+```
+
+Accept automatic setup and choose **3** for CUDA. New backend files go into a
+separate private folder; the existing Vulkan/CPU backend is never deleted or
+overwritten. Declining or skipping after a failed download keeps the saved
+backend path. Successful setup updates the CLI launcher and shortcuts.
+Restart Synapse to use the new backend; an already running app retains its old
+executable. Model settings and model weights are not changed. To return to the
+old backend, rerun with `-LlamaServer` and its original EXE path.
+
+From a checkout, `python install.py --switch-backend --no-pi` is equivalent.
+Switching requires an interactive Windows terminal and cannot be combined with
+`-NonInteractive` or `-LlamaServer`. It does not enable the Linux-only hybrid
+engine. Compare matched requests and run Auto Tune before claiming a speedup.
+
+Use `-NoShortcuts` or `-NoPath` to skip those integrations. `-NonInteractive`
+disables backend prompts and never downloads a backend. `-Prefix "C:\my folder\Synapse"` isolates the app and
+launcher under that folder without changing PATH or creating shortcuts. For a
+source checkout or offline package, the same installer supports
+`-LocalPackage .\dist\SYNAPSE.pyz`; no application download is performed. In a
+source checkout you may equivalently use `python install.py`; its Windows
+default creates the same integrations. Rerunning preserves an existing saved
+backend unless you supply a new one, and refuses unrelated launchers/shortcuts.
+
+## Windows portable app
+
+Download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases),
+verify it against the release's `SHA256SUMS`, and run:
+
+```powershell
+py -3 .\SYNAPSE.pyz --llama-server "C:\llama.cpp\llama-server.exe"
+```
+
+This runs the application **without installing it**: no Desktop shortcut,
+Start Menu entry or `synapse` command is created. Use the managed installer
+above to get those integrations and the optional consent-based backend setup.
+Neither method installs Ollama, GPU drivers or model weights, or replaces your
+existing backend.
+
+## Optional Pi coding agent
+
+The interactive installer offers Pi on Windows, Linux and macOS. Decline with
+Enter (the default), use `--no-pi` (`-NoPi` in PowerShell), or use
+`--non-interactive` to skip all optional offers. To explicitly consent:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -WithPi
+```
+
+From a Linux/macOS source checkout:
+
+```sh
+python3 install.py --with-pi --no-accelerated
+```
+
+The one-line installer also accepts `--with-pi`. This option permits Pi
+installation and adding a Synapse provider to its user configuration.
+An existing Pi on PATH or in its managed agent `bin` directory is reused,
+never upgraded or replaced. Otherwise SYNAPSE downloads a SHA-256-pinned Pi
+1.5.2 standalone release into a new private app subdirectory. x64 and ARM64
+builds are available for all three platforms. No system Node/npm installation,
+sudo, model download or background agent startup is performed.
+Pi setup requires an installed SYNAPSE release with the Pi commands. If the
+latest published release is older, the installer reports this without installing
+Pi; wait for a compatible release or explicitly build a source preview and
+install it using `--local-package`.
+
+Pi runs with your user permissions and can edit files and execute commands;
+it is not a sandbox. Install only when you trust this capability. Failures are
+reported separately; SYNAPSE remains installed when optional Pi setup fails.
+An explicit `--with-pi`/`-WithPi` request exits nonzero if Pi setup fails.
+
+Configuration uses `PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent`.
+The installer adds `synapse/local-model` at `http://127.0.0.1:8080/v1`, preserves
+other providers, startup choices, tool settings and credentials. `synapse-pi`
+selects **Synapse Local** for that invocation without changing ordinary `pi`
+startup defaults. On Windows the launcher selects PowerShell instead of Bash;
+on Unix it leaves Pi's tool selection unchanged.
+
+The Synapse Pi launcher requires a ready model with at least 8192 context tokens.
+Pi 1.5.2 reserves 4096 tokens when calculating output room, so a 4K context
+can limit responses to one token. The 8192 minimum is not a guarantee that a
+large project prompt will fit. The launcher checks the running model and refuses
+to use Pi settings that advertise more context than the loaded model has.
+If no model is ready during installation, Pi installation completes but provider
+configuration is deferred. After loading a model or changing its context, refresh:
+
+```sh
+synapse --configure-pi
+# If Synapse uses another listening port:
+synapse --configure-pi --port 8081
+```
+
+Use `--port` for the port of the running Synapse app; the launcher reads that
+port from Pi's Synapse provider. This command adds the Synapse provider if
+needed, updates its endpoint, and refreshes its model context/output limits and
+model-specific compaction reserve/recent-history defaults. It does not load
+models or run inference. It requires a running, ready Synapse model. Default
+output is capped at 4096 tokens; compaction reserves up to 8192 and keeps up to
+12000 recent tokens, scaled down for small contexts. Adjust these values in
+Pi's `models.json` and `settings.json`; `/reload` then `/model` reloads them.
+Explicit refresh resets those budgets to derived defaults, so rerun only when
+you want that reset. No cloud provider is silently selected by Synapse setup.
+
+## First-turn latency
+
+Backend startup warm-up and processing a new conversation's prompt are separate.
+A new coding session sends system instructions, tool schemas and project context;
+the backend must evaluate any uncached prefix before generating output. Follow-up
+turns can reuse matching prompt/KV state and therefore respond much faster.
+Model disk reads, GPU initialization and generated reasoning are other possible
+contributors. Fast generation alone does not identify the slow first-turn phase.
+
+SYNAPSE preserves the client's prompt-cache settings and does not send a hidden
+dummy prompt when a model loads or a conversation starts. A generic warm-up cannot
+guarantee it precomputes Pi's actual prompt, and can consume resources or evict
+useful cache state. No general pre-warmer has been qualified for production here.
+Diagnose using actual prompt-processing time, time to first streamed reasoning or
+answer token, cache reuse and decode timing, comparing a new session with its
+follow-up on the same loaded model. Do not infer a remedy from cache allocation
+size alone. Prefill/engine experiments belong in the research repository until
+measured and qualified; automatic generation behavior is unchanged.
+
 ## Context size and editor clients
 
 In **Chat -> Model Controls -> Run settings**, standard execution accepts
@@ -29,6 +225,16 @@ its allocation. This is an application limit, not a fit, speed or model-support
 guarantee. Try larger contexts progressively and check the reported loaded
 context, memory use and a real long-prompt response, not just successful loading.
 Automatic fitting may reduce GPU weight placement as context memory grows.
+
+When no Hybrid profile is installed (including standard Windows/macOS setups),
+Automatic also allows an explicit context for the next load. Editing the context
+applies it to the currently selected model. When selecting a different model,
+the displayed value is not sent until edited; Automatic instead uses that model's
+remembered Auto Tune choice or installation defaults. Checking **Allow
+experimental Hybrid acceleration** does not lock that input or install Hybrid;
+other run settings remain automatic. Unload an active model before editing.
+Installations with a real Hybrid profile retain their profile/Auto Tune context
+policy and its validation guards.
 
 Experimental hybrid execution still uses the context budget in its installation
 profile, capped by model metadata. Profiles may explicitly configure up to

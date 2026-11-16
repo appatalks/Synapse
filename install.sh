@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix="synapse-installer-") as directory:
             allowed = relative in ("install.py", "LICENSE", "scripts/build_synapse.py",
                                     "scripts/setup_acceleration.py") or (
                 len(parts) >= 2 and parts[0] == "synapse_app" and
-                Path(relative).suffix in (".py", ".mjs", ".js", ".json", ".svg", ".html", ".css"))
+                Path(relative).suffix in (".py", ".mjs", ".js", ".json", ".svg", ".ico", ".html", ".css"))
             if not allowed or name.endswith("/"):
                 continue
             destination = root / relative

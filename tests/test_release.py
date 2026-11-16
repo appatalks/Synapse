@@ -18,10 +18,12 @@ class ReleaseTests(unittest.TestCase):
     def test_version_and_public_payload(self):
         result = subprocess.run([sys.executable, str(ARCHIVE), "--version"],
                                 capture_output=True, text=True, check=True, timeout=10)
-        self.assertIn("SYNAPSE 0.2.2rc2", result.stdout)
+        self.assertIn("SYNAPSE 0.2.3rc1", result.stdout)
         with zipfile.ZipFile(ARCHIVE) as archive:
             names = archive.namelist()
         self.assertIn("synapse_app/web/monitor.mjs", names)
+        self.assertIn("synapse_app/web/icon.ico", names)
+        self.assertIn("synapse_app/pi_setup.py", names)
         self.assertIn("synapse_app/tuning.py", names)
         self.assertIn("synapse_app/settings.py", names)
         self.assertIn("synapse_app/profiles.py", names)
@@ -59,6 +61,12 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(response.status, 200)
                     self.assertIn(content, response.read())
                     connection.close()
+                    result = subprocess.run([sys.executable, str(ARCHIVE), "--configure-pi", "--port", str(port)],
+                                env={**os.environ, "PI_CODING_AGENT_DIR": str(Path(config.name) / "pi")},
+                                capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Load a model", result.stderr)
+                    self.assertFalse((Path(config.name) / "pi").exists())
             result = subprocess.run([sys.executable, str(ARCHIVE), "--stop", "--port", str(port)],
                                     capture_output=True, text=True, timeout=40)
             self.assertEqual(result.returncode, 0,

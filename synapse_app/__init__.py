@@ -1,3 +1,3 @@
 """SYNAPSE local model application."""
 
-__version__ = "0.2.2rc2"
+__version__ = "0.2.3rc1"

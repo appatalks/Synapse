@@ -51,12 +51,21 @@ export function draftControls(status, mode, type) {
   };
 }
 
-export function modelLoadPayload(settings) {
+export function contextEditable(status, mode) {
+  return mode === "standard" || (mode === "auto" && status?.hybrid_available === false);
+}
+
+export function explicitContextForModel(selectedModel, model) {
+  return selectedModel !== undefined && (selectedModel === "" || selectedModel === model.trim());
+}
+
+export function modelLoadPayload(settings, status, explicitContext = false) {
   if (settings.execution_mode === "standard") return settings;
   const payload = {
     model: settings.model, execution_mode: settings.execution_mode, kv_cache_type: settings.kv_cache_type,
     draft_type: settings.draft_type, draft_model: settings.draft_model, draft_tokens: settings.draft_tokens,
   };
+  if (contextEditable(status, settings.execution_mode) && explicitContext) payload.context = settings.context;
   if (settings.execution_mode === "hybrid") Object.assign(payload, {
     cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll,
     expert_cache_mib: settings.expert_cache_mib,
@@ -91,7 +100,7 @@ export function bindEngineSelection(toggle, select, changed) {
   return sync;
 }
 
-export function engineSettingsText(status, mode, context) {
+export function engineSettingsText(status, mode, context, explicitContext = false) {
   const running = status?.model && status.state === "ready"
     ? `Running now: ${status.hybrid_active ? "Hybrid" : "Standard (Hybrid is not active)"} at ${status.context.toLocaleString()} context tokens. ` : "";
   const maximum = status?.engine_source === "measured" && status.tuning?.goal === "maximum" &&
@@ -113,8 +122,14 @@ export function engineSettingsText(status, mode, context) {
     ? ` The installed Hybrid profile defaults to ${budget.toLocaleString()} context tokens; model limits and a matching Auto Tune result may change this.` : "";
   const manual = Number(context);
   const warning = Number.isInteger(manual) && manual >= 512
+    && !contextEditable(status, mode)
     ? ` The displayed ${manual.toLocaleString()}-token context is not requested manually in Automatic; switching modes may change it.` : "";
-  return `${running}${maximum}${policy} Automatic manages context and run settings.${profile}${warning} Use Auto Tune to measure supported contexts, or uncheck Hybrid for editable Standard-only settings.${reload}`;
+  const contextPolicy = contextEditable(status, mode)
+    ? ` Context is editable for the next load; ${mode === "auto" && !explicitContext
+      ? "the displayed value is not requested until edited; Automatic uses the model's remembered choice or defaults. "
+      : "the displayed value will be requested. "}Other run settings remain automatic. Use Auto Tune to measure supported contexts.`
+    : ` Automatic manages context and run settings.${profile}${warning} Use Auto Tune to measure supported contexts, or uncheck Hybrid for editable Standard-only settings.`;
+  return `${running}${maximum}${policy}${contextPolicy}${reload}`;
 }
 
 export function statusPollDelay(status, hidden) {

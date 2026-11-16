@@ -74,9 +74,18 @@ automatically. It prefers a checksummed release and labels a source fallback as
 a preview. You can [review the installer](install.sh) first or supply an existing
 backend with `--llama-server /path/to/llama-server`.
 
-**Windows:** download `SYNAPSE.pyz` from [Releases](https://github.com/appatalks/synapse/releases)
-and run `py SYNAPSE.pyz --llama-server C:\path\to\llama-server.exe`.
+**Windows:** use the [PowerShell installer](docs/installing.md#windows-managed-install)
+for Desktop/Start Menu shortcuts and the `synapse` command. It detects an existing
+llama.cpp backend or asks for its `llama-server.exe` location and remembers it.
+When the backend is missing, it offers to download and configure a verified
+official Windows build with your consent. Ollama is not a compatible replacement.
+Python 3.10+ and your own GGUF model are required.
+The [portable download](docs/installing.md#windows-portable-app) remains available.
 See the [installation guide](docs/installing.md) for all platforms and options.
+
+On all three platforms, setup can optionally install/configure the
+[Pi coding agent](docs/installing.md#optional-pi-coding-agent) with your consent.
+Existing Pi installations and credentials are preserved.
 
 ## Open it. Pick a model. Go.
 
