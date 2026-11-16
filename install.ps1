@@ -67,7 +67,7 @@ with urllib.request.urlopen(request, timeout=30) as response:
 if len(body) > 16 * 1024 * 1024:
     raise SystemExit('Installer source exceeds its size limit.')
 with tempfile.TemporaryDirectory(prefix='synapse-installer-') as directory:
-    root = Path(directory)
+    root = Path(directory).resolve()
     with zipfile.ZipFile(io.BytesIO(body)) as archive:
         if sum(info.file_size for info in archive.infolist()) > 32 * 1024 * 1024:
             raise SystemExit('Installer source is unexpectedly large.')

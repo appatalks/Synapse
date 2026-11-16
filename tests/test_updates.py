@@ -612,6 +612,52 @@ class UpdateTests(unittest.TestCase):
                         installer.install_windows_backend(self.root, "cuda-13.4")
                     self.assertEqual(set(self.root.iterdir()), before)
 
+    @unittest.skipIf(sys.platform == "win32", "Unix bootstrap requires bash and symlink support")
+    def test_unix_bootstrap_resolves_temp_directory_and_rejects_archive_escape(self):
+        state = {}
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(state["body"])
+
+            def log_message(self, *arguments):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            target = self.root / "real-temp"
+            target.mkdir()
+            alias = self.root / "temp-alias"
+            alias.symlink_to(target, target_is_directory=True)
+            script = self.root / "bootstrap.sh"
+            script.write_text((ROOT / "install.sh").read_text().replace(
+                "https://api.github.com/repos/appatalks/synapse/zipball/main",
+                f"http://127.0.0.1:{server.server_port}/source.zip"))
+            for name, succeeds in (("synapse-source/install.py", True),
+                                   ("synapse-source/synapse_app/../../escape.py", False)):
+                source = io.BytesIO()
+                with zipfile.ZipFile(source, "w") as archive:
+                    archive.writestr(name, "import json, sys; print(json.dumps(sys.argv[1:]))")
+                state["body"] = source.getvalue()
+                result = subprocess.run(["bash", str(script), "--non-interactive", "--with-pi"],
+                                        env={**os.environ, "TMPDIR": str(alias)},
+                                        capture_output=True, text=True, timeout=20)
+                if succeeds:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout.strip().splitlines()[-1]),
+                                     ["--non-interactive", "--with-pi"])
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Unsafe installer archive path", result.stderr)
+                    self.assertFalse((target / "escape.py").exists())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
     @unittest.skipUnless(sys.platform == "win32", "PowerShell bootstrap is Windows-only")
     def test_standalone_powershell_bootstrap_downloads_source_and_forwards_arguments(self):
         source = io.BytesIO()
