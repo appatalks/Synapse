@@ -36,6 +36,15 @@ prove native equivalence. Failed checks, differing output hashes, all samples
 and control definitions remain in the linked evidence. Rates are not quality
 rankings or fit guarantees; native Automatic selection is not hybrid execution.
 
+### Related out-of-core research
+
+[DeepSeek-V4.1-Flash-1017 GSQ-RCO IQ2_XXS](https://github.com/appatalks/unified-memory-scheduler/blob/d11c062019ae8e248baad185d62620418496f1ea/docs/research/deepseek-v41-disk-inference.md)
+ran at **6.94–7.15 decode tok/s** (native-paging medians across two cohorts
+with varying prompts) using isolated upstream llama.cpp b11870, a 4K context,
+and text-only GGUF shards on NVMe. This is a VRAMBridge research result,
+not a Synapse engine benchmark or a compatibility claim. It is not
+comparable to the 16K results above.
+
 ## Community results welcome
 
 Just add a table with your setup, model and reported tok/s, then submit a PR.

@@ -129,6 +129,13 @@ Completed native cache trials retain the backend's cumulative hit/miss
 and upload counters; these are load-level diagnostics, not pure per-token
 decode counters or a reason to choose a slower configuration.
 
+Synapse detects llama.cpp support for `--moe-cache-cpu-share` separately
+from native cache support. This is diagnostic only: Synapse does not set
+the flag or compare miss placement policies in Auto Tune. Teardown
+statistics include `cpu_misses` only when the backend reports it. Zero
+means no misses ran on the CPU in that bucket; cache activation still
+requires the GPU allocation and KV precision markers, not counters.
+
 When a qualified optional Strata component/profile is installed, Auto
 Tune also compares that model-bound provider without another user switch.
 It must confirm full routing, the bound cache, F16 and MTP before ready.
