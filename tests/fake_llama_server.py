@@ -28,6 +28,9 @@ parser.add_argument("--ubatch-size")
 parser.add_argument("--no-warmup", action="store_true")
 parser.add_argument("--load-mode", default="auto")
 parser.add_argument("--moe-cache-mib", default="0")
+supports_cpu_share = Path(__file__).stem == "llama-server-cpu-share"
+if supports_cpu_share:
+    parser.add_argument("--moe-cache-cpu-share")
 parser.add_argument("--cpu-moe", action="store_true")
 parser.add_argument("--poll")
 parser.add_argument("--no-op-offload", action="store_true")
@@ -43,7 +46,10 @@ parser.add_argument("--cache-type-v")
 parser.add_argument("--flash-attn")
 parser.add_argument("--log-verbosity")
 parser.add_argument("--jinja", action="store_true")
-args, _ = parser.parse_known_args()
+args, unknown = parser.parse_known_args()
+if (getattr(args, "moe_cache_cpu_share", None) is not None or
+        any(arg.partition("=")[0] == "--moe-cache-cpu-share" for arg in unknown)):
+    parser.error("Synapse must not pass --moe-cache-cpu-share")
 if Path(args.model).stem in ("not-a-server", "old-server"):
     print("error: invalid argument: " + ("--model" if Path(args.model).stem == "not-a-server" else "--load-mode"),
           flush=True)
@@ -87,6 +93,7 @@ print(json.dumps({
     "batch_threads": args.threads_batch,
     "load_mode": args.load_mode,
     "expert_cache_mib": args.moe_cache_mib,
+    "inherited_cache_cpu_share": os.getenv("LLAMA_ARG_MOE_CACHE_CPU_SHARE"),
     "cpu_moe": args.cpu_moe,
     "poll": args.poll,
     "no_op_offload": args.no_op_offload,
@@ -148,8 +155,12 @@ if args.log_verbosity == "4":
     print("api_keys: [fixture marker]", flush=True)
 if int(args.moe_cache_mib) > 0 and not os.getenv("VRAMBRIDGE_HYBRID_PLAN"):
     def shutdown_cache(*_):
-        print("0.123 I llama_moe_cache: ubatch <= 8: hits = 80, misses = 20, hit rate = 80.00%, uploaded = 12.50 MiB",
-              flush=True)
+        cpu = " (15 on the CPU)" if supports_cpu_share else ""
+        print(f"0.123 I llama_moe_cache: ubatch <= 8: hits = 80, misses = 20{cpu}, "
+              "hit rate = 80.00%, uploaded = 12.50 MiB", flush=True)
+        if supports_cpu_share:
+            print("0.123 I llama_moe_cache: ubatch  > 8: hits = 4, misses = 12 (0 on the CPU), "
+                  "hit rate = 25.00%, uploaded = 24.00 MiB", flush=True)
         sys.exit(0)
     signal.signal(signal.SIGTERM, shutdown_cache)
     if Path(args.model).stem == "native-cache-disabled":

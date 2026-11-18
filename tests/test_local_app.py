@@ -2208,6 +2208,41 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(flags["native_tail_skip"], "0")
         self.assertTrue(status["native_cache_verified"])
 
+    def test_legacy_native_cache_retains_counters_without_cpu_miss_count(self):
+        write_metadata(self.model, HYBRID_METADATA)
+        settings = {"model": str(self.model), "execution_mode": "standard", "expert_cache_mib": 4096}
+        capabilities = self.runtime.status()["engine_capabilities"]
+        self.assertTrue(capabilities["native_cache"])
+        self.assertFalse(capabilities["native_cache_cpu_share"])
+        status = self.load(**settings)
+        self.assertTrue(status["native_cache_verified"])
+        self.assertEqual(status["native_cache_statistics"], {})
+        self.runtime.stop()
+        stats = self.runtime.status()["native_cache_statistics"]["ubatch <= 8"]
+        self.assertEqual((stats["hits"], stats["misses"], stats["hit_rate_percent"], stats["uploaded_mib"]),
+                         (80, 20, 80.0, 12.5))
+        self.assertNotIn("cpu_misses", stats)
+
+    def test_native_cache_cpu_share_is_diagnostic_only(self):
+        write_metadata(self.model, HYBRID_METADATA)
+        backend = self.root / "llama-server-cpu-share.py"
+        shutil.copyfile(self.backend, backend)
+        self.runtime.stop(closing=True)
+        self.runtime = self.server.runtime = app.Runtime(str(backend))
+        self.assertTrue(self.runtime.status()["engine_capabilities"]["native_cache_cpu_share"])
+        with mock.patch.dict(os.environ, {"LLAMA_ARG_MOE_CACHE_CPU_SHARE": "1"}):
+            status = self.load(execution_mode="standard", expert_cache_mib=4096, moe_cache_cpu_share=0.95)
+        self.assertNotIn("--moe-cache-cpu-share", self.runtime.process.args)
+        self.assertIsNone(json.loads(status["logs"][0])["inherited_cache_cpu_share"])
+        self.assertTrue(status["native_cache_verified"])
+        self.assertEqual(status["native_cache_statistics"], {})
+        self.runtime.stop()
+        stats = self.runtime.status()["native_cache_statistics"]
+        self.assertEqual(stats["ubatch <= 8"]["cpu_misses"], 15)
+        self.assertEqual(stats["ubatch <= 8"]["misses"], 20)
+        self.assertEqual(stats["ubatch  > 8"]["cpu_misses"], 0)
+        self.assertEqual(stats["ubatch  > 8"]["uploaded_mib"], 24.0)
+
     def test_auto_tune_remembers_native_cache_winner_and_falls_back_after_allocation_failures(self):
         hardware = {"platform": "Linux", "gpus": [{"name": "NVIDIA fixture", "vram_total_bytes": 16 * 1024**3}]}
         for stem, expected in (("tuning-native-cache-fast", 15360), ("tuning-native-cache-limit", 4096),

@@ -112,7 +112,7 @@ def backend_executable(value: str) -> str | None:
 
 
 @lru_cache(maxsize=16)
-def _native_cache_help(executable: str, size: int, modified: int) -> bool:
+def _llama_help_options(executable: str, size: int, modified: int) -> frozenset[str]:
     command = ([sys.executable] if executable.lower().endswith(".py") else []) + [executable, "--help"]
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_"))}
@@ -122,20 +122,31 @@ def _native_cache_help(executable: str, size: int, modified: int) -> bool:
             result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, env=environment, timeout=3)
             output.seek(0)
             text = output.read(65536).decode("utf-8", errors="replace")
-        return result.returncode == 0 and "--moe-cache-mib" in text and "--cpu-moe" in text
+        if result.returncode == 0:
+            declarations = re.findall(r"(?m)^[ \t]*(-{1,2}[\w-]+(?:,[ \t]*-{1,2}[\w-]+)*)(?=[ \t\r]|$)", text)
+            return frozenset(option.strip() for declaration in declarations for option in declaration.split(","))
     except (OSError, subprocess.SubprocessError):
-        return False
+        pass
+    return frozenset()
 
 
-def native_cache_supported(executable: str | None) -> bool:
+def llama_help_options(executable: str | None) -> frozenset[str]:
     if executable is None:
-        return False
+        return frozenset()
     try:
         path = Path(executable).resolve(strict=True)
         info = path.stat()
-        return _native_cache_help(str(path), info.st_size, info.st_mtime_ns)
+        return _llama_help_options(str(path), info.st_size, info.st_mtime_ns)
     except OSError:
-        return False
+        return frozenset()
+
+
+NATIVE_CACHE_FLAGS = {"--cpu-moe", "--moe-cache-mib"}
+NATIVE_CACHE_CPU_SHARE_FLAG = "--moe-cache-cpu-share"
+NATIVE_CACHE_COUNTERS = re.compile(
+    r"\bllama_moe_cache: (?P<bucket>ubatch\s*[<>]=?\s*8): hits = (?P<hits>\d+), "
+    r"misses = (?P<misses>\d+)(?: \((?P<cpu_misses>\d+) on the CPU\))?, "
+    r"hit rate = (?P<hit_rate>\d+(?:\.\d+)?)%, uploaded = (?P<uploaded>\d+(?:\.\d+)?) MiB")
 
 
 BACKEND_ARGUMENT_ERROR = re.compile(
@@ -558,7 +569,9 @@ class Runtime:
         self.executable = backend_executable(executable)
         self.requested_executable = executable
         self.standard_executable = self.executable
-        self.native_cache_available = backend_kind == "llama.cpp" and native_cache_supported(self.standard_executable)
+        options = llama_help_options(self.standard_executable) if backend_kind == "llama.cpp" else frozenset()
+        self.native_cache_available = NATIVE_CACHE_FLAGS <= options
+        self.native_cache_cpu_share_available = NATIVE_CACHE_CPU_SHARE_FLAG in options
         self.hybrid_executable = backend_executable(hybrid_executable or executable) if hybrid_plan is not None else None
         if hybrid_plan is not None and not self.hybrid_executable:
             raise ValueError("The configured patched hybrid executable was not found.")
@@ -790,7 +803,9 @@ class Runtime:
                 "hybrid_active": self.hybrid_active,
                 "engine_capabilities": {"standard": True, "hybrid": self.hybrid_plan is not None,
                                         "hosted": self.hybrid_plan is not None and self.hosted_capable,
-                                        "native_cache": self.native_cache_available, "strata": self.strata.available(),
+                                        "native_cache": self.native_cache_available,
+                                        "native_cache_cpu_share": self.native_cache_cpu_share_available,
+                                        "strata": self.strata.available(),
                                         "causal": self.causal.available()},
                 "causal_active": self.causal_active,
                 "causal_verified": (self.causal_active and self.causal_mappings_verified and
@@ -802,6 +817,7 @@ class Runtime:
                 "strata_cache_mib": self.strata_cache_mib,
                 "strata_error": self.strata.error,
                 "native_cache_available": self.native_cache_available,
+                "native_cache_cpu_share_available": self.native_cache_cpu_share_available,
                 "native_cache_active": self.native_cache_requested and self.native_cache_mib > 0,
                 "native_cache_verified": self.native_cache_requested and self.native_cache_mib > 0 and self.kv_cache_verified,
                 "native_cache_mib": self.native_cache_mib,
@@ -1453,14 +1469,16 @@ class Runtime:
                                     self.error = "The provider execution marker appeared before its verification request."
                                     backend_failed = True
                         if self.native_cache_requested:
-                            counters = re.search(
-                                r"\bllama_moe_cache: (ubatch\s*[<>]=?\s*8): hits = (\d+), misses = (\d+), "
-                                r"hit rate = (\d+(?:\.\d+)?)%, uploaded = (\d+(?:\.\d+)?) MiB", line)
+                            counters = NATIVE_CACHE_COUNTERS.search(line)
                             if counters:
-                                self.native_cache_statistics[counters[1]] = {
-                                    "hits": int(counters[2]), "misses": int(counters[3]),
-                                    "hit_rate_percent": float(counters[4]), "uploaded_mib": float(counters[5]),
+                                statistics = {
+                                    "hits": int(counters["hits"]), "misses": int(counters["misses"]),
+                                    "hit_rate_percent": float(counters["hit_rate"]),
+                                    "uploaded_mib": float(counters["uploaded"]),
                                     "scope": "Cumulative backend load; <=8 includes decode and small input batches."}
+                                if counters["cpu_misses"] is not None:
+                                    statistics["cpu_misses"] = int(counters["cpu_misses"])
+                                self.native_cache_statistics[counters["bucket"]] = statistics
                             allocation = re.search(r"(\S+)\s+MoE cache size\s*=\s*([\d.]+)\s+MiB", line)
                             if allocation and not allocation[1].startswith("CPU"):
                                 amount = float(allocation[2])
