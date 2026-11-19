@@ -59,7 +59,7 @@ export function explicitContextForModel(selectedModel, model) {
   return selectedModel !== undefined && (selectedModel === "" || selectedModel === model.trim());
 }
 
-export function modelLoadPayload(settings, status, explicitContext = false) {
+export function modelLoadPayload(settings, status, explicitContext = false, explicitHybridCache = false) {
   if (settings.execution_mode === "standard") return settings;
   const payload = {
     model: settings.model, execution_mode: settings.execution_mode, kv_cache_type: settings.kv_cache_type,
@@ -68,8 +68,10 @@ export function modelLoadPayload(settings, status, explicitContext = false) {
   if (contextEditable(status, settings.execution_mode) && explicitContext) payload.context = settings.context;
   if (settings.execution_mode === "hybrid") Object.assign(payload, {
     cpu_threads: settings.cpu_threads, batch_threads: settings.batch_threads, cpu_poll: settings.cpu_poll,
-    expert_cache_mib: settings.expert_cache_mib,
   });
+  if (settings.execution_mode === "hybrid" && explicitHybridCache) {
+    payload.expert_cache_mib = settings.expert_cache_mib;
+  }
   if (settings.execution_mode === "hybrid" && settings.hybrid_variant !== undefined) {
     payload.hybrid_variant = settings.hybrid_variant;
   }
@@ -191,6 +193,7 @@ export class ModelPrecheck {
     Object.assign(this, { input, button, output, request, changed });
     this.serial = 0;
     this.busy = false;
+    this.result = null;
     button.addEventListener("click", () => this.check());
     input.addEventListener("input", () => this.invalidate());
     input.addEventListener("change", () => this.check());
@@ -199,6 +202,7 @@ export class ModelPrecheck {
   invalidate() {
     this.serial += 1;
     this.busy = false;
+    this.result = null;
     this.output.textContent = "Model path changed. Check hybrid eligibility for the selected file.";
     this.changed();
   }
@@ -206,6 +210,7 @@ export class ModelPrecheck {
   async check() {
     const model = this.input.value.trim(), serial = ++this.serial;
     this.busy = false;
+    this.result = null;
     if (!model) {
       this.output.textContent = "Enter a local GGUF path to check hybrid eligibility.";
       this.changed();
@@ -216,7 +221,10 @@ export class ModelPrecheck {
     this.changed();
     try {
       const data = await this.request("/api/v1/model/precheck", { model });
-      if (serial === this.serial && model === this.input.value.trim()) this.output.textContent = precheckText(data);
+      if (serial === this.serial && model === this.input.value.trim()) {
+        this.result = { ...data, model };
+        this.output.textContent = precheckText(data);
+      }
     } catch (error) {
       if (serial === this.serial && model === this.input.value.trim()) {
         this.output.textContent = `Pre-check failed: ${error.message}`;

@@ -21,6 +21,7 @@ let statusTimer = null;
 let statusPolling = false;
 let standardSettings = null;
 let autoContextModel;
+let hybridCacheModel;
 let libraryTimer = null;
 let libraryBusy = false;
 const manualFields = ["context", "placement", "cpu-threads", "batch-threads", "cpu-poll",
@@ -33,9 +34,16 @@ el("context").addEventListener("input", () => {
   autoContextModel = el("model").value.trim();
   controls();
 });
+el("expert-cache").addEventListener("input", () => {
+  hybridCacheModel = el("model").value.trim();
+});
 
 function hasExplicitContext() {
   return explicitContextForModel(autoContextModel, el("model").value);
+}
+
+function hasExplicitHybridCache() {
+  return hybridCacheModel === el("model").value.trim();
 }
 
 function notice(message = "") {
@@ -57,6 +65,7 @@ async function request(path, body) {
 }
 
 function controls() {
+  if (hybridCacheModel !== el("model").value.trim()) hybridCacheModel = undefined;
   const tuning = !!status?.tuning?.active;
   const active = tuning || (status && ["loading", "ready", "stopping"].includes(status.state));
   el("load").disabled = !status?.backend_available || active || actionPending || !!controller;
@@ -107,11 +116,19 @@ function controls() {
     el("op-offload-min-batch").disabled = true;
   }
   if (selectedMode === "hybrid") {
+    if (!active) {
+      const profile = modelPrecheck.result?.model === el("model").value.trim()
+        ? modelPrecheck.result.required_hybrid : null;
+      el("context").value = String(profile?.context ?? status?.hybrid_context_budget ?? status?.hybrid_context ?? "");
+      if (!hasExplicitHybridCache()) el("expert-cache").value = profile ? String(profile.cache_mib) : "";
+    }
     for (const id of ["placement", "context", "load-mode", "fit-target", "host-op-offload", "op-offload-min-batch"]) {
       el(id).disabled = true;
     }
     el("expert-cache").disabled = active || actionPending || !status?.hybrid_generic;
   }
+  el("expert-cache").required = selectedMode !== "hybrid" || hasExplicitHybridCache();
+  el("expert-cache").placeholder = selectedMode === "hybrid" ? "Installed profile (check eligibility)" : "";
   el("placement").querySelector('option[value="cpu"]').disabled =
     status?.backend_kind === "ik_llama.cpp" || selectedMode !== "standard";
 }
@@ -194,7 +211,10 @@ function renderStatus() {
       restored.model === status.saved_model_settings.model && restored.execution_mode === "auto") {
     autoContextModel = restored.model;
   }
-  if (restored) hybridVariant = restored.hybrid_variant || "auto";
+  if (restored) {
+    hybridVariant = restored.hybrid_variant || "auto";
+    hybridCacheModel = restored.execution_mode === "hybrid" ? restored.model?.trim() : undefined;
+  }
   settingsInitialized = true;
   if (el("model").value !== previousModel) modelPrecheck.invalidate();
   el("backend-help").hidden = status.backend_available;
@@ -529,6 +549,7 @@ function engineChanged(previousMode) {
       fields: Object.fromEntries(manualFields.map((id) => [id, el(id).value])) };
   }
   hybridVariant = "auto";
+  hybridCacheModel = undefined;
   if (el("draft-type").value !== "none") {
     notice("Changing the engine turns speculative decoding off. Select a compatible draft again before loading.");
   }
@@ -553,6 +574,7 @@ function engineChanged(previousMode) {
     el("context").value = context;
   }
   controls();
+  if (el("execution-mode").value === "hybrid") modelPrecheck.check();
 }
 
 el("draft-type").addEventListener("change", () => {
@@ -660,7 +682,7 @@ el("load-form").addEventListener("submit", async (event) => {
         ? el("draft-model").value.trim() || null : null,
       draft_tokens: Number(el("draft-tokens").value),
     };
-    const payload = modelLoadPayload(settings, status, hasExplicitContext());
+    const payload = modelLoadPayload(settings, status, hasExplicitContext(), hasExplicitHybridCache());
     status = await request("/api/v1/model/load", payload);
     if (hasExplicitContext()) autoContextModel = settings.model.trim();
     clearChat();

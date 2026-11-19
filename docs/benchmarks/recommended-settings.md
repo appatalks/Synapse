@@ -70,9 +70,14 @@ the numbers into a different profile.
 3. **Use Require Hybrid only for a controlled comparison or troubleshooting.**
    Verify the *active* engine, context, and expert cache after loading. If the
    form shows values different from the model's pre-check, don't assume they
-   will be corrected on load. In 0.2.5rc1 the form can submit a general cache
-   size and use the shared default context instead of the model's Hybrid
-   profile; a rejected load leaves the prior saved settings in place.
+   will be corrected on older builds. Starting with 0.2.6rc2, Require Hybrid uses the installed
+   profile's context rather than the shared context default, and inherits the
+   selected model's expert-cache budget unless you explicitly edit it.
+   Pre-check displays that model's budget; changing models clears an unsaved
+   cache override. Saved manual Hybrid settings retain their explicit cache
+   for the same model. In older builds, including 0.2.5rc1, the form can submit
+   a general cache size and the shared context instead; a rejected load leaves
+   the prior saved settings in place.
 4. **Compare like with like.** Keep the GGUF, prompt, occupied context,
    output budget, and reasoning setting fixed. Record first-token latency
    separately for fresh and cached prompts, and use backend decode tok/s for

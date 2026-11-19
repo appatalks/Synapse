@@ -1063,7 +1063,7 @@ class Runtime:
                 metadata = model_metadata(model)
             except (OSError, ValueError) as exc:
                 raise AppError(400, f"Cannot select an execution profile: {exc}") from exc
-        if not hy4 and self.preferred_context is not None and "context" not in data:
+        if not hy4 and mode in ("auto", "standard") and self.preferred_context is not None and "context" not in data:
             try:
                 metadata = metadata or model_metadata(model)
                 limit = metadata.get(metadata["general.architecture"] + ".context_length", MAX_CONTEXT)

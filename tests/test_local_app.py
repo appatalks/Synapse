@@ -410,6 +410,27 @@ class LocalAppTests(unittest.TestCase):
         self.assertTrue(all(trial["settings"]["context"] == 131072 for trial in report["trials"]))
         self.assertEqual(self.runtime.status()["context"], 131072)
 
+    def test_require_hybrid_uses_profile_context_instead_of_shared_default(self):
+        self.hybrid_runtime(hybrid_generic=True, hybrid_context=2048, hybrid_cache_mib=64,
+                            hybrid_generic_cache_mib=32)
+        self.runtime.preferred_context = 4096
+        for metadata, cache in ((HYBRID_METADATA, 64), (MTP_METADATA, 32)):
+            with self.subTest(architecture=metadata["general.architecture"]):
+                write_metadata(self.model, metadata)
+                expected = self.precheck()["required_hybrid"]
+                state = self.load(execution_mode="hybrid")
+                self.assertEqual(state["context"], expected["context"])
+                self.assertEqual(state["context"], 2048)
+                self.assertEqual(state["expert_cache_mib"], cache)
+                self.assertTrue(state["hybrid_verified"])
+                self.assertEqual(self.runtime.preferred_context, 4096)
+                self.runtime.stop()
+                code, _, _ = self.request("POST", "/api/v1/model/load",
+                                         {"model": str(self.model), "execution_mode": "hybrid", "context": 4096})
+                self.assertEqual(code, 400)
+        self.assertEqual(self.load(execution_mode="auto")["context"], 4096)
+        self.assertFalse(self.runtime.status()["hybrid_active"])
+
     @unittest.skipUnless(sys.platform == "linux", "Strata qualification is Linux-only.")
     def test_strata_auto_tune_verifies_remembers_and_reloads_the_provider(self):
         model = self.root / "tuning-strata-fast.gguf"
