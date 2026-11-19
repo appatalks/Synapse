@@ -4,6 +4,9 @@ This guide combines public model discovery with SYNAPSE text-generation
 measurements. A popular repository is a useful candidate source, not a
 compatibility certificate or a quality ranking.
 
+For benchmark-backed run settings on the reference machine, see
+[Recommended settings by model](recommended-settings.md).
+
 ## First batch: small through large
 
 The October 20, 2026 UTC discovery batch selects four public GGUFs within a

@@ -1,7 +1,7 @@
 # SYNAPSE benchmark results
 
 One table per hardware setup. Model links open the measurements and limitations.
-[Model-choice guide](model-guide.md) · [Contribute results by PR](CONTRIBUTING.md) · [Simple table template](TEMPLATE.md)
+[Recommended settings by model](recommended-settings.md) · [Model-choice guide](model-guide.md) · [Contribute results by PR](CONTRIBUTING.md) · [Simple table template](TEMPLATE.md)
 
 ## Ryzen 9 9950X + RTX 5070 Ti 16GB
 

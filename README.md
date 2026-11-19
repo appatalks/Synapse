@@ -37,6 +37,7 @@ automatic placement, Qwen3.8 uses CPU experts, and GLM uses the fastest tested
 non-hybrid control. GLM used a 6 GiB cache; its 8 GiB attempt did not fit.
 These are not universal speed or quality guarantees: some strict reference
 comparisons and an earlier answer check failed. See the
+[recommended settings by model](docs/benchmarks/recommended-settings.md),
 [benchmark details](docs/benchmarks/README.md), [model guide](docs/benchmarks/model-guide.md),
 [compatibility limits](docs/compatibility.md) and
 [technical white paper](docs/whitepaper/synapse-whitepaper.pdf).
