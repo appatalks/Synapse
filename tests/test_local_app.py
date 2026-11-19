@@ -97,6 +97,89 @@ class LocalAppTests(unittest.TestCase):
         self.runtime.strata = app._strata.Installation(profile)
         self.runtime.native_cache_available = False
 
+    def configure_hy4(self):
+        executable = self.root / "llama-server-hy4.py"
+        shutil.copyfile(self.backend, executable)
+        runtime = app.Runtime(str(self.backend), hy4_executable=executable)
+        self.addCleanup(runtime.stop, closing=True)
+        return runtime, executable
+
+    @unittest.skipUnless(sys.platform == "linux", "Optional Hy4 CUDA backend is Linux-only.")
+    def test_hy4_opt_in_routes_by_architecture_and_preserves_legacy_commands(self):
+        runtime, executable = self.configure_hy4()
+        model = self.root / "arbitrary.gguf"
+        write_metadata(model, {"general.architecture": "hy_v4_flash"})
+        self.assertEqual(runtime.precheck({"model": str(model)})["automatic"]["execution_profile"], "hy4-standard")
+        for extra in ({"execution_mode": "hybrid"}, {"placement": "cpu"}, {"context": 32768},
+                      {"fit_target_mib": 1024}, {"expert_cache_mib": 4096}):
+            with self.assertRaises(app.AppError):
+                runtime.load({"model": str(model), **extra})
+        runtime.load({"model": str(model), "execution_mode": "auto"})
+        deadline = time.monotonic() + 6
+        while runtime.status()["state"] == "loading" and time.monotonic() < deadline:
+            time.sleep(.025)
+        status = runtime.status()
+        self.assertEqual(status["state"], "ready", status["logs"])
+        self.assertTrue(status["hy4_verified"])
+        self.assertEqual(status["context"], 16384)
+        self.assertEqual(status["fit_target_mib"], 2048)
+        self.assertEqual(runtime.executable, str(executable))
+        runtime.stop()
+        self.assertEqual(runtime.executable, str(self.backend))
+        for architecture in ("qwen3moe", "qwen4exp", "gpt-oss"):
+            # A misleading filename must not affect engine selection.
+            legacy = self.root / f"Hy4-{architecture}.gguf"
+            write_metadata(legacy, {"general.architecture": architecture})
+            commands = []
+            for candidate in (self.runtime, runtime):
+                candidate.load({"model": str(legacy), "context": 8192})
+                command = candidate.process.args.copy()
+                for flag in ("--api-key", "--port"):
+                    command[command.index(flag) + 1] = "[dynamic]"
+                commands.append(command)
+                self.assertFalse(candidate.status()["hy4_active"])
+                candidate.stop()
+            self.assertEqual(*commands)
+
+    @unittest.skipUnless(sys.platform == "linux", "Optional Hy4 CUDA backend is Linux-only.")
+    def test_hy4_missing_engram_marker_fails_without_fallback(self):
+        runtime, executable = self.configure_hy4()
+        model = self.root / "hy4-missing-engram.gguf"
+        write_metadata(model, {"general.architecture": "hy_v4_flash"})
+        with mock.patch.object(app, "SPECULATION_VERIFICATION_TIMEOUT", .25):
+            runtime.load({"model": str(model)})
+            deadline = time.monotonic() + 6
+            while runtime.status()["state"] in ("loading", "stopping") and time.monotonic() < deadline:
+                time.sleep(.025)
+        status = runtime.status()
+        self.assertEqual(status["state"], "error", status["logs"])
+        self.assertIn("engram", status["error"])
+        self.assertFalse(status["hy4_verified"])
+        self.assertEqual(runtime.executable, str(executable))
+
+    @unittest.skipUnless(sys.platform == "linux", "Optional Hy4 CUDA backend is Linux-only.")
+    def test_hy4_auto_tune_remembers_the_choice_for_only_its_backend_identity(self):
+        _, executable = self.configure_hy4()
+        self.runtime.hy4_executable = str(executable)
+        model = self.root / "tuning-hy4.gguf"
+        write_metadata(model, {"general.architecture": "hy_v4_flash", "hy_v4_flash.context_length": 1048576})
+        code, _, body = self.request("POST", "/api/v1/tuning/start",
+                                     {"model": str(model), "confirm": True})
+        self.assertEqual(code, 202, body)
+        report = self.wait_tuning("completed")
+        settings = [trial["settings"] for trial in report["trials"]]
+        self.assertEqual([entry["context"] for entry in settings], [8192, 16384])
+        self.assertTrue(all(entry["fit_target_mib"] == 2048 and entry["execution_mode"] == "standard"
+                            for entry in settings))
+        machine = self.server._machine()
+        self.assertIsNone(self.server.choices.lookup(model, "f16", machine))
+        self.assertIsNotNone(self.server.choices.lookup(model, "f16", self.runtime.hy4_machine(machine)))
+        self.runtime.stop()
+        self.runtime.load({"model": str(model), "execution_mode": "auto"})
+        status = self.wait_state("ready")
+        self.assertTrue(status["hy4_verified"])
+        self.assertEqual(status["engine_source"], "measured")
+
     def configure_causal(self, model):
         write_metadata(model, {"general.architecture": app._causal.ARCHITECTURE,
                                f"{app._causal.ARCHITECTURE}.context_length": 131072})

@@ -173,6 +173,7 @@ export function bindReasoningEffort(primary, quick, invalid) {
 export function precheckText(data) {
   const automatic = data.automatic, hybrid = data.required_hybrid;
   const defaultLabel = automatic.execution_profile === "standard" ? "Standard backend" :
+    automatic.execution_profile === "hy4-standard" ? "Hy4 compatibility backend (verification required)" :
     automatic.execution_profile === "provider-candidate" ? "Registered provider (verification required)" : "Hybrid candidate";
   const lines = [
     `Hybrid eligibility: ${data.hybrid_candidate ? "Candidate - runtime unverified" : "Not eligible with this installation"}.`,

@@ -47,6 +47,7 @@ the numbers into a different profile.
 | GLM-4.7-Flash Q4_K_M | Hybrid direct, 16K, 8,192 MiB | 87.45 vs. 64.87 | **Compared.** Same build and full routed-layer coverage. [Report](glm/glm47-flash-q4-km-hybrid.md) |
 | GPT-OSS-20B MXFP4 | Standard, 16K | 207.08 vs. 143.99 Hybrid | **Compared.** Standard also won on the same patched build. [Report](gpt-oss/gpt-oss20b-hybrid-screen.md) |
 | GPT-OSS-120B MXFP4 | Trained Hybrid profile, 16K, 12,000 MiB | 47.89–48.92 | **Experimental.** Range of three Hybrid block medians; the model-bound plan and quality limits matter. [Report](gpt-oss/upstream-pr29887.md) |
+| Hy4 Flash Q3_K | Automatic with the optional CUDA backend, 16K, 16/16 threads, 2,048 MiB fit reserve | 7.63–13.79 | **Experimental.** Two routed requests, not medians. 8K with 8/16 threads was slightly faster in the coding screen; 16K leaves more headroom for Pi. [Report](hy4/hy4-flash-q3-k.md) |
 | LFM2 1.2B Q8_0 | Automatic (native), 16K | 486.55 | **Baseline.** Integer and AST checks failed. [Report][matrix] |
 | LFM2.5-1.2B-Instruct Q4_K_M | Standard, 16K | 660.30 | **Baseline.** No routed-MoE descriptor; integer and AST checks failed. [Report](lfm/lfm25-12b-q4-km.json) |
 | Mistral Nemo 12B Instruct Q4_K_M | Native; 16K was the minimum fit tested, 8 threads | 89.71 | **Baseline.** Synthetic `llama-bench`, not a Synapse chat rate. [Report](mistral/mistral-nemo-12b-q4-km.json) |

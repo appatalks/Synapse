@@ -36,6 +36,15 @@ prove native equivalence. Failed checks, differing output hashes, all samples
 and control definitions remain in the linked evidence. Rates are not quality
 rankings or fit guarantees; native Automatic selection is not hybrid execution.
 
+### Optional Hy4 Flash backend
+
+[Hy4 Flash Q3_K](hy4/hy4-flash-q3-k.md) ran through a separate CUDA backend
+with automatic CPU/GPU placement. At 16K allocated context, it measured
+**13.79 tok/s** on a short arithmetic request and **7.63 tok/s** on a
+1,787-token code prompt; both answered correctly. These are single-request
+checks, not three-request medians. The pinned standard backend could not load
+this GGUF, so there is no control rate or speedup comparison.
+
 ### Related out-of-core research
 
 [DeepSeek-V4.1-Flash-1017 GSQ-RCO IQ2_XXS](https://github.com/appatalks/unified-memory-scheduler/blob/d11c062019ae8e248baad185d62620418496f1ea/docs/research/deepseek-v41-disk-inference.md)
