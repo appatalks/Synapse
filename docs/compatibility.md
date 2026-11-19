@@ -16,6 +16,15 @@ The [read-only pre-check](application_notes.md#hybrid-eligibility-pre-check)
 explains metadata/profile eligibility and Automatic selection without loading
 weights. It is not a kernel, fit, performance or quality qualification.
 
+## Optional Hy4 Flash compatibility
+
+[Hy4 Flash Q3_K](benchmarks/hy4/hy4-flash-q3-k.md) passed text generation
+checks at 16K on Linux with the separate
+[Hy4 CUDA backend](installing.md#optional-hy4-flash-backend-linuxcuda).
+The installer-pinned backend rejected its Engram tensor format. The
+opt-in route leaves other models' backend selection unchanged and is not
+a Hybrid, vision or near-capacity qualification.
+
 ## Modular execution profiles
 
 SYNAPSE bundles a declarative catalog in

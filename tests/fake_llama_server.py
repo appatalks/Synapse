@@ -27,6 +27,8 @@ parser.add_argument("--threads-batch")
 parser.add_argument("--ubatch-size")
 parser.add_argument("--no-warmup", action="store_true")
 parser.add_argument("--load-mode", default="auto")
+if Path(__file__).stem == "llama-server-hy4":
+    parser.add_argument("--lazy-mode")
 parser.add_argument("--moe-cache-mib", default="0")
 supports_cpu_share = Path(__file__).stem == "llama-server-cpu-share"
 if supports_cpu_share:
@@ -82,6 +84,11 @@ else:
     time.sleep(0.15)
 if Path(args.model).stem == "gpu-fail":
     print("ggml_cuda_init: failed to initialize CUDA: test driver unavailable", flush=True)
+if getattr(args, "lazy_mode", None) == "on":
+    if args.load_mode == "mmap" and Path(args.model).stem != "hy4-missing-engram":
+        print("add: tensor per_layer_token_embd.weight (size = 60425 MiB) lazy read enabled", flush=True)
+    print("load_tensors: CUDA0 model buffer size = 11350.28 MiB", flush=True)
+    print(f"srv: initializing, n_slots = 1, n_ctx_slot = {args.ctx_size}", flush=True)
 print(json.dumps({
     "pid": os.getpid(),
     "gpu_layers": args.n_gpu_layers,

@@ -20,6 +20,9 @@ from . import profiles
 
 
 LOG = logging.getLogger("synapse.tuning")
+HY4_ARCHITECTURE = "hy_v4_flash"
+HY4_CONTEXTS = (8192, 16384)
+HY4_FIT_MIB = 2048
 LOAD_FIELDS = ("model", "execution_mode", "context", "placement", "cpu_threads", "batch_threads",
                "load_mode", "expert_cache_mib", "fit_target_mib", "host_op_offload", "cpu_poll",
                "op_offload_min_batch", "kv_cache_type", "draft_model", "draft_type", "draft_tokens",
@@ -294,10 +297,19 @@ class AutoTuner:
             raise RuntimeError("Wait for the current model operation or chat to finish before tuning.")
         metadata = self.metadata(Path(model))
         architecture = metadata.get("general.architecture")
+        hy4 = architecture == HY4_ARCHITECTURE and bool(getattr(runtime, "hy4_executable", None))
         limit = metadata.get(f"{architecture}.context_length", self.maximum)
         if type(limit) is not int or limit < 512:
             raise ValueError("The model has no usable context limit.")
         target_context = data.get("context", getattr(runtime, "preferred_context", None))
+        if hy4:
+            if placement != "auto" or cache != "f16" or hybrid is True:
+                raise ValueError("Hy4 Auto Tune requires automatic placement and F16 KV without Hybrid.")
+            if "context" not in data:
+                target_context = None
+            elif type(target_context) is not int or not HY4_CONTEXTS[0] <= target_context <= HY4_CONTEXTS[-1]:
+                raise ValueError("Hy4 Auto Tune supports context from 8192 through 16384.")
+            hybrid = False
         if target_context is not None:
             if type(target_context) is not int or not 512 <= target_context <= self.maximum:
                 raise ValueError("Requested tuning context is outside the supported range.")
@@ -314,10 +326,10 @@ class AutoTuner:
         if available < min(4 * 1024 ** 3, total // 10):
             raise RuntimeError("Insufficient available RAM safety reserve. Free memory before starting Auto Tune.")
         hardware = self.hardware()
-        cache_banks = native_cache_banks(
+        cache_banks = [] if hy4 else native_cache_banks(
             hardware, supported=current.get("native_cache_available", False),
             compatible=self.compatible(metadata), placement=placement, kv_cache_type=cache)
-        strata = (data.get("include_hybrid") is not False and self.compatible(metadata) and
+        strata = (not hy4 and data.get("include_hybrid") is not False and self.compatible(metadata) and
                   runtime.strata.eligible(model, hardware, placement, cache) and
                   (target_context is None or target_context <= runtime.strata.data["maximum_context"]))
         maximum = min(limit, self.maximum, 32768 if goal == "balanced" else self.maximum)
@@ -326,8 +338,10 @@ class AutoTuner:
             contexts.append(maximum)
         if target_context is not None:
             contexts = [target_context]
+        elif hy4:
+            contexts = list(HY4_CONTEXTS)
         causal = False
-        if (runtime.causal.data is not None and data.get("include_hybrid") is not False and
+        if (not hy4 and runtime.causal.data is not None and data.get("include_hybrid") is not False and
                 placement == "auto" and cache == "f16"):
             machine = self.machine() if self.machine is not None else None
             causal = runtime.causal.eligible(model, metadata, machine, min(contexts[-1], 131072))
@@ -491,11 +505,12 @@ class AutoTuner:
         done = False
         thread.start()
         try:
+            hy4 = getattr(runtime, "hy4_active", False)
             connection.request("POST", "/v1/chat/completions", json.dumps({
                 "model": "local-model", "messages": [{"role": "user", "content": prompt}],
-                "stream": True, "max_tokens": 128, "temperature": 0, "seed": 42, "cache_prompt": False,
+                "stream": True, "max_tokens": 384 if hy4 else 128, "temperature": 0, "seed": 42, "cache_prompt": False,
                 "chat_template_kwargs": {"enable_thinking": False}, "stream_options": {"include_usage": True},
-                **({"reasoning_effort": "low"} if runtime.backend_kind == "llama.cpp" else {}),
+                **({"reasoning_effort": "low"} if runtime.backend_kind == "llama.cpp" and not hy4 else {}),
             }), {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
             response = connection.getresponse()
             if response.status != 200:
@@ -622,10 +637,12 @@ class AutoTuner:
             return candidate["decode_tokens_per_second"] >= incumbent["decode_tokens_per_second"] * 1.05
         return candidate["request_seconds"] <= incumbent["request_seconds"] * 0.95
 
-    def _remember(self, model: str, selected: dict, standard: dict, goal: str) -> bool:
+    def _remember(self, model: str, selected: dict, standard: dict, goal: str, *, hy4: bool = False) -> bool:
         machine = self.machine() if self.machine is not None else None
         if self.choices is None or machine is None:
             return False
+        if hy4:
+            machine = self.runtime().hy4_machine(machine)
         settings = {key: selected["settings"][key] for key in CHOICE_FIELDS}
         identifier = profiles.identify(settings)
         if identifier is None:
@@ -676,11 +693,14 @@ class AutoTuner:
         final_state = "completed"
         error = None
         try:
+            hy4 = metadata.get("general.architecture") == HY4_ARCHITECTURE and bool(getattr(runtime, "hy4_executable", None))
             for context in contexts:
                 settings = {**profiles.settings("standard-cpu" if placement == "cpu" else "standard-auto"),
                             "model": model, "context": context, "cpu_threads": min(8, self.cpu_threads()),
                             "batch_threads": min(16, self.cpu_count()), "fit_target_mib": 1024,
                             "kv_cache_type": cache, "expert_cache_mib": 0}
+                if hy4:
+                    settings.update(cpu_threads=min(16, self.cpu_count()), fit_target_mib=HY4_FIT_MIB)
                 trial = self._trial(runtime, settings)
                 if not trial["capacity_passed"] and causal and context <= 131072:
                     trial = self._trial(runtime, {**settings, **profiles.settings("causal-single-token")})
@@ -768,7 +788,7 @@ class AutoTuner:
                 if best_hybrid is not None and self._better(best_hybrid, selected, goal):
                     selected = best_hybrid
             if not standard_only:
-                remembered = self._remember(model, selected, standard, goal)
+                remembered = self._remember(model, selected, standard, goal, hy4=hy4)
         except Cancelled as exc:
             final_state, error = "cancelled", str(exc)
             selected = None

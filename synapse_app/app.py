@@ -142,6 +142,8 @@ def llama_help_options(executable: str | None) -> frozenset[str]:
 
 
 NATIVE_CACHE_FLAGS = {"--cpu-moe", "--moe-cache-mib"}
+HY4_FLAGS = {"--lazy-mode", "--load-mode", "--fit-target", "--jinja"}
+HY4_MARKERS = {"engram", "cuda", "context"}
 NATIVE_CACHE_CPU_SHARE_FLAG = "--moe-cache-cpu-share"
 NATIVE_CACHE_COUNTERS = re.compile(
     r"\bllama_moe_cache: (?P<bucket>ubatch\s*[<>]=?\s*8): hits = (?P<hits>\d+), "
@@ -484,7 +486,7 @@ class Runtime:
                  hybrid_generic_cache_mib: int | None = None, hybrid_generic_transfer: str | None = None,
                  hybrid_hosted: bool = False, settings_store: Path | None = None,
                  strata_profile: Path | None = None, causal_profile: Path | None = None,
-                 default_context: int | None = None):
+                 default_context: int | None = None, hy4_executable: Path | None = None):
         if backend_kind not in ("llama.cpp", "ik_llama.cpp"):
             raise ValueError("Unsupported backend kind.")
         if (hybrid_plan is None) != (hybrid_cuda_plugin is None):
@@ -569,6 +571,18 @@ class Runtime:
         self.executable = backend_executable(executable)
         self.requested_executable = executable
         self.standard_executable = self.executable
+        self.hy4_executable = None
+        self.hy4_active = False
+        self.hy4_markers: set[str] = set()
+        if hy4_executable is not None:
+            if sys.platform != "linux" or backend_kind != "llama.cpp":
+                raise ValueError("The optional Hy4 backend requires Linux/CUDA and the llama.cpp adapter.")
+            executable_path = backend_executable(str(hy4_executable.expanduser().resolve()))
+            if (not executable_path or
+                    (self.standard_executable and Path(executable_path).samefile(self.standard_executable)) or
+                    not HY4_FLAGS <= llama_help_options(executable_path)):
+                raise ValueError("--hy4-llama-server requires a separate Hy4-capable llama-server build.")
+            self.hy4_executable = executable_path
         options = llama_help_options(self.standard_executable) if backend_kind == "llama.cpp" else frozenset()
         self.native_cache_available = NATIVE_CACHE_FLAGS <= options
         self.native_cache_cpu_share_available = NATIVE_CACHE_CPU_SHARE_FLAG in options
@@ -786,7 +800,8 @@ class Runtime:
                 "hybrid_generic": self.hybrid_generic,
                 "hybrid_initialization": "auto" if self.hybrid_plan == "auto" else "trained",
                 "selection_reason": self.selection_reason,
-                "execution_profile": ("experimental-causal-single-token" if self.causal_active else
+                "execution_profile": ("hy4-standard" if self.hy4_active else
+                                      "experimental-causal-single-token" if self.causal_active else
                                       "experimental-strata-mtp" if self.strata_active else
                                       f"experimental-hybrid-{self.active_hybrid_transfer}" if self.hybrid_active else "standard"),
                 "execution_profile_id": _profiles.identify({
@@ -806,7 +821,9 @@ class Runtime:
                                         "native_cache": self.native_cache_available,
                                         "native_cache_cpu_share": self.native_cache_cpu_share_available,
                                         "strata": self.strata.available(),
-                                        "causal": self.causal.available()},
+                                        "causal": self.causal.available(), "hy4": self.hy4_executable is not None},
+                "hy4_active": self.hy4_active,
+                "hy4_verified": self.hy4_active and HY4_MARKERS <= self.hy4_markers,
                 "causal_active": self.causal_active,
                 "causal_verified": (self.causal_active and self.causal_mappings_verified and
                                     {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers),
@@ -859,13 +876,29 @@ class Runtime:
                 "chat_busy": self.chat_lock.locked(),
             }
 
-    def _learned_choice(self, model: Path, mode: str, data: dict) -> dict | None:
+    def hy4_machine(self, machine: dict) -> dict:
+        executable = Path(self.hy4_executable).resolve()
+        libraries = {path.resolve() for pattern in ("libllama.so*", "libggml*.so*", "libmtmd.so*")
+                     for path in executable.parent.glob(pattern)}
+        components = []
+        for path in (executable, *sorted(libraries)):
+            try:
+                stat = path.stat()
+                components.append([str(path), stat.st_size, stat.st_mtime_ns])
+            except OSError:
+                components.append([str(path), None, None])
+        return {**machine, "hy4": components}
+
+    def _learned_choice(self, model: Path, mode: str, data: dict, *, hy4: bool = False) -> dict | None:
         """The Auto Tune winner for this model and machine, applied only by Automatic without conflicting input."""
         if mode != "auto" or self.engine_choices is None or self.machine is None:
             return None
         if data.get("draft_model") not in (None, "") or data.get("draft_type", "none") != "none":
             return None
-        entry = self.engine_choices.lookup(model, data.get("kv_cache_type", "f16"), self.machine())
+        machine = self.machine()
+        if hy4 and machine is not None:
+            machine = self.hy4_machine(machine)
+        entry = self.engine_choices.lookup(model, data.get("kv_cache_type", "f16"), machine)
         if entry is None:
             return None
         settings = entry["settings"]
@@ -967,6 +1000,12 @@ class Runtime:
             automatic_summary.update(
                 execution_profile="provider-candidate", reason_code="provider_candidate",
                 reason="A registered provider can be selected after model, machine and runtime verification.")
+        if self.hy4_executable and metadata["general.architecture"] == _tuning.HY4_ARCHITECTURE:
+            automatic_summary.update(execution_profile="hy4-standard", reason_code="hy4_backend",
+                                     reason="The optional Hy4 backend will verify CUDA placement and on-demand Engram reads.",
+                                     context=_tuning.HY4_CONTEXTS[-1], cache_mib=0, initialization=None, transfer=None)
+            required.update(hybrid=False, reason_code="hy4_standard_only", cache_mib=0,
+                            reason="The optional Hy4 backend supports Standard execution only.", execution_profile="standard")
 
         return {
             "api_version": 1, "model": str(model), "architecture": metadata["general.architecture"],
@@ -1009,12 +1048,22 @@ class Runtime:
             raise AppError(400, "Hybrid variant must be auto, classic, or hosted.")
         metadata = {}
         context_policy_warning = None
-        if mode != "standard" and self.hybrid_plan is not None:
+        hy4 = False
+        if self.hy4_executable:
+            try:
+                hy4 = (model_metadata(model, architecture_only=True).get("general.architecture")
+                       == _tuning.HY4_ARCHITECTURE)
+            except (OSError, ValueError):
+                # Keep the existing backend's validation and diagnostics for other or unreadable models.
+                LOG.debug("Cannot detect optional Hy4 routing for %s", model, exc_info=True)
+            if hy4 and mode not in ("auto", "standard"):
+                raise AppError(400, "The optional Hy4 backend supports Automatic or Standard execution only.")
+        if not hy4 and mode != "standard" and self.hybrid_plan is not None:
             try:
                 metadata = model_metadata(model)
             except (OSError, ValueError) as exc:
                 raise AppError(400, f"Cannot select an execution profile: {exc}") from exc
-        if self.preferred_context is not None and "context" not in data:
+        if not hy4 and self.preferred_context is not None and "context" not in data:
             try:
                 metadata = metadata or model_metadata(model)
                 limit = metadata.get(metadata["general.architecture"] + ".context_length", MAX_CONTEXT)
@@ -1027,10 +1076,10 @@ class Runtime:
                 data = {**data, "context": requested}
             except (OSError, ValueError) as exc:
                 raise AppError(400, f"Cannot apply shared context: {exc}") from exc
-        learned = self._learned_choice(model, mode, data)
+        learned = self._learned_choice(model, mode, data, hy4=hy4)
         strata = (learned["execution_mode"] if learned else mode) == "strata"
         causal = ((learned["execution_mode"] if learned else mode) == "causal" or
-                  (mode == "auto" and learned is None and self.causal.available(model) and
+                  (not hy4 and mode == "auto" and learned is None and self.causal.available(model) and
                    _causal.native_cannot_load(self.standard_executable)))
         if causal:
             if not self.causal.available(model):
@@ -1043,7 +1092,7 @@ class Runtime:
             if moe_layout(metadata) is None:
                 raise AppError(400, "Strata requires a complete routed-MoE descriptor.")
         selection = self._select_execution(metadata, model.stat().st_size,
-                                           "standard" if strata or causal else learned["execution_mode"] if learned else mode, learned)
+                                           "standard" if strata or causal or hy4 else learned["execution_mode"] if learned else mode, learned)
         if learned is not None and selection["hybrid"] != (learned["execution_mode"] == "hybrid"):
             learned = None
             selection = self._select_execution(metadata, model.stat().st_size, mode)
@@ -1061,8 +1110,13 @@ class Runtime:
             raise AppError(400, "Hybrid mode requires an installed plan policy and a compatible routed-MoE descriptor. "
                            + reason)
         selected_executable = (self.hybrid_executable if hybrid else
-                               self.standard_executable if self.hybrid_plan is not None or self.strata_active or self.causal_active else
+                               self.standard_executable if self.hybrid_plan is not None or self.strata_active or self.causal_active or self.hy4_active else
                                self.executable)
+        if hy4:
+            selected_executable = self.hy4_executable
+            reason = "GGUF architecture matched the optional Hy4 backend."
+            if learned is None:
+                planned_context = _tuning.HY4_CONTEXTS[-1]
         if strata:
             selected_executable = backend_executable(self.strata.data["executable"])
         if causal:
@@ -1070,13 +1124,14 @@ class Runtime:
         context = data.get("context", planned_context)
         placement = data.get("placement", learned["placement"] if learned else "auto")
         cpu_threads = data.get("cpu_threads", learned["cpu_threads"] if learned else
+                               min(16, len(available_cpus())) if hy4 else
                                min(8, len(available_cpus())) if hybrid or causal else default_cpu_threads())
         batch_threads = data.get("batch_threads", learned["batch_threads"] if learned else
-                                 min(16, len(available_cpus())) if hybrid or causal else cpu_threads)
+                                 min(16, len(available_cpus())) if hybrid or causal or hy4 else cpu_threads)
         load_mode = data.get("load_mode", "auto")
         expert_cache_mib = data.get("expert_cache_mib", learned["expert_cache_mib"] if learned else
                                    selected_cache_mib if hybrid else 0)
-        fit_target_mib = data.get("fit_target_mib", 1024)
+        fit_target_mib = data.get("fit_target_mib", _tuning.HY4_FIT_MIB if hy4 else 1024)
         host_op_offload = data.get("host_op_offload", not hybrid)
         cpu_poll = data.get("cpu_poll", 50)
         op_offload_min_batch = data.get("op_offload_min_batch", 32)
@@ -1084,6 +1139,12 @@ class Runtime:
         draft_value = data.get("draft_model")
         draft_type = data.get("draft_type", "dflash" if draft_value not in (None, "") else "none")
         draft_tokens = data.get("draft_tokens", 4 if draft_type == "mtp" else 9)
+        if hy4 and (type(context) is not int or not _tuning.HY4_CONTEXTS[0] <= context <= _tuning.HY4_CONTEXTS[-1] or
+                    placement != "auto" or kv_cache_type != "f16" or expert_cache_mib != 0 or
+                    load_mode != "auto" or draft_type != "none" or draft_value not in (None, "") or
+                    type(fit_target_mib) is not int or fit_target_mib < _tuning.HY4_FIT_MIB):
+            raise AppError(400, "Hy4 requires 8192-16384 context, automatic placement and load mode, F16 KV, "
+                           "at least 2048 MiB GPU reserve, and no drafts or expert-cache overrides.")
         if strata and (placement != "auto" or kv_cache_type != "f16" or expert_cache_mib != 0 or
                        draft_type != "none" or load_mode != "auto" or context > self.strata.data["maximum_context"]):
             raise AppError(400, "Strata uses its verified F16/MTP/cache profile, automatic placement and qualified context; "
@@ -1256,6 +1317,8 @@ class Runtime:
             if causal:
                 command += ["--ubatch-size", "1", "--spec-type", "none", "--cache-type-k", "f16",
                             "--cache-type-v", "f16", "--no-warmup", "--log-verbosity", "4"]
+            if hy4:
+                command += ["--load-mode", "mmap", "--lazy-mode", "on", "--jinja", "--log-verbosity", "4"]
             if draft_type == "dflash" or kv_cache_type == "q8_0":
                 command += ["--flash-attn", "on"]
             # Do not inherit placement overrides or credentials from a developer's shell.
@@ -1277,6 +1340,9 @@ class Runtime:
                                if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_", "LD_")) and
                                key not in ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")}
                 environment.update(VRAMBRIDGE_EXPERIMENT_CAUSAL_SINGLE_TOKEN="1", GGML_CPU_TILED_MM="1")
+            if hy4:
+                environment = {key: value for key, value in environment.items()
+                               if not key.startswith(("LLAMA_", "GGML_", "STRATA_", "VRAMBRIDGE_", "LD_"))}
             if hybrid:
                 environment.update(
                     GGML_BACKEND_PATH=str(self.hybrid_cuda_plugin),
@@ -1317,6 +1383,8 @@ class Runtime:
             self.strata_cache_mib = 0.0
             self.strata_backend_pid = None
             self.causal_active = causal
+            self.hy4_active = hy4
+            self.hy4_markers.clear()
             self.causal_markers.clear()
             self.causal_warmup_started = False
             self.causal_mappings_verified = False
@@ -1340,7 +1408,7 @@ class Runtime:
             self.execution_mode = mode
             self.active_hosted = hosted
             self.engine_source = "measured" if learned else "manual" if mode != "auto" else "default"
-            label = "Automatic provider" if strata or causal else engine_label(hybrid, hosted, placement)
+            label = "Hy4 compatibility backend" if hy4 else "Automatic provider" if strata or causal else engine_label(hybrid, hosted, placement)
             if learned and hybrid:
                 self.engine_summary = (f"{label}: measured fastest on this machine by Auto Tune "
                                        f"({learned['decode_tokens_per_second']:.0f} tok/s vs "
@@ -1418,6 +1486,14 @@ class Runtime:
                                           else line.rstrip().replace(key, "[redacted]"))[:2000])
                         self.last_output_at = time.monotonic()
                         lower = line.lower()
+                        if self.hy4_active:
+                            if "tensor per_layer_token_embd.weight " in lower and "lazy read enabled" in lower:
+                                self.hy4_markers.add("engram")
+                            cuda = re.search(r"CUDA\d+ model buffer size\s*=\s*(\d+(?:\.\d+)?)\s+MiB", line)
+                            if cuda and float(cuda[1]) > 0:
+                                self.hy4_markers.add("cuda")
+                            if re.search(rf"n_slots\s*=\s*1,\s*n_ctx_slot\s*=\s*{self.requested_context}\b", line):
+                                self.hy4_markers.add("context")
                         if "warmup" in lower or "warm-up" in lower:
                             self.loading_phase = "Warming up the backend"
                         elif "listening on" in lower or "model loaded" in lower:
@@ -1694,6 +1770,7 @@ class Runtime:
                                     (not self.native_cache_requested or
                                      (self.native_cache_mib > 0 and self.kv_cache_verified)) and
                                     (not self.strata_active or self.strata_verified) and
+                                    (not self.hy4_active or HY4_MARKERS <= self.hy4_markers) and
                                     (not self.causal_active or (
                                         self.causal_mappings_verified and
                                         {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers)) and
@@ -1731,9 +1808,12 @@ class Runtime:
                                       time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT and
                                       not (self.causal_mappings_verified and
                                            {"context", "microbatch", "causal", "kv", "gpu", "execution"} <= self.causal_markers))
+                    hy4_expired = (self.hy4_active and self.backend_ready_at is not None and
+                                   time.monotonic() - self.backend_ready_at >= SPECULATION_VERIFICATION_TIMEOUT and
+                                   not HY4_MARKERS <= self.hy4_markers)
                     if (self.process is process and self.state == "loading"
                             and (time.monotonic() >= deadline or verification_expired or cache_expired or
-                                 speculation_expired or native_cache_expired or strata_expired or causal_expired)):
+                                 speculation_expired or native_cache_expired or strata_expired or causal_expired or hy4_expired)):
                         self._terminate(process)
                         self.state = "error"
                         missing = ", ".join(sorted(self.required_hybrid_markers - self.hybrid_markers))
@@ -1744,6 +1824,9 @@ class Runtime:
                                       if self.hybrid_active else
                                       "Model loading timed out. See backend output; try a smaller model or CPU mode. "
                                       + (self.readiness_error or ""))
+                        if self.hy4_active and not HY4_MARKERS <= self.hy4_markers:
+                            missing = ", ".join(sorted(HY4_MARKERS - self.hy4_markers))
+                            self.error = f"Hy4 backend did not confirm {missing}. No fallback backend was started."
                         if cache_expired or (self.kv_cache_type == "q8_0" and self.backend_ready_at is not None and
                                              (not self.kv_cache_verified or self.flash_attention_verified is not True)):
                             self.error = ("Q8 cache verification timed out: the backend must confirm q8_0 for both "
@@ -1828,8 +1911,10 @@ class Runtime:
                 self.native_cache_requested = False
                 self.native_cache_mib = 0.0
                 self.native_cache_allocations.clear()
-                if self.strata_active or self.causal_active:
+                if self.strata_active or self.causal_active or self.hy4_active:
                     self.executable = self.standard_executable
+                self.hy4_active = False
+                self.hy4_markers.clear()
                 self.strata_active = False
                 self.strata_verified = False
                 self.strata_cache_mib = 0.0
@@ -2430,6 +2515,8 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"SYNAPSE {__version__}")
     parser.add_argument("--llama-server", default=os.environ.get("LLAMA_SERVER", "llama-server"),
                         help="llama-server executable or path (also LLAMA_SERVER)")
+    parser.add_argument("--hy4-llama-server", type=Path,
+                        help="optional separate Linux/CUDA llama-server for Hy4 Flash GGUF models only")
     parser.add_argument("--backend-kind", choices=("llama.cpp", "ik_llama.cpp"), default="llama.cpp",
                         help="explicit backend flag adapter; ik_llama.cpp is experimental")
     parser.add_argument("--experimental-speculation", action="store_true",
@@ -2501,6 +2588,7 @@ def main() -> None:
             raise ValueError("The experimental hybrid engine is Linux/CUDA-only in this release. Use --execution-mode standard.")
         mode = "hybrid" if explicit and args.execution_mode == "auto" else args.execution_mode
         runtime = Runtime(args.llama_server, backend_kind=args.backend_kind,
+                          hy4_executable=args.hy4_llama_server,
                           enable_speculation=args.experimental_speculation,
                           execution_mode=mode, settings_store=user_config_dir() / "model-settings.json",
                           strata_profile=user_config_dir() / "strata-profile.json",

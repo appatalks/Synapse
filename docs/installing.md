@@ -208,6 +208,43 @@ Pi's `models.json` and `settings.json`; `/reload` then `/model` reloads them.
 Explicit refresh resets those budgets to derived defaults, so rerun only when
 you want that reset. No cloud provider is silently selected by Synapse setup.
 
+## Optional Hy4 Flash backend (Linux/CUDA)
+
+Hy4 Flash GGUF uses an Engram tensor format that the installer-pinned
+llama.cpp backend cannot read. Keep that backend for existing models. To
+use a separately built Hy4-capable server, pass its absolute path at startup:
+
+```sh
+synapse --hy4-llama-server /path/to/hy4-build/bin/llama-server
+```
+
+Synapse does not download, build, or replace a backend for this option.
+The tested CUDA build was llama.cpp commit
+[`0a054d0b0`](https://github.com/ggml-org/llama.cpp/commit/0a054d0b02454c998e068381d15f3f6615bdd987)
+from [ggml-org/llama.cpp#32517](https://github.com/ggml-org/llama.cpp/pull/32517),
+built with `GGML_CUDA=ON` for the RTX 5070 Ti (`CMAKE_CUDA_ARCHITECTURES=120`).
+Keep the executable and its matching libraries together.
+
+Select the first GGUF shard and leave **Engine: Automatic**. Synapse reads
+`general.architecture` rather than the filename and uses the optional backend
+only for `hy_v4_flash`. It requires verified CUDA placement, on-demand Engram
+reads and the requested context before serving requests. All other
+architectures keep their existing backend and load flags.
+
+The starting settings are 16,384 context, up to 16 generation and 16 prompt
+threads, automatic GPU placement, and a 2,048 MiB GPU reserve. Manual Standard
+loads and Auto Tune are limited to 8,192–16,384 context for this route. This
+option is tested with Q3_K text inference; vision, other quantizations, and
+other GPU configurations have not been qualified. Forced full GPU offload,
+Hybrid, expert-cache overrides, and speculative drafts are not supported
+on this route.
+
+On the RTX 5070 Ti test system, Synapse verified the 16K allocation and
+correctly retrieved two values from a 1,787-token code prompt. The
+[Hy4 Flash Q3_K benchmark](benchmarks/hy4/hy4-flash-q3-k.md) records the
+8K/16K thread comparison, the load failures and the Pi starting settings.
+The 16K setting is an allocation limit, not a near-capacity throughput claim.
+
 ## First-turn latency
 
 Backend startup warm-up and processing a new conversation's prompt are separate.
