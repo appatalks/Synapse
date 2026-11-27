@@ -104,7 +104,7 @@ in [unified-memory-scheduler](https://github.com/appatalks/unified-memory-schedu
 
 ---
 
-**Local-only API:** do not expose it to the network. [Details](docs/application_notes.md#local-only-api).
+**Network access:** loopback by default; remote LAN clients require a token, while connections from the host do not. Manage the token from Connect an App on the host. Uses unencrypted HTTP. [Details](docs/application_notes.md#network-access).
 
 [Installation](docs/installing.md) · [Monitoring](docs/monitoring.md) ·
 [Application notes](docs/application_notes.md) · [Development](docs/releasing.md) · [MIT license](LICENSE)

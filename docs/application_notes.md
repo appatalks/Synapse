@@ -10,15 +10,17 @@ The app needs only Python and a browser; models and an appropriate
 The reference backend revision is b11669.
 [Platform and sensor limits](monitoring.md).
 
-## Tested model library
+## Model library
 
-Open **Model Controls → Model library** to browse the curated GGUFs,
-their download sizes, licenses, and test limitations. Select a local file
-or explicitly confirm a download to the chosen directory. Downloads use
-revision-pinned HTTPS URLs and verify the complete size and SHA-256 before
-publishing the file. Cancelled or failed partial downloads are removed;
-existing files are never overwritten. A file found by name and size is
-identified as local, but is not automatically re-hashed.
+Open **Model Controls → Model library** to browse curated GGUFs, their
+download sizes, licenses, and test limitations. Catalog entries are not
+necessarily tested or qualified by SYNAPSE. Select a local file or explicitly
+confirm a download to the chosen directory. Downloads use revision-pinned
+HTTPS URLs and verify every file's size and SHA-256 before publishing the
+complete model, including all shards of split models. Cancelled or failed
+partial downloads are removed; existing files are never overwritten. A file
+found by name and size is identified as local, but is not automatically
+re-hashed.
 
 The library also scans the chosen library folder, configured local search
 roots, and the last-used model for GGUF files without reading model weights.
@@ -268,10 +270,30 @@ The PR's published speedups are not an additional multiplier on SYNAPSE's result
 The experiments, native patches, benchmark methodology and full history live in
 [unified-memory-scheduler](https://github.com/appatalks/unified-memory-scheduler).
 
-## Local-only API
+## Network access
 
-The API has no app authentication. Do not expose it through a tunnel or reverse
-proxy. No universal speedup, fit guarantee or quality qualification is implied.
+SYNAPSE binds to `127.0.0.1` by default. To serve the full UI and API on a
+trusted IPv4 LAN, start it with `--host 0.0.0.0`, or bind to one specific LAN
+address, for example `--host 192.168.1.20`. The app prints a random access token
+that remains valid until shutdown. Use that token as the password for the
+browser's Basic Authentication prompt (username `synapse`), or as a Bearer
+token for API requests. All routes, including model controls and monitoring,
+require authentication for remote clients on a non-loopback bind. Connections
+from this computer do not require a token. Open **Connect an app** on the host
+to reveal, copy or rotate the remote token; rotating it immediately invalidates
+the previous token. The generated Python example includes the Bearer token when
+network access is enabled. Token management is restricted to the host computer.
+This local exemption is based on the TCP peer address; do not put a reverse
+proxy in front of the listener or rewrite requests to appear local.
+
+This listener uses plain HTTP, so the token and requests are not encrypted on
+the network. Use it only on a trusted LAN; use a VPN for access from other
+networks. SYNAPSE does not provide TLS or forwarded-host proxy support. Do not
+port-forward the listener or expose it directly to the public internet. Remote
+browsers should connect using this machine's LAN IPv4 address and the printed
+port; host and origin checks reject mismatched destinations.
+
+No universal speedup, fit guarantee or quality qualification is implied.
 
 [Installation](installing.md) · [Monitoring](monitoring.md) ·
 [Development](releasing.md) · [MIT license](../LICENSE).

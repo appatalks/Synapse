@@ -9,6 +9,7 @@ import { bindEngineSelection, bindReasoningEffort, bindSettingsTabs, contextEdit
 
 const el = (id) => document.getElementById(id);
 let status = null;
+let networkAccess = null;
 let controller = null;
 let actionPending = false;
 let history = [];
@@ -620,7 +621,13 @@ document.addEventListener("visibilitychange", () => {
 });
 
 el("endpoint").value = `${window.location.origin}/v1`;
-el("connect-example").textContent = `import json
+
+function renderConnectExample() {
+  const headers = { "Content-Type": "application/json" };
+  if (networkAccess?.network_access && networkAccess.token) {
+    headers.Authorization = `Bearer ${networkAccess.token}`;
+  }
+  el("connect-example").textContent = `import json
 from urllib.request import Request, urlopen
 
 request = Request(
@@ -629,10 +636,69 @@ request = Request(
         "model": "local-model",
         "messages": [{"role": "user", "content": "Hello!"}]
     }).encode(),
-    headers={"Content-Type": "application/json"}
+    headers=${JSON.stringify(headers, null, 2)}
 )
 with urlopen(request) as response:
     print(json.load(response)["choices"][0]["message"]["content"])`;
+}
+
+async function refreshNetworkAccess() {
+  try {
+    networkAccess = await request("/api/v1/network/access");
+    if (networkAccess.network_access) {
+      el("api-auth-value").textContent = "Bearer token for remote clients";
+      el("network-token-controls").hidden = false;
+      el("network-token").value = networkAccess.token;
+      el("network-access-note").textContent = "Remote devices need a token. Connections from this computer do not.";
+    } else {
+      el("api-auth-value").textContent = "Loopback only";
+      el("network-token-controls").hidden = true;
+      el("network-access-note").textContent = "This instance accepts connections only from this computer. Restart with a non-loopback --host to enable LAN access.";
+    }
+  } catch {
+    networkAccess = null;
+    el("api-auth-value").textContent = "Token required remotely";
+    el("network-token-controls").hidden = true;
+    el("network-access-note").textContent = "Token settings are available only from a browser on the SYNAPSE host. Open this page there to view or rotate the remote token.";
+  }
+  renderConnectExample();
+}
+
+el("show-network-token").addEventListener("click", () => {
+  const input = el("network-token");
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  el("show-network-token").textContent = showing ? "Show" : "Hide";
+  el("show-network-token").setAttribute("aria-pressed", String(!showing));
+});
+
+el("copy-network-token").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(el("network-token").value);
+    el("copy-network-token").textContent = "Copied";
+    window.setTimeout(() => { el("copy-network-token").textContent = "Copy"; }, 1500);
+  } catch (error) {
+    el("network-access-note").textContent = `Clipboard unavailable. Select and copy the token manually. ${error.message}`;
+  }
+});
+
+el("rotate-network-token").addEventListener("click", async () => {
+  const button = el("rotate-network-token");
+  button.disabled = true;
+  try {
+    networkAccess = await request("/api/v1/network/access/rotate", {});
+    el("network-token").value = networkAccess.token;
+    el("network-access-note").textContent = "New token generated. Existing remote clients must be updated.";
+    renderConnectExample();
+  } catch (error) {
+    el("network-access-note").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+renderConnectExample();
+refreshNetworkAccess();
 el("copy-example").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(el("connect-example").textContent);
