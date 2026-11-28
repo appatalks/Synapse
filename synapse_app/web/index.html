@@ -73,8 +73,8 @@
           <p class="hint">Output tokens include reasoning and the final answer. Changes apply to your next message.</p><p id="context-note"></p>
         </section>
         <section id="panel-library" role="tabpanel" aria-labelledby="tab-library" tabindex="0" class="settings-section" hidden>
-          <h3>Tested model library</h3>
-          <p>Choose an exact tested GGUF or download it from its publisher. Files stay on this computer.</p>
+          <h3>Model library</h3>
+          <p>Choose a catalog GGUF or download it from its publisher. Test limitations are shown for each model. Files stay on this computer.</p>
           <label for="library-directory">Download directory</label>
           <div class="copy-row"><input id="library-directory" autocomplete="off" spellcheck="false"><button id="library-refresh" type="button" class="secondary">Refresh</button></div>
           <p class="hint">Sizes are downloads, not total RAM or VRAM required. Speed gains are measured examples on a specific machine, not predictions or guarantees. Auto Tune selects the best supported settings locally.</p>
@@ -82,7 +82,7 @@
           <p class="hint">Local discovery does not verify model quality or backend compatibility. Split models list their first shard.</p>
           <p id="local-model-status" role="status" aria-live="polite"></p>
           <div id="local-models"></div>
-          <h4>Tested downloads</h4>
+          <h4>Catalog downloads</h4>
           <div id="library-status" role="status" aria-live="polite"></div>
           <div id="library-models"></div>
           <div id="library-download" hidden><progress id="library-progress" max="1" value="0"></progress><p id="library-download-text" role="status"></p><button id="library-cancel" type="button" class="secondary">Cancel download</button></div>
@@ -204,16 +204,24 @@
 
     <section id="view-connect" data-view="connect" aria-labelledby="connect-title" hidden>
       <div class="connect-grid">
-        <section class="card"><p class="eyebrow">ONE MODEL. YOUR FAVORITE TOOLS.</p><h2 id="connect-title">Connect an app</h2><p>Use an OpenAI-compatible client while a model is ready. Requests stay on this computer.</p>
+        <section class="card"><p class="eyebrow">ONE MODEL. YOUR FAVORITE TOOLS.</p><h2 id="connect-title">Connect an app</h2><p>Use an OpenAI-compatible client while a model is ready. Requests stay on this computer or its trusted LAN, depending on the bind address.</p>
           <label for="endpoint">API base URL</label><div class="copy-row"><input id="endpoint" readonly><button id="copy" class="secondary" type="button">Copy</button></div>
-          <div class="connection-facts"><div><span>MODEL ID</span><code>local-model</code></div><div><span>API KEY</span><code>local</code></div></div>
-          <p>The key is a client placeholder, not authentication. This service is loopback-only. Do not expose it through a tunnel or reverse proxy.</p>
+          <div class="connection-facts"><div><span>MODEL ID</span><code>local-model</code></div><div><span>REMOTE AUTH</span><code id="api-auth-value">Checking access</code></div></div>
+          <section class="network-access" aria-labelledby="network-access-title"><h3 id="network-access-title">Network access</h3>
+            <p id="network-access-note" role="status" aria-live="polite">Checking access settings...</p>
+            <div id="network-token-controls" hidden>
+              <label for="network-token">Remote access token</label>
+              <div class="copy-row"><input id="network-token" type="password" readonly autocomplete="off"><button id="show-network-token" class="secondary" type="button" aria-pressed="false">Show</button><button id="copy-network-token" class="secondary" type="button">Copy</button></div>
+              <div class="actions"><button id="rotate-network-token" class="secondary" type="button">Generate new token</button></div>
+              <p class="hint">Remote devices must use this token. Local connections do not. Generating a new token immediately invalidates the previous one.</p>
+            </div>
+          </section>
           <p id="connection-state" class="callout">Choose a model from Chat &rarr; Model Controls before connecting.</p>
         </section>
         <section class="card"><div class="card-heading"><div><p class="eyebrow">QUICK CHECK</p><h2>Try the API</h2></div><button id="copy-example" class="secondary" type="button">Copy Python</button></div><p>This example uses only Python's standard library.</p><pre id="connect-example"></pre><p class="hint">Supported: model discovery and streamed or non-streamed chat completions. This is not a complete implementation of every OpenAI API.</p></section>
       </div>
     </section>
-    <footer><span>SYNAPSE &middot; Local only</span><a href="https://github.com/appatalks/unified-memory-scheduler" target="_blank" rel="noreferrer">Research behind SYNAPSE &#8599;</a></footer>
+    <footer><span>SYNAPSE &middot; Local inference</span><a href="https://github.com/appatalks/unified-memory-scheduler" target="_blank" rel="noreferrer">Research behind SYNAPSE &#8599;</a></footer>
   </main>
 </body>
 </html>

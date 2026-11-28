@@ -6,13 +6,23 @@ import threading
 import unittest
 from unittest import mock
 
-from synapse_app.model_library import ModelLibrary
+from synapse_app.model_library import CATALOG, ModelLibrary
 
 
 CONTENT = b"GGUF fixture bytes"
 MODEL = {"id": "test-model", "name": "Test", "repo": "publisher/repo", "revision": "a" * 40,
          "filename": "test.gguf", "size": len(CONTENT), "sha256": hashlib.sha256(CONTENT).hexdigest(),
          "license": "MIT", "gain": None, "evidence": "fixture"}
+SHARDED_CONTENT = (b"first shard", b"second shard")
+SHARDED_MODEL = {"id": "test-sharded-model", "name": "Sharded test", "repo": "publisher/repo",
+                 "revision": "b" * 40,
+                 "filename": "weights-00001-of-00002.gguf",
+                 "size": sum(map(len, SHARDED_CONTENT)),
+                 "files": tuple({"filename": f"weights-0000{index}-of-00002.gguf", "size": len(content),
+                                 "remote_path": f"quant/weights-0000{index}-of-00002.gguf",
+                                 "sha256": hashlib.sha256(content).hexdigest()}
+                                for index, content in enumerate(SHARDED_CONTENT, 1)),
+                 "license": "MIT", "gain": None, "evidence": "fixture"}
 
 
 class ModelLibraryTests(unittest.TestCase):
@@ -57,6 +67,66 @@ class ModelLibraryTests(unittest.TestCase):
         self.assertEqual(state["state"], "error")
         self.assertIn("SHA-256", state["error"])
         self.assertEqual(list((self.root / "test-model").iterdir()), [])
+
+    def test_sharded_download_verifies_all_files_before_publishing(self):
+        library = ModelLibrary(self.root, [SHARDED_MODEL])
+        self.addCleanup(library.close)
+        openers = [mock.Mock() for _ in SHARDED_CONTENT]
+        for opener, content in zip(openers, SHARDED_CONTENT):
+            opener.open.return_value = io.BytesIO(content)
+        with mock.patch("synapse_app.model_library.urllib.request.build_opener", side_effect=openers), \
+                mock.patch("synapse_app.model_library.shutil.disk_usage") as disk:
+            disk.return_value.free = 100 * 1024**3
+            state = library.start("test-sharded-model", str(self.root), True)
+            self.assertEqual(state["total"], SHARDED_MODEL["size"])
+            state = self.wait_library(library)
+        self.assertEqual(state["state"], "completed")
+        for index, opener in enumerate(openers, 1):
+            request = opener.open.call_args.args[0]
+            self.assertEqual(request.full_url, f"https://huggingface.co/publisher/repo/resolve/{'b' * 40}/"
+                             f"quant/weights-0000{index}-of-00002.gguf")
+        folder = self.root / "test-sharded-model"
+        for file in SHARDED_MODEL["files"]:
+            self.assertEqual((folder / file["filename"]).read_bytes(),
+                             SHARDED_CONTENT[SHARDED_MODEL["files"].index(file)])
+        self.assertTrue(library.listing()["models"][0]["installed"])
+
+    def test_sharded_download_failure_does_not_publish_verified_first_shard(self):
+        library = ModelLibrary(self.root, [SHARDED_MODEL])
+        self.addCleanup(library.close)
+        openers = [mock.Mock(), mock.Mock()]
+        openers[0].open.return_value = io.BytesIO(SHARDED_CONTENT[0])
+        openers[1].open.return_value = io.BytesIO(b"X" * len(SHARDED_CONTENT[1]))
+        with mock.patch("synapse_app.model_library.urllib.request.build_opener", side_effect=openers), \
+                mock.patch("synapse_app.model_library.shutil.disk_usage") as disk:
+            disk.return_value.free = 100 * 1024**3
+            library.start("test-sharded-model", str(self.root), True)
+            state = self.wait_library(library)
+        self.assertEqual(state["state"], "error")
+        self.assertIn("SHA-256", state["error"])
+        self.assertEqual(list((self.root / "test-sharded-model").iterdir()), [])
+        self.assertFalse(library.listing()["models"][0]["installed"])
+
+    def test_huihui_shards_use_quantization_subdirectories(self):
+        for model in CATALOG:
+            if not model["id"].startswith("huihui-qwen38-flash-iq3-"):
+                continue
+            quantization = "IQ3_XXS" if model["id"].endswith("xxs") else "IQ3_S"
+            for file in model["files"]:
+                self.assertEqual(file["remote_path"], f"swift-{quantization}/{file['filename']}")
+
+    def test_huihui_27b_catalog_entry_is_pinned_and_unverified(self):
+        model = next(item for item in CATALOG if item["id"] == "huihui-qwen38-27b-iq3-s")
+        self.assertEqual(model["filename"], "Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_S.gguf")
+        self.assertEqual(model["size"], 11771546208)
+        self.assertEqual(len(model["revision"]), 40)
+        self.assertEqual(len(model["sha256"]), 64)
+        self.assertIn("unverified", model["evidence"])
+
+    def wait_library(self, library):
+        library.worker.join(timeout=5)
+        self.assertFalse(library.worker.is_alive())
+        return library.snapshot()
 
     def test_cancellation_removes_partial(self):
         started = threading.Event()

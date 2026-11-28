@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import base64
 import http.client
 import importlib.util
 import io
@@ -317,7 +318,11 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(code, 200)
         catalog = json.loads(body)
         self.assertTrue(catalog["models"])
-        self.assertTrue(all(model["size"] > 0 and len(model["sha256"]) == 64 for model in catalog["models"]))
+        for model in catalog["models"]:
+            files = model.get("files", [model])
+            self.assertTrue(files)
+            self.assertEqual(model["size"], sum(file["size"] for file in files))
+            self.assertTrue(all(file["size"] > 0 and len(file["sha256"]) == 64 for file in files))
         for data in ({"model": "not-listed", "directory": str(self.root), "confirm": True},
                      {"model": catalog["models"][0]["id"], "directory": str(self.root), "confirm": False}):
             code, _, _ = self.request("POST", "/api/v1/models/download", data)
@@ -2984,6 +2989,97 @@ class LocalAppTests(unittest.TestCase):
             self.assertEqual(self.request("POST", "/api/v1/shutdown", {}, headers)[0], 403)
         self.assertEqual(self.request("GET", "/api/v1/status",
                                      headers={"Origin": f"http://127.0.0.1:{self.port}"})[0], 200)
+
+    def test_network_access_requires_authentication_and_keeps_host_checks(self):
+        token = "test-network-token"
+        runtime = app.Runtime(str(self.backend))
+        server = app.AppServer(("0.0.0.0", 0), runtime, access_token=token)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+
+        def request(headers=None, path="/api/v1/status", method="GET", data=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                supplied = {"Content-Type": "application/json"} if data is not None else {}
+                supplied.update(headers or {})
+                connection.request(method, path, body=json.dumps(data) if data is not None else None,
+                                   headers=supplied)
+                response = connection.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                connection.close()
+
+        try:
+            status, headers, _ = request()
+            self.assertEqual(status, 200)
+            self.assertNotIn("WWW-Authenticate", headers)
+
+            basic = base64.b64encode(f"synapse:{token}".encode()).decode()
+            self.assertEqual(request({"Authorization": f"Basic {basic}"})[0], 200)
+            self.assertEqual(request({"Authorization": f"Bearer {token}"})[0], 200)
+            self.assertEqual(request({"Authorization": f"Bearer wrong", "Host": "attacker.example"})[0], 403)
+            self.assertEqual(request({"Authorization": f"Bearer {token}",
+                                      "Origin": "http://attacker.example"})[0], 403)
+            self.assertEqual(request({"Authorization": f"Basic {basic}"}, "/")[0], 200)
+
+            settings = request(path="/api/v1/network/access")
+            self.assertEqual(settings[0], 200)
+            self.assertEqual(json.loads(settings[2]), {"network_access": True, "token": token})
+            rotated = request(path="/api/v1/network/access/rotate", method="POST", data={})
+            self.assertEqual(rotated[0], 200)
+            self.assertNotEqual(json.loads(rotated[2])["token"], token)
+        finally:
+            runtime.stop(closing=True)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+    def test_network_guard_rejects_unauthenticated_nonlocal_peer(self):
+        handler = object.__new__(app.Handler)
+        handler.server = type("TestServer", (), {
+            "server_address": ("0.0.0.0", 8080), "access_token": "test-network-token",
+        })()
+        handler.client_address = ("192.168.1.50", 12345)
+        handler.connection = mock.Mock()
+        handler.connection.getsockname.return_value = ("192.168.1.10", 8080)
+        headers = {"Host": "192.168.1.10:8080"}
+        handler.headers = mock.Mock()
+        handler.headers.get.side_effect = lambda name, default=None: headers.get(name, default)
+        with self.assertRaises(app.AppError) as error:
+            handler._guard()
+        self.assertEqual(error.exception.status, 401)
+        with self.assertRaises(app.AppError) as error:
+            handler._require_local_client()
+        self.assertEqual(error.exception.status, 403)
+
+    def test_network_cli_binds_and_prints_temporary_access_token(self):
+        process = subprocess.Popen(
+            [sys.executable, str(APP_PATH), "--host", "0.0.0.0", "--port", "0", "--no-browser",
+             "--no-update-check", "--execution-mode", "standard"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        try:
+            url_line = process.stdout.readline().strip()
+            listener_line = process.stdout.readline().strip()
+            token_line = process.stdout.readline().strip()
+            self.assertTrue(url_line.startswith("SYNAPSE: http://127.0.0.1:"), url_line)
+            self.assertIn("Listening on 0.0.0.0:", listener_line)
+            self.assertTrue(token_line.startswith("Network access token (valid until shutdown): "), token_line)
+            port = urlsplit(url_line.split(" ", 1)[1]).port
+            token = token_line.rsplit(" ", 1)[1]
+            for headers, expected in (({}, 200), ({"Authorization": f"Bearer {token}"}, 200)):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                try:
+                    connection.request("GET", "/api/v1/status", headers=headers)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    response.read()
+                finally:
+                    connection.close()
+        finally:
+            process.terminate()
+            process.communicate(timeout=10)
 
     def test_request_validation(self):
         self.assertEqual(self.request("POST", "/api/v1/model/load", [])[0], 400)

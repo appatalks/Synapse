@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from collections import deque
 from functools import lru_cache
 import hashlib
@@ -11,6 +12,7 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import import_module
 from importlib.resources import files
+import ipaddress
 import json
 import logging
 import os
@@ -1943,10 +1945,11 @@ class AppServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], runtime: Runtime, *, update_checks: bool = True,
                  tuning_store: Path | None = None, model_library_dir: str | None = None,
-                 model_search_roots: list[str] | None = None):
+         model_search_roots: list[str] | None = None, access_token: str | None = None):
         self.choices = _tuning.EngineChoices(tuning_store.parent / "engine-choices.json" if tuning_store else None)
         self._gpus: list[dict] | None = None
         self.runtime = runtime
+        self.access_token = access_token
         self.operation_lock = threading.RLock()
         self.chat_queue: deque[object] = deque()
         self.closing = threading.Event()
@@ -2093,18 +2096,61 @@ class Handler(BaseHTTPRequestHandler):
 
     def _guard(self) -> None:
         port = self.server.server_address[1]
-        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        destination = self.connection.getsockname()[0]
+        destination_host = f"[{destination}]" if ":" in destination else destination
+        hosts = {f"{destination_host}:{port}"}
+        try:
+            if ipaddress.ip_address(destination).is_loopback:
+                hosts.add(f"localhost:{port}")
+        except ValueError:
+            pass
         if self.headers.get("Host") not in hosts:
-            raise AppError(403, "Only the local application host is allowed.")
+            raise AppError(403, "The request host does not match the connected address.")
         origin = self.headers.get("Origin")
         if origin is not None and origin not in {f"http://{host}" for host in hosts}:
             raise AppError(403, "Cross-origin requests are not allowed.")
         if self.headers.get("Sec-Fetch-Site") == "cross-site":
             raise AppError(403, "Cross-site requests are not allowed.")
+        if self.server.access_token is not None and not self._is_local_client() and not self._authorized():
+            raise AppError(401, "Network access requires authentication.")
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _is_local_client(self) -> bool:
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
+            destination = ipaddress.ip_address(self.connection.getsockname()[0])
+        except ValueError:
+            return False
+        return peer.is_loopback or (not destination.is_unspecified and peer == destination)
+
+    def _require_local_client(self) -> None:
+        if not self._is_local_client():
+            raise AppError(403, "Network token settings are available only from this computer.")
+
+    def _authorized(self) -> bool:
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, credentials = authorization.partition(" ")
+        if not separator:
+            return False
+        if scheme.lower() == "bearer":
+            supplied = credentials
+        elif scheme.lower() == "basic":
+            try:
+                decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return False
+            username, separator, supplied = decoded.partition(":")
+            if not separator or username != "synapse":
+                return False
+        else:
+            return False
+        return secrets.compare_digest(supplied.encode("utf-8"), self.server.access_token.encode("ascii"))
+
+    def _send(self, status: int, body: bytes, content_type: str,
+              extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self._headers(content_type)
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -2119,8 +2165,8 @@ class Handler(BaseHTTPRequestHandler):
                          "style-src 'self'; img-src 'self'; frame-ancestors 'none'; "
                          "base-uri 'none'; form-action 'none'")
 
-    def _json(self, status: int, data: dict) -> None:
-        self._send(status, json.dumps(data).encode(), "application/json; charset=utf-8")
+    def _json(self, status: int, data: dict, extra_headers: dict[str, str] | None = None) -> None:
+        self._send(status, json.dumps(data).encode(), "application/json; charset=utf-8", extra_headers)
 
     def _body(self) -> dict:
         if self.headers.get("Transfer-Encoding"):
@@ -2158,7 +2204,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._guard()
             path = urlsplit(self.path).path
-            if method == "GET" and path == "/api/v1/status":
+            if method == "GET" and path == "/api/v1/network/access":
+                self._require_local_client()
+                self._json(200, {"network_access": self.server.access_token is not None,
+                                 "token": self.server.access_token})
+            elif method == "POST" and path == "/api/v1/network/access/rotate":
+                self._require_local_client()
+                if self._body():
+                    raise AppError(400, "Token rotation accepts an empty JSON object.")
+                if self.server.access_token is None:
+                    raise AppError(409, "Network access is disabled. Restart with a non-loopback --host first.")
+                self.server.access_token = secrets.token_urlsafe(32)
+                self._json(200, {"network_access": True, "token": self.server.access_token})
+            elif method == "GET" and path == "/api/v1/status":
                 self._json(200, self.server.status())
             elif method == "GET" and path == "/api/v1/models/library":
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
@@ -2299,7 +2357,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise AppError(404, "Endpoint not found.")
         except AppError as exc:
             self.close_connection = True
-            self._json(exc.status, {"error": {"message": str(exc), "type": "vrambridge_error"}})
+            headers = {"WWW-Authenticate": 'Basic realm="SYNAPSE", charset="UTF-8"'} if exc.status == 401 else None
+            self._json(exc.status, {"error": {"message": str(exc), "type": "vrambridge_error"}}, headers)
         except (BrokenPipeError, ConnectionResetError):
             LOG.info("Local client disconnected.")
         except (OSError, http.client.HTTPException) as exc:
@@ -2530,6 +2589,8 @@ def main() -> None:
     parser.add_argument("--hybrid-profile", type=Path,
                         help="optional Linux/CUDA experimental installation JSON; legacy VRAMBridge profiles are supported")
     parser.add_argument("--port", type=int, default=8080, help="local app port; 0 chooses a free port")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="IPv4 bind address; non-loopback addresses require an access token")
     parser.add_argument("--stop", action="store_true",
                         help="gracefully stop the local SYNAPSE app and its owned model backend on --port")
     parser.add_argument("--configure-pi", action="store_true",
@@ -2541,6 +2602,12 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
+    try:
+        bind_address = ipaddress.ip_address(args.host)
+    except ValueError:
+        parser.error("--host must be an IPv4 address")
+    if bind_address.version != 4:
+        parser.error("--host must be an IPv4 address")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     if args.check_pi:
         if args.stop or args.configure_pi:
@@ -2614,12 +2681,14 @@ def main() -> None:
                     any(not isinstance(root, str) or not Path(root).expanduser().is_absolute()
                         for root in search_roots)):
                 raise ValueError("Model search roots must be a list of absolute paths.")
-        server = AppServer(("127.0.0.1", args.port), runtime, update_checks=not args.no_update_check,
+        access_token = None if bind_address.is_loopback else secrets.token_urlsafe(32)
+        server = AppServer((str(bind_address), args.port), runtime, update_checks=not args.no_update_check,
                            tuning_store=user_config_dir() / "tuning.json", model_library_dir=library_dir,
-                           model_search_roots=search_roots)
+                           model_search_roots=search_roots, access_token=access_token)
     except (OSError, ValueError) as exc:
         parser.exit(1, f"Cannot start local app: {exc}\n")
-    url = f"http://127.0.0.1:{server.server_address[1]}"
+    url_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    url = f"http://{url_host}:{server.server_address[1]}"
 
     def shutdown(signum: int, frame: object) -> None:
         threading.Thread(target=server.shutdown_app, daemon=True).start()
@@ -2629,6 +2698,9 @@ def main() -> None:
     if hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, shutdown)
     print(f"SYNAPSE: {url}", flush=True)
+    if access_token is not None:
+        print(f"Listening on {args.host}:{server.server_address[1]} with network authentication enabled.", flush=True)
+        print(f"Network access token (valid until shutdown): {access_token}", flush=True)
     if not runtime.executable:
         LOG.warning("llama-server not found. The UI will show backend setup instructions.")
     if not args.no_browser and not webbrowser.open(url):
@@ -2639,7 +2711,8 @@ def main() -> None:
         runtime.stop(closing=True)
         server.server_close()
     if server.restart_requested and not server.stop_requested:
-        os.execv(sys.executable, [sys.executable, *sys.argv, "--port", str(server.server_address[1]), "--no-browser"])
+        os.execv(sys.executable, [sys.executable, *sys.argv, "--host", str(bind_address),
+                                 "--port", str(server.server_address[1]), "--no-browser"])
 
 
 if __name__ == "__main__":

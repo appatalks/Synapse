@@ -37,7 +37,53 @@ CATALOG = (
      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502", "filename": "Qwen3.8-27B-UD-Q4_K_M.gguf",
      "size": 16464440224, "sha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482",
      "license": "Apache-2.0", "gain": None, "evidence": "Standard 16K passed narrow checks; acceleration gain not measured."},
+    {"id": "huihui-qwen38-27b-iq3-s",
+     "name": "Huihui Qwen3.8 27B Abliterated · GSQ-RCO IQ3_S",
+     "repo": "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+     "revision": "c4b90228246aef7ecc6cb2be9d80575a911a0f3a",
+     "filename": "Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_S.gguf",
+     "size": 11771546208, "sha256": "329e01fc79dc8a49465e40adef8ed925935093b3dc8f7ee6da0c88ac7b5d3692",
+     "license": "Apache-2.0", "gain": None,
+     "evidence": "Not tested with SYNAPSE; compatibility, performance and GPU fit are unverified. Abliterated model with reduced refusal behavior; review the publisher's model card and license."},
+    {"id": "huihui-qwen38-flash-iq3-xxs",
+     "name": "Huihui Qwen3.8 Flash-Next Abliterated v2 · IQ3_XXS",
+     "repo": "huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF",
+     "revision": "cbc7fba13f1939ac3fa42b18d77ccf43847d74ef",
+     "filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+     "size": 75966073120,
+     "files": (
+         {"filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+          "remote_path": "swift-IQ3_XXS/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+          "size": 39785790560, "sha256": "e66b543e5b89f039c81e5d74c31d2410de60e3cb84a7b89aec1f2ce11fdd9830"},
+         {"filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf",
+          "remote_path": "swift-IQ3_XXS/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf",
+          "size": 36180282560, "sha256": "d219681902f80f677b200d6bbb30387010de6cea51f6cc14ef90d873a5357a85"},
+     ),
+     "license": "qwen-community-1.0", "gain": None,
+     "evidence": "Not tested with SYNAPSE; compatibility and performance are unverified. Abliterated model with reduced refusal behavior; review the publisher's model card and license."},
+    {"id": "huihui-qwen38-flash-iq3-s",
+     "name": "Huihui Qwen3.8 Flash-Next Abliterated v2 · IQ3_S",
+     "repo": "huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF",
+     "revision": "cbc7fba13f1939ac3fa42b18d77ccf43847d74ef",
+     "filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+     "size": 83743737120,
+     "files": (
+         {"filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+          "remote_path": "swift-IQ3_S/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+          "size": 44900816736, "sha256": "9cdb79ad99ef066064628f13b67ace8ef077d02d9d3848a53b11d5c3cbe94332"},
+         {"filename": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf",
+          "remote_path": "swift-IQ3_S/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf",
+          "size": 38842920384, "sha256": "04e1f010edbeacbce3a8948abf0044e858d73a37fc74a0e58abeeff98cbe4f0f"},
+     ),
+     "license": "qwen-community-1.0", "gain": None,
+     "evidence": "Not tested with SYNAPSE; compatibility and performance are unverified. Abliterated model with reduced refusal behavior; review the publisher's model card and license."},
 )
+
+
+def _model_files(model):
+    if "files" in model:
+        return model["files"]
+    return ({"filename": model["filename"], "size": model["size"], "sha256": model["sha256"]},)
 
 
 class Cancelled(Exception):
@@ -75,10 +121,12 @@ class ModelLibrary:
         self.discover(str(root), recent=recent)
         result = []
         for item in self.catalog.values():
-            path = root / item["id"] / item["filename"]
+            paths = [root / item["id"] / file["filename"] for file in _model_files(item)]
+            path = paths[0]
             # A matching size is only a local discovery hint, not an integrity verification.
             try:
-                exists = path.is_file() and path.stat().st_size == item["size"]
+                exists = all(file_path.is_file() and file_path.stat().st_size == file["size"]
+                             for file_path, file in zip(paths, _model_files(item)))
             except OSError:
                 exists = False
             result.append({**item, "path": str(path), "installed": exists})
@@ -205,19 +253,21 @@ class ModelLibrary:
         if confirm is not True:
             raise ValueError("Confirm the download size and model license before downloading.")
         if not isinstance(model_id, str) or model_id not in self.catalog:
-            raise ValueError("Choose a model from the tested catalog.")
+            raise ValueError("Choose a model from the catalog.")
         if not isinstance(directory, str) or not directory.strip() or len(directory) > 4096:
             raise ValueError("Choose a model download directory.")
         root = Path(directory).expanduser()
         if not root.is_absolute():
             raise ValueError("Model download directory must be absolute.")
+        model = self.catalog[model_id]
+        total_size = sum(file["size"] for file in _model_files(model))
         with self.lock:
             if self.state["active"]:
                 raise RuntimeError("A model download is already running.")
             self.cancelled.clear()
             self.state = {"state": "downloading", "active": True, "model": model_id,
-                          "downloaded": 0, "total": self.catalog[model_id]["size"], "error": None}
-            self.worker = threading.Thread(target=self._download, args=(self.catalog[model_id], root), daemon=True)
+                          "downloaded": 0, "total": total_size, "error": None}
+            self.worker = threading.Thread(target=self._download, args=(model, root), daemon=True)
             self.worker.start()
         return self.snapshot()
 
@@ -234,49 +284,60 @@ class ModelLibrary:
             self.scan_worker.join(timeout=3)
 
     def _download(self, model, root):
-        temporary = None
+        published = []
+        success = False
         try:
             root.mkdir(parents=True, exist_ok=True)
             folder = root / model["id"]
             if folder.is_symlink():
                 raise ValueError("The model folder cannot be a symbolic link.")
             folder.mkdir(exist_ok=True)
-            target = folder / model["filename"]
-            if target.exists() or target.is_symlink():
+            files = _model_files(model)
+            targets = [folder / file["filename"] for file in files]
+            if any(target.exists() or target.is_symlink() for target in targets):
                 raise ValueError("Destination already exists; existing files are never overwritten.")
             if shutil.disk_usage(folder).free < model["size"] + 1024**3:
                 raise ValueError("Not enough free disk space for the model plus 1 GiB reserve.")
-            url = f"https://huggingface.co/{model['repo']}/resolve/{model['revision']}/{model['filename']}"
-            request = urllib.request.Request(url, headers={"User-Agent": "SYNAPSE-model-download",
-                                                         "Accept-Encoding": "identity"})
-            digest = hashlib.sha256()
-            count = 0
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".synapse-download-", suffix=".part",
-                                             delete=False) as output:
-                temporary = Path(output.name)
-                with urllib.request.build_opener(HttpsRedirect()).open(request, timeout=30) as response:
-                    while True:
-                        if self.cancelled.is_set():
-                            raise Cancelled()
-                        chunk = response.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        count += len(chunk)
-                        if count > model["size"]:
-                            raise ValueError("Download exceeded the expected model size.")
-                        output.write(chunk)
-                        digest.update(chunk)
-                        with self.lock:
-                            self.state["downloaded"] = count
-                output.flush()
-                os.fsync(output.fileno())
-            if self.cancelled.is_set():
-                raise Cancelled()
-            if count != model["size"] or digest.hexdigest() != model["sha256"]:
-                raise ValueError("Download size or SHA-256 did not match the pinned model.")
-            os.link(temporary, target)
+            downloaded = 0
+            with tempfile.TemporaryDirectory(prefix=".synapse-download-", dir=folder) as staging:
+                staged = []
+                for index, (file, target) in enumerate(zip(files, targets)):
+                    temporary = Path(staging) / str(index)
+                    remote_path = file.get("remote_path", file["filename"])
+                    url = f"https://huggingface.co/{model['repo']}/resolve/{model['revision']}/{remote_path}"
+                    request = urllib.request.Request(url, headers={"User-Agent": "SYNAPSE-model-download",
+                                                                 "Accept-Encoding": "identity"})
+                    digest = hashlib.sha256()
+                    count = 0
+                    with temporary.open("xb") as output:
+                        with urllib.request.build_opener(HttpsRedirect()).open(request, timeout=30) as response:
+                            while True:
+                                if self.cancelled.is_set():
+                                    raise Cancelled()
+                                chunk = response.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                count += len(chunk)
+                                if count > file["size"]:
+                                    raise ValueError("Download exceeded the expected model shard size.")
+                                output.write(chunk)
+                                digest.update(chunk)
+                                with self.lock:
+                                    self.state["downloaded"] = downloaded + count
+                        output.flush()
+                        os.fsync(output.fileno())
+                    if count != file["size"] or digest.hexdigest() != file["sha256"]:
+                        raise ValueError("Download size or SHA-256 did not match the pinned model shard.")
+                    downloaded += count
+                    staged.append((temporary, target))
+                if self.cancelled.is_set():
+                    raise Cancelled()
+                for temporary, target in staged:
+                    os.link(temporary, target)
+                    published.append(target)
             with self.lock:
-                self.state.update(state="completed", active=False, path=str(target))
+                self.state.update(state="completed", active=False, path=str(targets[0]))
+            success = True
         except Cancelled:
             with self.lock:
                 self.state.update(state="cancelled", active=False)
@@ -284,5 +345,6 @@ class ModelLibrary:
             with self.lock:
                 self.state.update(state="error", active=False, error=str(exc))
         finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+            if not success:
+                for target in published:
+                    target.unlink(missing_ok=True)
