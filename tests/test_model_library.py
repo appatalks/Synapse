@@ -115,6 +115,14 @@ class ModelLibraryTests(unittest.TestCase):
             for file in model["files"]:
                 self.assertEqual(file["remote_path"], f"swift-{quantization}/{file['filename']}")
 
+    def test_huihui_27b_catalog_entry_is_pinned_and_unverified(self):
+        model = next(item for item in CATALOG if item["id"] == "huihui-qwen38-27b-iq3-s")
+        self.assertEqual(model["filename"], "Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_S.gguf")
+        self.assertEqual(model["size"], 11771546208)
+        self.assertEqual(len(model["revision"]), 40)
+        self.assertEqual(len(model["sha256"]), 64)
+        self.assertIn("unverified", model["evidence"])
+
     def wait_library(self, library):
         library.worker.join(timeout=5)
         self.assertFalse(library.worker.is_alive())
